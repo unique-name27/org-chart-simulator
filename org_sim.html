@@ -1,0 +1,2649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HYPERLANE — Galactic Org Chart</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000814;overflow:hidden;font-family:'Courier New',monospace;color:#a0c4ff;}
+#c{position:fixed;top:0;left:0;width:100vw;height:100vh;display:block;}
+
+/* ── TOPBAR ── */
+#topbar{position:fixed;top:0;left:0;right:0;height:52px;background:rgba(0,8,20,.93);
+  backdrop-filter:blur(14px);border-bottom:1px solid rgba(0,212,255,.1);
+  display:flex;align-items:center;gap:7px;padding:0 12px;z-index:100;overflow:hidden;}
+.logo{font-size:12px;font-weight:bold;color:#00d4ff;letter-spacing:3px;
+  text-shadow:0 0 12px rgba(0,212,255,.65);white-space:nowrap;margin-right:4px;}
+.logo span{color:rgba(0,212,255,.3);}
+#search-box{width:160px;background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.18);
+  border-radius:3px;padding:5px 9px;color:#a0c4ff;font-family:'Courier New',monospace;
+  font-size:11px;outline:none;}
+#search-box::placeholder{color:rgba(160,196,255,.3);}
+.tbtn{background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.2);border-radius:3px;
+  color:#a0c4ff;font-family:'Courier New',monospace;font-size:10px;padding:5px 10px;
+  cursor:pointer;white-space:nowrap;letter-spacing:.5px;transition:all .18s;}
+.tbtn:hover{background:rgba(0,212,255,.15);border-color:rgba(0,212,255,.42);color:#00d4ff;}
+.tbtn.on{background:rgba(0,255,180,.09);border-color:rgba(0,255,180,.42);color:#00ffb8;}
+.tbtn.warn{background:rgba(255,200,50,.09);border-color:rgba(255,200,50,.42);color:#ffc832;}
+#stats-bar{margin-left:auto;font-size:9px;color:rgba(160,196,255,.35);white-space:nowrap;}
+
+/* ── SIDEBAR ── */
+#sidebar{position:fixed;top:52px;left:0;width:170px;background:rgba(0,8,20,.88);
+  backdrop-filter:blur(14px);border-right:1px solid rgba(0,212,255,.08);padding:12px 10px;
+  z-index:90;transition:transform .28s;}
+#sidebar.hidden{transform:translateX(-180px);}
+#sidebar h3{font-size:8px;letter-spacing:3px;color:rgba(0,212,255,.45);margin-bottom:8px;}
+.dept-filter{display:flex;align-items:center;gap:6px;margin-bottom:5px;cursor:pointer;
+  font-size:10px;color:rgba(160,196,255,.72);user-select:none;}
+.dept-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;box-shadow:0 0 4px currentColor;}
+.dept-filter.off{opacity:.28;}
+.sdiv{border:none;border-top:1px solid rgba(0,212,255,.07);margin:9px 0;}
+.sstat{font-size:9px;color:rgba(160,196,255,.4);margin-bottom:4px;display:flex;justify-content:space-between;}
+.sstat span{color:#00d4ff;}
+
+/* ── FILTER PANEL ── */
+#filter-panel{position:fixed;top:52px;left:0;width:260px;height:calc(100vh - 52px);
+  background:rgba(0,6,18,.96);backdrop-filter:blur(18px);
+  border-right:1px solid rgba(0,212,255,.14);padding:16px 14px;z-index:110;
+  transform:translateX(-270px);transition:transform .26s cubic-bezier(.25,.46,.45,.94);overflow-y:auto;}
+#filter-panel.open{transform:translateX(0);}
+.fp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+.fp-head span{font-size:10px;letter-spacing:3px;color:#00d4ff;}
+#fp-close{background:none;border:1px solid rgba(0,212,255,.18);color:rgba(160,196,255,.5);
+  font-size:12px;width:24px;height:24px;border-radius:3px;cursor:pointer;font-family:monospace;}
+#fp-close:hover{border-color:rgba(0,212,255,.4);color:#00d4ff;}
+.fp-sec{margin-bottom:14px;}
+.fp-lbl{font-size:8px;letter-spacing:2.5px;color:rgba(0,212,255,.45);margin-bottom:7px;
+  border-bottom:1px solid rgba(0,212,255,.07);padding-bottom:3px;}
+.fp-presets{display:flex;flex-wrap:wrap;gap:5px;}
+.fp-preset{background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.2);border-radius:12px;
+  color:#a0c4ff;font-family:'Courier New',monospace;font-size:9px;padding:3px 9px;cursor:pointer;
+  letter-spacing:1px;transition:all .15s;}
+.fp-preset:hover,.fp-preset.active{background:rgba(0,212,255,.15);border-color:rgba(0,212,255,.5);color:#00d4ff;}
+.fp-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:12px;
+  border:1px solid rgba(255,255,255,.12);margin:2px;cursor:pointer;font-size:9px;
+  color:rgba(160,196,255,.75);transition:all .15s;user-select:none;}
+.fp-chip.active{opacity:1;border-width:1px;}
+.fp-chip:not(.active){opacity:.28;filter:grayscale(1);}
+.level-check{display:flex;align-items:center;gap:7px;margin-bottom:6px;cursor:pointer;
+  font-size:10px;color:rgba(160,196,255,.72);}
+.level-check input{accent-color:#00d4ff;width:12px;height:12px;}
+.fp-range-row{display:flex;align-items:center;gap:8px;}
+#fp-hc{flex:1;accent-color:#00d4ff;height:3px;}
+#fp-hc-val{font-size:10px;color:#00d4ff;min-width:36px;}
+#fp-reset-btn{display:block;width:100%;padding:7px;border-radius:3px;background:rgba(255,80,80,.06);
+  border:1px solid rgba(255,80,80,.25);color:rgba(255,120,120,.8);font-size:9px;letter-spacing:2px;
+  cursor:pointer;font-family:monospace;margin-top:6px;}
+#fp-reset-btn:hover{background:rgba(255,80,80,.12);}
+#fp-count{font-size:9px;color:rgba(160,196,255,.45);text-align:center;margin-top:8px;letter-spacing:1px;}
+#filter-badge{display:none;background:#00d4ff;color:#000;border-radius:50%;width:14px;height:14px;
+  font-size:8px;align-items:center;justify-content:center;font-weight:bold;margin-left:-4px;}
+#filter-badge.visible{display:flex;}
+
+/* ── CHAIN HUD ── */
+#chain-hud{position:fixed;top:60px;left:50%;transform:translateX(-50%);
+  background:rgba(0,8,20,.88);border:1px solid rgba(255,200,50,.45);border-radius:4px;
+  padding:6px 16px;font-size:11px;color:#ffc832;letter-spacing:2px;z-index:95;
+  display:none;align-items:center;gap:12px;}
+#chain-hud.visible{display:flex;}
+#chain-clear{background:none;border:1px solid rgba(255,200,50,.35);border-radius:3px;
+  color:#ffc832;font-size:10px;padding:2px 8px;cursor:pointer;font-family:monospace;}
+#chain-clear:hover{background:rgba(255,200,50,.12);}
+
+/* ── REORG PANEL ── */
+#reorg-panel{position:fixed;bottom:0;left:0;right:0;min-height:76px;height:auto;
+  background:rgba(0,6,18,.96);backdrop-filter:blur(14px);
+  border-top:1px solid rgba(255,200,50,.25);padding:10px 18px 12px;z-index:100;
+  transform:translateY(calc(100% + 4px));transition:transform .26s;}
+#reorg-panel.open{transform:translateY(0);}
+.rp-top{display:flex;align-items:center;gap:12px;margin-bottom:7px;}
+.rp-title{font-size:10px;letter-spacing:2px;color:#ffc832;}
+#rp-close{margin-left:auto;background:none;border:1px solid rgba(255,200,50,.25);
+  color:rgba(255,200,50,.6);font-size:12px;width:22px;height:22px;border-radius:3px;cursor:pointer;font-family:monospace;}
+.rp-controls{display:flex;align-items:center;gap:10px;}
+.rp-lbl{font-size:9px;color:rgba(255,200,50,.6);letter-spacing:1px;white-space:nowrap;}
+#rp-play{background:rgba(255,200,50,.1);border:1px solid rgba(255,200,50,.4);border-radius:3px;
+  color:#ffc832;font-size:10px;padding:3px 10px;cursor:pointer;font-family:monospace;white-space:nowrap;}
+#rp-play:hover{background:rgba(255,200,50,.18);}
+#rp-slider{flex:1;accent-color:#ffc832;height:4px;cursor:pointer;}
+#rp-reset-btn{background:none;border:1px solid rgba(255,200,50,.3);border-radius:3px;
+  color:rgba(255,200,50,.6);font-size:10px;padding:3px 8px;cursor:pointer;font-family:monospace;}
+.rp-pct{font-size:9px;color:rgba(255,200,50,.55);min-width:30px;}
+#rp-changes{display:none;margin-top:8px;max-height:160px;overflow-y:auto;
+  border-top:1px solid rgba(255,200,50,.1);padding-top:7px;}
+#rp-changes.open{display:block;}
+.rpc-row{display:flex;align-items:flex-start;gap:7px;margin-bottom:6px;font-size:9px;color:rgba(255,200,50,.8);line-height:1.5;}
+.rpc-row:last-child{margin-bottom:0;}
+.rpc-badge{padding:1px 6px;border-radius:3px;font-size:8px;letter-spacing:.5px;white-space:nowrap;flex-shrink:0;margin-top:1px;}
+.rpc-move{background:rgba(255,150,30,.12);border:1px solid rgba(255,150,30,.4);color:#ff9620;}
+.rpc-new{background:rgba(0,255,160,.08);border:1px solid rgba(0,255,160,.35);color:#00ffa0;}
+.rpc-user{background:rgba(180,100,255,.1);border:1px solid rgba(180,100,255,.35);color:#b464ff;}
+.rpc-del{background:none;border:none;color:rgba(255,80,80,.45);cursor:pointer;font-size:11px;padding:0 2px;margin-left:auto;flex-shrink:0;}
+.rpc-del:hover{color:#ff5050;}
+#rp-suggest-bar{display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:7px;
+  border-top:1px solid rgba(255,200,50,.08);}
+#rp-changes-toggle{background:none;border:1px solid rgba(255,200,50,.22);border-radius:3px;
+  color:rgba(255,200,50,.65);font-size:9px;padding:2px 8px;cursor:pointer;font-family:monospace;white-space:nowrap;}
+#rp-changes-toggle:hover{border-color:rgba(255,200,50,.45);color:#ffc832;}
+#rp-suggest-btn{background:rgba(180,100,255,.08);border:1px solid rgba(180,100,255,.3);border-radius:3px;
+  color:#b464ff;font-size:9px;padding:3px 9px;cursor:pointer;font-family:monospace;white-space:nowrap;}
+#rp-suggest-btn.on{background:rgba(180,100,255,.2);border-color:rgba(180,100,255,.55);}
+#rp-suggest-status{font-size:9px;color:rgba(180,100,255,.75);letter-spacing:.5px;flex:1;}
+#rp-export-proposals{display:none;background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.22);
+  border-radius:3px;color:#a0c4ff;font-size:9px;padding:2px 8px;cursor:pointer;font-family:monospace;}
+#rp-export-proposals.visible{display:inline-block;}
+
+/* ── IC LIST IN PROFILE ── */
+.ic-list{max-height:220px;overflow-y:auto;border:1px solid rgba(0,212,255,.08);border-radius:3px;margin-top:4px;}
+.ic-row{display:flex;align-items:center;gap:5px;padding:4px 8px;border-bottom:1px solid rgba(0,212,255,.04);}
+.ic-row:last-child{border-bottom:none;}
+.ic-row:hover{background:rgba(0,212,255,.03);}
+.ic-nm{color:#c0d8f0;font-size:10px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ic-ttl{font-size:8px;color:rgba(160,196,255,.45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;}
+.ic-lv{font-size:8px;padding:1px 4px;border-radius:3px;border:1px solid rgba(0,212,255,.18);color:rgba(0,212,255,.55);flex-shrink:0;}
+.ic-loc-sm{font-size:8px;color:rgba(160,196,255,.35);white-space:nowrap;flex-shrink:0;}
+
+/* ── POPULATION LEGEND ── */
+#pop-legend{position:fixed;bottom:16px;left:14px;
+  background:rgba(0,6,18,.88);backdrop-filter:blur(12px);border:1px solid rgba(0,212,255,.1);
+  border-radius:4px;padding:10px 12px;z-index:85;display:none;}
+#pop-legend.visible{display:block;}
+.pop-title{font-size:8px;letter-spacing:3px;color:rgba(0,212,255,.5);margin-bottom:8px;}
+.pop-row{display:flex;align-items:center;gap:7px;margin-bottom:5px;font-size:10px;color:rgba(160,196,255,.75);}
+.pop-dot{width:8px;height:8px;border-radius:50%;}
+.pop-ct{margin-left:auto;font-size:9px;color:rgba(160,196,255,.45);}
+
+/* ── PROFILE CARD ── */
+#profile-card{position:fixed;top:52px;right:0;width:288px;height:calc(100vh - 52px);
+  background:rgba(0,6,18,.94);backdrop-filter:blur(18px);border-left:1px solid rgba(0,212,255,.1);
+  padding:20px 16px;z-index:90;transform:translateX(292px);
+  transition:transform .24s cubic-bezier(.25,.46,.45,.94);overflow-y:auto;}
+#profile-card.visible{transform:translateX(0);}
+#profile-close{position:absolute;top:10px;right:10px;background:none;
+  border:1px solid rgba(0,212,255,.16);color:rgba(160,196,255,.48);font-size:13px;
+  width:26px;height:26px;border-radius:3px;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;font-family:monospace;transition:all .14s;}
+#profile-close:hover{border-color:rgba(0,212,255,.42);color:#00d4ff;}
+.p-avatar{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:22px;margin:0 auto 11px;border:2px solid;}
+.p-name{font-size:14px;color:#e0f0ff;text-align:center;margin-bottom:3px;letter-spacing:1px;}
+.p-title{font-size:10px;color:rgba(160,196,255,.52);text-align:center;margin-bottom:7px;line-height:1.5;}
+.p-hc{text-align:center;font-size:11px;color:#ffc832;margin-bottom:9px;letter-spacing:1px;}
+.p-badge{display:block;width:fit-content;padding:2px 9px;border-radius:10px;font-size:9px;
+  letter-spacing:2px;border:1px solid;margin:0 auto 14px;}
+.p-chain-btn{display:block;width:100%;padding:6px;border-radius:3px;
+  background:rgba(255,200,50,.07);border:1px solid rgba(255,200,50,.3);color:#ffc832;
+  font-size:10px;letter-spacing:2px;cursor:pointer;text-align:center;margin-bottom:12px;font-family:monospace;}
+.p-chain-btn:hover,.p-chain-btn.active{background:rgba(255,200,50,.15);}
+.p-sec-label{font-size:8px;letter-spacing:2.5px;color:rgba(0,212,255,.42);text-transform:uppercase;
+  margin-bottom:6px;border-bottom:1px solid rgba(0,212,255,.07);padding-bottom:3px;}
+.p-sec{margin-bottom:12px;}
+.p-val{font-size:11px;color:rgba(160,196,255,.82);line-height:1.5;}
+.p-link{display:block;padding:4px 8px;margin-bottom:3px;border-radius:3px;
+  background:rgba(0,212,255,.04);color:#a0c4ff;font-size:10px;cursor:pointer;
+  transition:all .12s;border:1px solid transparent;}
+.p-link:hover{background:rgba(0,212,255,.1);border-color:rgba(0,212,255,.2);color:#00d4ff;}
+
+/* ── FPS HUD ── */
+#hud{display:none;position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:80;}
+#hud.visible{display:block;}
+@keyframes rt-rotate{from{transform:translate(-50%,-50%) rotate(0deg);}to{transform:translate(-50%,-50%) rotate(360deg);}}
+@keyframes rt-rotate-rev{from{transform:translate(-50%,-50%) rotate(0deg);}to{transform:translate(-50%,-50%) rotate(-360deg);}}
+#fp-reticle{position:absolute;top:50%;left:50%;width:0;height:0;}
+.rt-ring{position:absolute;border-radius:50%;border-style:solid;transform:translate(-50%,-50%);}
+.rt-outer{width:54px;height:54px;border-width:1px;border-color:rgba(0,212,255,.5) transparent rgba(0,212,255,.5) transparent;
+  animation:rt-rotate 4s linear infinite;}
+.rt-inner{width:30px;height:30px;border-width:1px;border-color:transparent rgba(0,255,160,.55) transparent rgba(0,255,160,.55);
+  animation:rt-rotate-rev 2.5s linear infinite;}
+#fp-reticle .rt-dot{position:absolute;width:4px;height:4px;border-radius:50%;
+  background:#00d4ff;box-shadow:0 0 6px #00d4ff;transform:translate(-50%,-50%);}
+#fp-reticle.target .rt-outer{border-color:#ff9000 transparent #ff9000 transparent;box-shadow:0 0 12px rgba(255,144,0,.4);}
+#fp-reticle.target .rt-inner{border-color:transparent #ffc832 transparent #ffc832;}
+#fp-reticle.target .rt-dot{background:#ffc832;box-shadow:0 0 8px #ffc832;}
+.rt-bracket{position:absolute;width:10px;height:10px;border-color:rgba(0,212,255,.55);border-style:solid;}
+.rt-br-tl{top:-36px;left:-36px;border-width:1px 0 0 1px;}
+.rt-br-tr{top:-36px;right:-36px;border-width:1px 1px 0 0;}
+.rt-br-bl{bottom:-36px;left:-36px;border-width:0 0 1px 1px;}
+.rt-br-br{bottom:-36px;right:-36px;border-width:0 1px 1px 0;}
+.fp-corner{position:absolute;width:28px;height:28px;border-color:rgba(0,212,255,.28);border-style:solid;}
+.fp-corner.tl{top:18px;left:18px;border-width:1px 0 0 1px;}
+.fp-corner.tr{top:18px;right:18px;border-width:1px 1px 0 0;}
+.fp-corner.bl{bottom:18px;left:18px;border-width:0 0 1px 1px;}
+.fp-corner.br{bottom:18px;right:18px;border-width:0 1px 1px 0;}
+#fp-hud-left{position:absolute;bottom:100px;left:22px;font-size:10px;
+  color:rgba(0,212,255,.75);line-height:2;letter-spacing:1.5px;font-family:'Courier New',monospace;}
+#fp-hud-left .hud-lbl{color:rgba(0,212,255,.38);font-size:8px;letter-spacing:2px;}
+#fp-speed-val{color:#00d4ff;font-size:15px;font-weight:bold;}
+#fp-speed-val.boost{color:#ffc832;text-shadow:0 0 10px rgba(255,200,50,.7);}
+#fp-warp{position:absolute;top:50%;left:50%;transform:translate(-50%,36px);
+  font-size:9px;letter-spacing:5px;color:#ffc832;text-shadow:0 0 10px rgba(255,200,50,.8);
+  opacity:0;transition:opacity .15s;pointer-events:none;}
+#fp-warp.on{opacity:1;}
+#fp-vignette{position:absolute;top:0;left:0;right:0;bottom:0;
+  background:radial-gradient(ellipse at center, transparent 55%, rgba(255,144,0,.28) 100%);
+  opacity:0;transition:opacity .2s;}
+#fp-vignette.on{opacity:1;}
+#interact-prompt{position:absolute;bottom:88px;left:50%;transform:translateX(-50%);
+  background:rgba(0,8,20,.82);border:1px solid rgba(0,212,255,.4);border-radius:4px;
+  padding:7px 16px;font-size:11px;color:#00d4ff;letter-spacing:1px;
+  opacity:0;transition:opacity .2s;white-space:nowrap;}
+#interact-prompt.visible{opacity:1;}
+#minimap{position:absolute;bottom:14px;right:14px;width:136px;height:136px;border-radius:50%;
+  border:1px solid rgba(0,212,255,.26);overflow:hidden;background:rgba(0,4,14,.85);}
+#minimap canvas{width:136px;height:136px;border-radius:50%;}
+#ctrl-legend{position:absolute;bottom:14px;left:14px;font-size:10px;
+  color:rgba(160,196,255,.4);line-height:1.9;letter-spacing:1px;}
+.ck{display:inline-block;background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.16);
+  border-radius:2px;padding:0 4px;font-size:9px;}
+
+/* ── ANALYTICS PANEL ── */
+#analytics-panel{position:fixed;top:52px;right:0;width:320px;height:calc(100vh - 52px);
+  background:rgba(0,6,18,.96);backdrop-filter:blur(18px);border-left:1px solid rgba(0,212,255,.1);
+  padding:16px 14px;z-index:91;transform:translateX(325px);
+  transition:transform .26s cubic-bezier(.25,.46,.45,.94);overflow-y:auto;}
+#analytics-panel.visible{transform:translateX(0);}
+.ap-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+.ap-title{font-size:10px;letter-spacing:3px;color:#00d4ff;}
+#ap-close{background:none;border:1px solid rgba(0,212,255,.18);color:rgba(160,196,255,.5);
+  font-size:12px;width:24px;height:24px;border-radius:3px;cursor:pointer;font-family:monospace;}
+.ap-sec{margin-bottom:16px;}
+.ap-lbl{font-size:8px;letter-spacing:2.5px;color:rgba(0,212,255,.45);text-transform:uppercase;
+  margin-bottom:8px;border-bottom:1px solid rgba(0,212,255,.07);padding-bottom:3px;}
+.ap-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}
+.ap-stat{background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.1);border-radius:3px;
+  padding:7px 9px;}
+.ap-stat-val{font-size:16px;color:#00d4ff;font-weight:bold;letter-spacing:1px;}
+.ap-stat-lbl{font-size:8px;color:rgba(160,196,255,.45);letter-spacing:.5px;margin-top:2px;}
+.ap-stat.warn .ap-stat-val{color:#ffc832;}
+.ap-stat.danger .ap-stat-val{color:#ff6060;}
+.ap-bar-row{display:flex;align-items:center;gap:7px;margin-bottom:5px;}
+.ap-bar-lbl{font-size:9px;color:rgba(160,196,255,.65);width:100px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ap-bar-track{flex:1;height:6px;background:rgba(0,212,255,.08);border-radius:3px;overflow:hidden;}
+.ap-bar-fill{height:100%;border-radius:3px;transition:width .4s;}
+.ap-bar-val{font-size:9px;color:rgba(160,196,255,.45);min-width:28px;text-align:right;}
+.ap-flag-row{display:flex;align-items:center;gap:6px;margin-bottom:5px;font-size:9px;}
+.ap-flag-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.ap-flag-name{color:#e0f0ff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ap-flag-badge{padding:1px 5px;border-radius:3px;font-size:8px;flex-shrink:0;}
+.ap-flag-over{background:rgba(255,80,80,.12);border:1px solid rgba(255,80,80,.35);color:#ff6060;}
+.ap-flag-under{background:rgba(255,200,50,.08);border:1px solid rgba(255,200,50,.3);color:#ffc832;}
+.ap-flag-link{cursor:pointer;border-radius:3px;transition:background .12s;}
+.ap-flag-link:hover{background:rgba(0,212,255,.07);}
+
+/* ── SPAN VIEW / COST VIEW overlays ── */
+.tbtn.span-on{background:rgba(0,255,160,.09);border-color:rgba(0,255,160,.42);color:#00ffa0;}
+.tbtn.cost-on{background:rgba(255,200,50,.09);border-color:rgba(255,200,50,.42);color:#ffc832;}
+
+/* ── SAVED VIEWS PANEL ── */
+#views-panel{position:fixed;top:52px;left:0;width:220px;background:rgba(0,6,18,.96);
+  backdrop-filter:blur(18px);border-right:1px solid rgba(0,212,255,.1);padding:12px 11px;
+  z-index:108;transform:translateX(-226px);transition:transform .26s;}
+#views-panel.open{transform:translateX(0);}
+.vp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.vp-title{font-size:9px;letter-spacing:3px;color:#00d4ff;}
+#vp-close{background:none;border:1px solid rgba(0,212,255,.18);color:rgba(160,196,255,.5);
+  font-size:11px;width:22px;height:22px;border-radius:3px;cursor:pointer;font-family:monospace;}
+.vp-chip{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:3px;
+  background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.12);margin-bottom:5px;cursor:pointer;
+  font-size:10px;color:#a0c4ff;transition:all .14s;}
+.vp-chip:hover{background:rgba(0,212,255,.12);border-color:rgba(0,212,255,.3);color:#00d4ff;}
+.vp-chip-del{background:none;border:none;color:rgba(255,80,80,.4);cursor:pointer;font-size:11px;padding:0;margin-left:auto;}
+.vp-chip-del:hover{color:#ff5050;}
+#vp-save-btn{display:block;width:100%;padding:6px;border-radius:3px;margin-top:8px;
+  background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.22);color:#a0c4ff;
+  font-size:9px;letter-spacing:2px;cursor:pointer;font-family:monospace;text-align:center;}
+#vp-save-btn:hover{background:rgba(0,212,255,.14);border-color:rgba(0,212,255,.4);color:#00d4ff;}
+.vp-name-input{width:100%;background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.2);
+  border-radius:3px;padding:5px 8px;color:#a0c4ff;font-family:'Courier New',monospace;font-size:10px;
+  outline:none;margin-bottom:5px;display:none;}
+
+/* ── COMMAND PALETTE ── */
+#cmd-palette{position:fixed;top:0;left:0;right:0;bottom:0;z-index:500;
+  background:rgba(0,0,14,.7);display:none;align-items:flex-start;justify-content:center;padding-top:14vh;}
+#cmd-palette.open{display:flex;}
+#cmd-box{width:440px;background:rgba(0,6,20,.98);border:1px solid rgba(0,212,255,.3);border-radius:6px;
+  overflow:hidden;box-shadow:0 0 60px rgba(0,212,255,.12);}
+#cmd-input{width:100%;background:none;border:none;border-bottom:1px solid rgba(0,212,255,.14);
+  padding:13px 16px;color:#e0f0ff;font-family:'Courier New',monospace;font-size:13px;outline:none;}
+#cmd-input::placeholder{color:rgba(160,196,255,.3);}
+#cmd-results{max-height:320px;overflow-y:auto;}
+.cmd-row{display:flex;align-items:center;gap:10px;padding:9px 16px;cursor:pointer;
+  border-bottom:1px solid rgba(0,212,255,.04);font-size:11px;color:#a0c4ff;}
+.cmd-row:hover,.cmd-row.active{background:rgba(0,212,255,.08);color:#00d4ff;}
+.cmd-row-icon{font-size:14px;flex-shrink:0;width:18px;text-align:center;}
+.cmd-row-label{flex:1;}
+.cmd-row-type{font-size:8px;color:rgba(160,196,255,.35);letter-spacing:1px;flex-shrink:0;}
+
+/* ── MODE FLASH ── */
+#mode-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,20,0);
+  z-index:200;pointer-events:none;display:flex;align-items:center;justify-content:center;
+  transition:background .35s;}
+#mode-text{font-size:22px;letter-spacing:8px;color:#00d4ff;text-shadow:0 0 28px rgba(0,212,255,.9);
+  opacity:0;transition:opacity .3s;text-transform:uppercase;}
+
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-thumb{background:rgba(0,212,255,.18);border-radius:2px;}
+input[type=range]{-webkit-appearance:none;height:4px;border-radius:2px;background:rgba(0,212,255,.2);}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#00d4ff;cursor:pointer;}
+
+/* ── TIMELINE BAR ── */
+#timeline-bar{position:fixed;bottom:0;left:0;right:0;
+  background:rgba(0,6,18,.96);backdrop-filter:blur(14px);
+  border-top:1px solid rgba(0,212,255,.25);padding:10px 18px 12px;z-index:99;
+  transform:translateY(calc(100% + 4px));transition:transform .26s;}
+#timeline-bar.open{transform:translateY(0);}
+.tl-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.tl-title{font-size:10px;letter-spacing:2px;color:#00d4ff;}
+#tl-date{font-size:13px;color:#00d4ff;font-weight:bold;letter-spacing:2px;min-width:72px;}
+#tl-close{margin-left:auto;background:none;border:1px solid rgba(0,212,255,.25);
+  color:rgba(0,212,255,.6);font-size:12px;width:22px;height:22px;border-radius:3px;cursor:pointer;font-family:monospace;}
+#tl-close:hover{border-color:rgba(0,212,255,.5);color:#00d4ff;}
+.tl-controls{display:flex;align-items:center;gap:10px;}
+#tl-play{background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.4);border-radius:3px;
+  color:#00d4ff;font-size:10px;padding:3px 10px;cursor:pointer;font-family:monospace;white-space:nowrap;min-width:60px;}
+#tl-play:hover{background:rgba(0,212,255,.18);}
+#tl-slider{flex:1;accent-color:#00d4ff;height:4px;cursor:pointer;}
+.tl-stats{display:flex;gap:14px;margin-top:7px;padding-top:7px;border-top:1px solid rgba(0,212,255,.08);}
+.tl-stat{font-size:9px;letter-spacing:.5px;display:flex;align-items:center;gap:5px;}
+#tl-hc{color:#00d4ff;}
+#tl-joined{color:#00ffb8;}
+#tl-departed{color:#ff6060;}
+.tl-stat-lbl{color:rgba(160,196,255,.4);}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <div class="logo">✦ HYPERLANE <span>ORG</span></div>
+  <input id="search-box" type="text" placeholder="search people...">
+  <button class="tbtn" id="btn-orbit">⟳ ORBIT: OFF</button>
+  <button class="tbtn" id="btn-filter">⚙ FILTERS <span id="filter-badge"></span></button>
+  <button class="tbtn" id="btn-reorg">⇄ REORG</button>
+  <button class="tbtn" id="btn-pop">◉ POPULATION</button>
+  <button class="tbtn" id="btn-analytics">◈ ORG HEALTH</button>
+  <button class="tbtn" id="btn-span">◉ SPAN VIEW</button>
+  <button class="tbtn" id="btn-cost">$ COST</button>
+  <button class="tbtn" id="btn-views">📌 VIEWS</button>
+  <button class="tbtn" id="btn-png">⬇ PNG</button>
+  <button class="tbtn" id="btn-export">↓ EXPORT</button>
+  <button class="tbtn" id="btn-import">↑ IMPORT</button>
+  <button class="tbtn" id="btn-mode">⚡ SPACE FLIGHT</button>
+  <button class="tbtn" id="btn-timeline">◷ TIMELINE</button>
+  <div id="stats-bar"></div>
+</div>
+
+<!-- SIDEBAR (dept quick-view) -->
+<div id="sidebar">
+  <h3>DIVISIONS</h3>
+  <div id="dept-dots"></div>
+  <hr class="sdiv">
+  <h3>COMPANY</h3>
+  <div class="sstat">EMPLOYEES <span id="sn">—</span></div>
+  <div class="sstat">DIVISIONS <span id="sd">—</span></div>
+  <div class="sstat">MANAGERS <span id="sm">—</span></div>
+</div>
+
+<!-- FILTER PANEL -->
+<div id="filter-panel">
+  <div class="fp-head"><span>FILTERS &amp; SLICERS</span><button id="fp-close">✕</button></div>
+
+  <div class="fp-sec">
+    <div class="fp-lbl">QUICK SELECT</div>
+    <div class="fp-presets">
+      <button class="fp-preset" data-preset="technical">TECHNICAL</button>
+      <button class="fp-preset" data-preset="commercial">COMMERCIAL</button>
+      <button class="fp-preset" data-preset="corporate">CORPORATE</button>
+      <button class="fp-preset active" data-preset="all">ALL</button>
+    </div>
+  </div>
+
+  <div class="fp-sec">
+    <div class="fp-lbl">DIVISION</div>
+    <div id="fp-dept-chips"></div>
+  </div>
+
+  <div class="fp-sec">
+    <div class="fp-lbl">LEVEL (L1=CEO → L7=IC)</div>
+    <div id="fp-levels"></div>
+  </div>
+
+  <div class="fp-sec">
+    <div class="fp-lbl">BUSINESS UNIT</div>
+    <div id="fp-bu-chips" style="display:flex;flex-wrap:wrap;gap:3px;"></div>
+  </div>
+
+  <div class="fp-sec">
+    <div class="fp-lbl">FUNCTION</div>
+    <div id="fp-func-chips" style="display:flex;flex-wrap:wrap;gap:3px;"></div>
+  </div>
+
+  <div class="fp-sec">
+    <div class="fp-lbl">LOCATION</div>
+    <div id="fp-loc-list"></div>
+  </div>
+
+  <div class="fp-sec">
+    <div class="fp-lbl">MIN ORG SIZE — <span id="fp-hc-val">1</span> people</div>
+    <input type="range" id="fp-hc" min="1" max="1300" value="1" step="5">
+  </div>
+
+  <button id="fp-reset-btn">↩ RESET ALL FILTERS</button>
+  <div id="fp-count"></div>
+</div>
+
+<!-- CHAIN HUD -->
+<div id="chain-hud">
+  <span id="chain-label">CHAIN VIEW</span>
+  <button id="chain-clear">✕ CLEAR</button>
+</div>
+
+<!-- REORG PANEL (bottom) -->
+<div id="reorg-panel">
+  <div class="rp-top">
+    <span class="rp-title">⇄ REORG STUDIO</span>
+    <button id="rp-close">✕</button>
+  </div>
+  <div class="rp-controls">
+    <span class="rp-lbl">CURRENT</span>
+    <button id="rp-play">▶ PLAY</button>
+    <input type="range" id="rp-slider" min="0" max="100" value="0">
+    <span class="rp-pct" id="rp-pct">0%</span>
+    <button id="rp-reset-btn">↩</button>
+    <span class="rp-lbl">PROPOSED</span>
+  </div>
+  <div id="rp-suggest-bar">
+    <button id="rp-changes-toggle">▸ PROPOSED CHANGES</button>
+    <button id="rp-suggest-btn">⊕ SUGGEST MOVE</button>
+    <span id="rp-suggest-status"></span>
+    <button id="rp-export-proposals">↓ EXPORT</button>
+  </div>
+  <div id="rp-changes"></div>
+</div>
+
+<!-- TIMELINE BAR -->
+<div id="timeline-bar">
+  <div class="tl-top">
+    <span class="tl-title">◷ GROWTH TIMELINE</span>
+    <span id="tl-date">Q1 2018</span>
+    <button id="tl-play">▶ PLAY</button>
+    <button id="tl-close">✕</button>
+  </div>
+  <div class="tl-controls">
+    <input type="range" id="tl-slider" min="0" value="0">
+  </div>
+  <div class="tl-stats">
+    <div class="tl-stat"><span id="tl-hc">—</span><span class="tl-stat-lbl">employees</span></div>
+    <div class="tl-stat"><span id="tl-joined">+0</span><span class="tl-stat-lbl">joined this quarter</span></div>
+    <div class="tl-stat"><span id="tl-departed">−0</span><span class="tl-stat-lbl">departed this quarter</span></div>
+  </div>
+</div>
+
+<!-- POPULATION LEGEND -->
+<div id="pop-legend">
+  <div class="pop-title">EMPLOYEE POPULATION</div>
+  <div id="pop-legend-items"></div>
+</div>
+
+<!-- PROFILE CARD -->
+<div id="profile-card">
+  <button id="profile-close">✕</button>
+  <div id="profile-content"></div>
+</div>
+
+<!-- FPS HUD -->
+<div id="hud">
+  <div class="fp-corner tl"></div>
+  <div class="fp-corner tr"></div>
+  <div class="fp-corner bl"></div>
+  <div class="fp-corner br"></div>
+  <div id="fp-reticle">
+    <div class="rt-ring rt-outer"></div>
+    <div class="rt-ring rt-inner"></div>
+    <div class="rt-dot"></div>
+    <div class="rt-bracket rt-br-tl"></div>
+    <div class="rt-bracket rt-br-tr"></div>
+    <div class="rt-bracket rt-br-bl"></div>
+    <div class="rt-bracket rt-br-br"></div>
+  </div>
+  <div id="fp-hud-left">
+    <div><span class="hud-lbl">THRUST</span></div>
+    <div><span id="fp-speed-val">000</span> <span class="hud-lbl">U/S</span></div>
+    <div style="margin-top:4px"><span class="hud-lbl">HDG</span> <span id="fp-hdg-val">000°</span></div>
+    <div style="margin-top:4px"><span class="hud-lbl">POS</span> <span id="fp-pos-val">0·0·0</span></div>
+  </div>
+  <div id="fp-warp">⚡ WARP BOOST</div>
+  <div id="fp-vignette"></div>
+  <div id="interact-prompt"></div>
+  <div id="minimap"><canvas id="mm" width="136" height="136"></canvas></div>
+  <div id="ctrl-legend">
+    <span class="ck">W</span><span class="ck">A</span><span class="ck">S</span><span class="ck">D</span> THRUST &nbsp;
+    <span class="ck">SHIFT</span> WARP BOOST<br>
+    <span class="ck">SPACE</span>/<span class="ck">Q</span> UP/DOWN<br>
+    <span class="ck">E</span>/<span class="ck">R</span> ROLL &nbsp;
+    <span class="ck">MOUSE</span> LOOK<br>
+    <span class="ck">F</span> INTERACT &nbsp;
+    <span class="ck">ESC</span> MAP VIEW
+  </div>
+</div>
+
+<!-- ANALYTICS PANEL -->
+<div id="analytics-panel">
+  <div class="ap-head"><span class="ap-title">◈ ORG HEALTH</span><button id="ap-close">✕</button></div>
+  <div id="ap-content"></div>
+</div>
+
+<!-- SAVED VIEWS PANEL -->
+<div id="views-panel">
+  <div class="vp-head"><span class="vp-title">📌 SAVED VIEWS</span><button id="vp-close">✕</button></div>
+  <div id="vp-list"></div>
+  <input id="vp-name-input" class="vp-name-input" placeholder="View name…" maxlength="28">
+  <button id="vp-save-btn">+ SAVE CURRENT VIEW</button>
+</div>
+
+<!-- COMMAND PALETTE -->
+<div id="cmd-palette">
+  <div id="cmd-box">
+    <input id="cmd-input" placeholder="Search people or run a command…" autocomplete="off" spellcheck="false">
+    <div id="cmd-results"></div>
+  </div>
+</div>
+
+<div id="mode-overlay"><div id="mode-text"></div></div>
+<input type="file" id="org-file-input" accept=".xlsx,.csv" style="display:none">
+<div id="custom-org-badge" style="display:none;position:fixed;top:58px;right:14px;z-index:95;
+  background:rgba(0,255,180,.1);border:1px solid rgba(0,255,180,.4);border-radius:3px;
+  padding:4px 10px;font-size:9px;color:#00ffb8;font-family:monospace;letter-spacing:1px;">
+  ✓ CUSTOM ORG LOADED &nbsp;<button onclick="clearCustomOrg()" style="background:none;border:none;
+  color:rgba(0,255,180,.6);cursor:pointer;font-size:10px;font-family:monospace;">✕ RESET</button>
+</div>
+<div id="toast" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+  background:rgba(0,8,20,.96);border:1px solid rgba(0,212,255,.4);border-radius:4px;
+  padding:9px 20px;font-size:11px;color:#00d4ff;font-family:monospace;letter-spacing:1px;
+  z-index:300;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap;">
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
+
+// ─── ORG DATA ───────────────────────────────────────────────
+let ORG = [
+  // ── EXECUTIVE ──
+  {id:1,  name:'Alexandra Voss',    title:'Chief Executive Officer',             dept:'Executive',   managerId:null, hc:0},
+  // ── C-SUITE / SVPs ──
+  {id:2,  name:'James Nakamura',    title:'SVP Engineering',                     dept:'Engineering', managerId:1,    hc:0},
+  {id:3,  name:'Dr. Priya Sharma',  title:'SVP R&D & Technology',                dept:'RnD',         managerId:1,    hc:0},
+  {id:4,  name:'Marcus Webb',       title:'Chief Operating Officer',             dept:'Operations',  managerId:1,    hc:0},
+  {id:5,  name:'Chen Li',           title:'Chief Financial Officer',             dept:'Finance',     managerId:1,    hc:0},
+  {id:6,  name:'Sofia Reyes',       title:'Chief Marketing Officer',             dept:'Marketing',   managerId:1,    hc:0},
+  {id:7,  name:'David Kim',         title:'SVP Worldwide Sales',                 dept:'Sales',       managerId:1,    hc:0},
+  {id:8,  name:'Amara Osei',        title:'Chief People Officer',                dept:'People',      managerId:1,    hc:0},
+  {id:9,  name:'Raj Patel',         title:'VP IT & Security',                    dept:'Operations',  managerId:1,    hc:0},
+  // ── ENGINEERING VPs ──
+  {id:10, name:'Yuna Park',         title:'VP RTL Design',                       dept:'Engineering', managerId:2,    hc:0},
+  {id:11, name:'Trevor Hayes',      title:'VP Design Verification',              dept:'Engineering', managerId:2,    hc:0},
+  {id:12, name:'Laila Benali',      title:'VP Physical Design',                  dept:'Engineering', managerId:2,    hc:0},
+  {id:13, name:'Owen Stride',       title:'VP Firmware & Software',              dept:'Engineering', managerId:2,    hc:0},
+  {id:14, name:'Nadia Volkov',      title:'VP Design Infrastructure',            dept:'Engineering', managerId:2,    hc:0},
+  // ── R&D VPs ──
+  {id:15, name:'Felix Huang',       title:'VP Process Technology',               dept:'RnD',         managerId:3,    hc:0},
+  {id:16, name:'Ingrid Sorensen',   title:'VP Advanced Packaging',               dept:'RnD',         managerId:3,    hc:0},
+  {id:17, name:'Arjun Mehta',       title:'VP IP & Architecture',                dept:'RnD',         managerId:3,    hc:0},
+  // ── OPERATIONS VPs ──
+  {id:18, name:'Tomás Reyes',       title:'VP Manufacturing Operations',         dept:'Operations',  managerId:4,    hc:0},
+  {id:19, name:'Grace Cheng',       title:'VP Supply Chain',                     dept:'Operations',  managerId:4,    hc:0},
+  {id:20, name:'Viktor Ostroff',    title:'VP Quality & Reliability',            dept:'Operations',  managerId:4,    hc:0},
+  // ── FINANCE VPs ──
+  {id:21, name:'Fatima Al-Hassan',  title:'VP Finance & Accounting',             dept:'Finance',     managerId:5,    hc:0},
+  {id:22, name:'Bo Lindqvist',      title:'VP FP&A & Strategy',                  dept:'Finance',     managerId:5,    hc:0},
+  // ── MARKETING VPs ──
+  {id:23, name:'Cleo Marchetti',    title:'VP Product Management',               dept:'Marketing',   managerId:6,    hc:0},
+  {id:24, name:'Ian Sato',          title:'VP Marketing Communications',         dept:'Marketing',   managerId:6,    hc:0},
+  // ── SALES VPs ──
+  {id:25, name:'Rachel Torres',     title:'VP Americas Sales',                   dept:'Sales',       managerId:7,    hc:0},
+  {id:26, name:'Wei Zhang',         title:'VP APAC Sales',                       dept:'Sales',       managerId:7,    hc:0},
+  {id:27, name:'Pierre Dubois',     title:'VP EMEA Sales',                       dept:'Sales',       managerId:7,    hc:0},
+  // ── PEOPLE VPs ──
+  {id:28, name:'Maya Thornton',     title:'VP HR Business Partners',             dept:'People',      managerId:8,    hc:0},
+  {id:29, name:'Leo Castillo',      title:'VP Talent & Recruiting',              dept:'People',      managerId:8,    hc:0},
+  // ── IT & SECURITY VPs ──
+  {id:30, name:'Kira Volkov',       title:'VP IT Infrastructure',                dept:'Operations',  managerId:9,    hc:0},
+  {id:31, name:'Sam Obi',           title:'VP Legal & Compliance',               dept:'Finance',     managerId:9,    hc:0},
+  // ── DIRECTORS: RTL Design ──
+  {id:32, name:'Derek Moss',        title:'Director, CPU RTL',                   dept:'Engineering', managerId:10,   hc:0},
+  {id:33, name:'Aiko Tanaka',       title:'Director, GPU/NPU RTL',               dept:'Engineering', managerId:10,   hc:0},
+  {id:34, name:'Carlos Ruiz',       title:'Director, I/O & Interconnect',        dept:'Engineering', managerId:10,   hc:0},
+  {id:35, name:'Uma Patel',         title:'Director, SoC Integration',           dept:'Engineering', managerId:10,   hc:0},
+  // ── DIRECTORS: Design Verification ──
+  {id:36, name:'Nick Osei',         title:'Director, Block Verification',        dept:'Engineering', managerId:11,   hc:0},
+  {id:37, name:'Lena Fischer',      title:'Director, System Verification',       dept:'Engineering', managerId:11,   hc:0},
+  {id:38, name:'Rohan Das',         title:'Director, Formal Methods',            dept:'Engineering', managerId:11,   hc:0},
+  // ── DIRECTORS: Physical Design ──
+  {id:39, name:'Petra Novak',       title:'Director, Floorplan & PnR',           dept:'Engineering', managerId:12,   hc:0},
+  {id:40, name:'Kevin Bright',      title:'Director, Timing & Signoff',          dept:'Engineering', managerId:12,   hc:0},
+  {id:41, name:'Yoshi Kondo',       title:'Director, Custom Layout',             dept:'Engineering', managerId:12,   hc:0},
+  // ── DIRECTORS: Firmware & Software ──
+  {id:42, name:'Tanya Morrison',    title:'Director, Boot & Security FW',        dept:'Engineering', managerId:13,   hc:0},
+  {id:43, name:'Ben Larsson',       title:'Director, Drivers & SDK',             dept:'Engineering', managerId:13,   hc:0},
+  {id:44, name:'Zara Ahmed',        title:'Director, Tools & Debug SW',          dept:'Engineering', managerId:13,   hc:0},
+  // ── DIRECTORS: Design Infrastructure ──
+  {id:45, name:'Ivan Kozlov',       title:'Director, EDA & CAD Tools',           dept:'Engineering', managerId:14,   hc:0},
+  {id:46, name:'Mei Zhao',          title:'Director, PDK & Libraries',           dept:'Engineering', managerId:14,   hc:0},
+  {id:47, name:'Ahmed Khoury',      title:'Director, Design Automation',         dept:'Engineering', managerId:14,   hc:0},
+  // ── DIRECTORS: Process Technology ──
+  {id:48, name:'Sandra Müller',     title:'Director, CMOS Process',              dept:'RnD',         managerId:15,   hc:0},
+  {id:49, name:'Jae-Won Oh',        title:'Director, Emerging Devices',          dept:'RnD',         managerId:15,   hc:0},
+  // ── DIRECTORS: Advanced Packaging ──
+  {id:50, name:'Paulo Ferreira',    title:'Director, Chiplet Architecture',      dept:'RnD',         managerId:16,   hc:0},
+  {id:51, name:'Nina Okonkwo',      title:'Director, Package Design',            dept:'RnD',         managerId:16,   hc:0},
+  // ── DIRECTORS: IP & Architecture ──
+  {id:52, name:'Chris Manning',     title:'Director, CPU Architecture',          dept:'RnD',         managerId:17,   hc:0},
+  {id:53, name:'Hana Ito',          title:'Director, Memory Architecture',       dept:'RnD',         managerId:17,   hc:0},
+  // ── DIRECTORS: Manufacturing ──
+  {id:54, name:'Olga Petrov',       title:'Director, Fab Coordination',          dept:'Operations',  managerId:18,   hc:0},
+  {id:55, name:'James Okafor',      title:'Director, Assembly & Test',           dept:'Operations',  managerId:18,   hc:0},
+  // ── DIRECTORS: Supply Chain ──
+  {id:56, name:'Ana Lima',          title:'Director, Procurement',               dept:'Operations',  managerId:19,   hc:0},
+  {id:57, name:'Tariq Hassan',      title:'Director, Logistics & Planning',      dept:'Operations',  managerId:19,   hc:0},
+  // ── DIRECTORS: Quality & Reliability ──
+  {id:58, name:'Elena Moreau',      title:'Director, Quality Engineering',       dept:'Operations',  managerId:20,   hc:0},
+  {id:59, name:'Kwame Asante',      title:'Director, Reliability & FA',          dept:'Operations',  managerId:20,   hc:0},
+  // ── DIRECTORS: Finance ──
+  {id:60, name:'Laura Becker',      title:'Director, Financial Reporting',       dept:'Finance',     managerId:21,   hc:0},
+  {id:61, name:'Mark Johansson',    title:'Director, Tax & Treasury',            dept:'Finance',     managerId:21,   hc:0},
+  {id:62, name:'Petra Svensson',    title:'Director, Corporate FP&A',            dept:'Finance',     managerId:22,   hc:0},
+  // ── DIRECTORS: Marketing ──
+  {id:63, name:'Ryan Bloom',        title:'Director, Compute Products',          dept:'Marketing',   managerId:23,   hc:0},
+  {id:64, name:'Sana Qureshi',      title:'Director, Networking Products',       dept:'Marketing',   managerId:23,   hc:0},
+  {id:65, name:'Lars Eriksson',     title:'Director, Automotive Products',       dept:'Marketing',   managerId:23,   hc:0},
+  {id:66, name:'Cora Williams',     title:'Director, Technical Marketing',       dept:'Marketing',   managerId:24,   hc:0},
+  {id:67, name:'Finn Brennan',      title:'Director, Content & Events',          dept:'Marketing',   managerId:24,   hc:0},
+  // ── DIRECTORS: Sales ──
+  {id:68, name:'Jake Murphy',       title:'Director, Hyperscale Accounts',       dept:'Sales',       managerId:25,   hc:0},
+  {id:69, name:'Soo-Jin Lee',       title:'Director, Enterprise Accounts',       dept:'Sales',       managerId:25,   hc:0},
+  {id:70, name:'Danny Choi',        title:'Director, Greater China',             dept:'Sales',       managerId:26,   hc:0},
+  {id:71, name:'Yuki Matsuda',      title:'Director, Korea & Japan',             dept:'Sales',       managerId:26,   hc:0},
+  {id:72, name:'Claire Bernard',    title:'Director, EMEA Accounts',             dept:'Sales',       managerId:27,   hc:0},
+  // ── DIRECTORS: People ──
+  {id:73, name:'Kenji Watanabe',    title:'Director, HR Business Partners',      dept:'People',      managerId:28,   hc:0},
+  {id:74, name:'Bianca Lima',       title:'Director, Employee Experience',       dept:'People',      managerId:28,   hc:0},
+  {id:75, name:'Oren Blatt',        title:'Director, Technical Recruiting',      dept:'People',      managerId:29,   hc:0},
+  // ── DIRECTORS: IT & Legal ──
+  {id:76, name:'Omar Al-Farsi',     title:'Director, IT Operations',             dept:'Operations',  managerId:30,   hc:0},
+  {id:77, name:'Irina Kovacs',      title:'Director, Cybersecurity',             dept:'Operations',  managerId:30,   hc:0},
+  {id:78, name:'Alice Fontaine',    title:'Director, IP & Patent Litigation',    dept:'Finance',     managerId:31,   hc:0},
+  // ─────────────────────────────────────────────────────────────
+  // ── SENIOR MANAGERS ── (Level 4 — leaf nodes with IC headcount)
+  // ─────────────────────────────────────────────────────────────
+  // CPU RTL (Dir 32)
+  {id:79,  name:'Aiden Walsh',       title:'Sr. Manager, Integer Core RTL',          dept:'Engineering', managerId:32,  hc:14},
+  {id:80,  name:'Freya Jensen',      title:'Sr. Manager, Floating Point Unit RTL',   dept:'Engineering', managerId:32,  hc:14},
+  {id:81,  name:'Riku Nakao',        title:'Sr. Manager, Branch Predict & Fetch RTL',dept:'Engineering', managerId:32,  hc:14},
+  {id:82,  name:'Camila Restrepo',   title:'Sr. Manager, Cache Hierarchy RTL',       dept:'Engineering', managerId:32,  hc:14},
+  // GPU/NPU RTL (Dir 33)
+  {id:83,  name:'Oren Shapiro',      title:'Sr. Manager, Graphics Shader RTL',       dept:'Engineering', managerId:33,  hc:14},
+  {id:84,  name:'Yeon Park',         title:'Sr. Manager, NPU Matrix Compute RTL',    dept:'Engineering', managerId:33,  hc:14},
+  {id:85,  name:'Tobias Engel',      title:'Sr. Manager, GPU Memory Controller RTL', dept:'Engineering', managerId:33,  hc:14},
+  {id:86,  name:'Zara Mensah',       title:'Sr. Manager, Display & Video Engine RTL',dept:'Engineering', managerId:33,  hc:14},
+  // I/O & Interconnect (Dir 34)
+  {id:87,  name:'Ivan Popov',        title:'Sr. Manager, PCIe & CXL IP RTL',         dept:'Engineering', managerId:34,  hc:12},
+  {id:88,  name:'Layla Hassan',      title:'Sr. Manager, High-Speed SerDes RTL',     dept:'Engineering', managerId:34,  hc:12},
+  {id:89,  name:'Marcus Kohl',       title:'Sr. Manager, Network-on-Chip RTL',       dept:'Engineering', managerId:34,  hc:12},
+  // SoC Integration (Dir 35)
+  {id:90,  name:'Hina Qureshi',      title:'Sr. Manager, SoC Top-Level Integration', dept:'Engineering', managerId:35,  hc:12},
+  {id:91,  name:'Erik Gustafsson',   title:'Sr. Manager, Power Domain Architecture', dept:'Engineering', managerId:35,  hc:12},
+  {id:92,  name:'Amara Okonkwo',     title:'Sr. Manager, Subsystem Stitching',       dept:'Engineering', managerId:35,  hc:12},
+  // Block Verification (Dir 36)
+  {id:93,  name:'Kofi Mensah',       title:'Sr. Manager, CPU Block Verification',    dept:'Engineering', managerId:36,  hc:15},
+  {id:94,  name:'Soo-Yeon Lim',      title:'Sr. Manager, GPU Block Verification',    dept:'Engineering', managerId:36,  hc:15},
+  {id:95,  name:'Dmitri Voronov',    title:'Sr. Manager, Memory Subsystem Verif.',   dept:'Engineering', managerId:36,  hc:15},
+  {id:96,  name:'Priya Menon',       title:'Sr. Manager, IO Block Verification',     dept:'Engineering', managerId:36,  hc:15},
+  // System Verification (Dir 37)
+  {id:97,  name:'Gael Dupont',       title:'Sr. Manager, RTL Simulation Platforms',  dept:'Engineering', managerId:37,  hc:14},
+  {id:98,  name:'Yuki Hashimoto',    title:'Sr. Manager, Pre-Silicon Validation',    dept:'Engineering', managerId:37,  hc:14},
+  {id:99,  name:'Nadia Bergstrom',   title:'Sr. Manager, Emulation & FPGA Proto',    dept:'Engineering', managerId:37,  hc:14},
+  {id:100, name:'Jae-hyun Cho',      title:'Sr. Manager, Silicon Bring-Up Support',  dept:'Engineering', managerId:37,  hc:14},
+  // Formal Methods (Dir 38)
+  {id:101, name:'Ada Lindqvist',     title:'Sr. Manager, Property Specification',    dept:'Engineering', managerId:38,  hc:13},
+  {id:102, name:'Tomás Morales',     title:'Sr. Manager, Formal Verification Flows', dept:'Engineering', managerId:38,  hc:13},
+  {id:103, name:'Meera Krishnan',    title:'Sr. Manager, Formal Coverage & Apps',    dept:'Engineering', managerId:38,  hc:13},
+  {id:104, name:'Bastian Wolf',      title:'Sr. Manager, Security Formal Analysis',  dept:'Engineering', managerId:38,  hc:13},
+  // Floorplan & PnR (Dir 39)
+  {id:105, name:'Nina Johansson',    title:'Sr. Manager, Chip Floorplanning',        dept:'Engineering', managerId:39,  hc:14},
+  {id:106, name:'Wei Liu',           title:'Sr. Manager, Place & Route',             dept:'Engineering', managerId:39,  hc:14},
+  {id:107, name:'Chioma Eze',        title:'Sr. Manager, Power Grid Design',         dept:'Engineering', managerId:39,  hc:14},
+  {id:108, name:'Stefan Braun',      title:'Sr. Manager, DFM & ECO Engineering',    dept:'Engineering', managerId:39,  hc:14},
+  // Timing & Signoff (Dir 40)
+  {id:109, name:'Rina Suzuki',       title:'Sr. Manager, Static Timing Analysis',   dept:'Engineering', managerId:40,  hc:12},
+  {id:110, name:'Paulo Fonseca',     title:'Sr. Manager, Signal Integrity & Noise',  dept:'Engineering', managerId:40,  hc:12},
+  {id:111, name:'Hira Malik',        title:'Sr. Manager, Power Analysis & IR Drop',  dept:'Engineering', managerId:40,  hc:12},
+  // Custom Layout (Dir 41)
+  {id:112, name:'Yoshi Kimura',      title:'Sr. Manager, Analog & Mixed-Signal Layout', dept:'Engineering', managerId:41, hc:9},
+  {id:113, name:'Ewa Kowalski',      title:'Sr. Manager, Standard Cell Layout',     dept:'Engineering', managerId:41,  hc:9},
+  {id:114, name:'Gunnar Holm',       title:'Sr. Manager, SRAM Bitcell Layout',      dept:'Engineering', managerId:41,  hc:9},
+  // Boot & Security FW (Dir 42)
+  {id:115, name:'Farah Al-Amin',     title:'Sr. Manager, Secure Boot & RoT FW',     dept:'Engineering', managerId:42,  hc:14},
+  {id:116, name:'Ludo Vermeer',      title:'Sr. Manager, Power Management FW',      dept:'Engineering', managerId:42,  hc:14},
+  {id:117, name:'Sena Yildiz',       title:'Sr. Manager, Diagnostics & Recovery FW',dept:'Engineering', managerId:42,  hc:14},
+  {id:118, name:'Idris Okafor',      title:'Sr. Manager, HSM & Cryptographic FW',   dept:'Engineering', managerId:42,  hc:14},
+  // Drivers & SDK (Dir 43)
+  {id:119, name:'Britta Sorensen',   title:'Sr. Manager, GPU Display Drivers',      dept:'Engineering', managerId:43,  hc:14},
+  {id:120, name:'Kai Tanaka',        title:'Sr. Manager, Compute SDK & APIs',       dept:'Engineering', managerId:43,  hc:14},
+  {id:121, name:'Diego Romero',      title:'Sr. Manager, PCIe & Platform Drivers',  dept:'Engineering', managerId:43,  hc:14},
+  {id:122, name:'Astrid Lindberg',   title:'Sr. Manager, Developer Tools & Profiler',dept:'Engineering', managerId:43, hc:14},
+  // Tools & Debug SW (Dir 44)
+  {id:123, name:'Femi Adeyemi',      title:'Sr. Manager, Debug Infrastructure SW',  dept:'Engineering', managerId:44,  hc:14},
+  {id:124, name:'Jana Novotny',      title:'Sr. Manager, Performance Analysis Tools',dept:'Engineering', managerId:44, hc:14},
+  {id:125, name:'Raul Salinas',      title:'Sr. Manager, Trace & Logic Analyzer SW', dept:'Engineering', managerId:44, hc:14},
+  {id:126, name:'Pita Havili',       title:'Sr. Manager, Internal Build & CI Systems',dept:'Engineering',managerId:44, hc:14},
+  // EDA & CAD Tools (Dir 45)
+  {id:127, name:'Lars Magnusson',    title:'Sr. Manager, Front-End EDA Flows',      dept:'Engineering', managerId:45,  hc:14},
+  {id:128, name:'Anika Das',         title:'Sr. Manager, Back-End EDA Flows',       dept:'Engineering', managerId:45,  hc:14},
+  {id:129, name:'Mo Ibrahim',        title:'Sr. Manager, CAD Infrastructure',       dept:'Engineering', managerId:45,  hc:14},
+  {id:130, name:'Cleo Petersen',     title:'Sr. Manager, EDA Vendor Mgmt',          dept:'Engineering', managerId:45,  hc:14},
+  // PDK & Libraries (Dir 46)
+  {id:131, name:'Xu Fang',           title:'Sr. Manager, Standard Cell Library Dev',dept:'Engineering', managerId:46,  hc:12},
+  {id:132, name:'Birgit Hansen',     title:'Sr. Manager, Memory Compilers & IP',    dept:'Engineering', managerId:46,  hc:12},
+  {id:133, name:'Nikos Stavros',     title:'Sr. Manager, IO & eFuse Libraries',     dept:'Engineering', managerId:46,  hc:12},
+  // Design Automation (Dir 47)
+  {id:134, name:'Ona Adisa',         title:'Sr. Manager, RTL Automation & Linting', dept:'Engineering', managerId:47,  hc:11},
+  {id:135, name:'Victor Popescu',    title:'Sr. Manager, Constraint Automation',    dept:'Engineering', managerId:47,  hc:11},
+  {id:136, name:'Tae-yang Oh',       title:'Sr. Manager, Tapeout Automation',       dept:'Engineering', managerId:47,  hc:11},
+  // CMOS Process (Dir 48)
+  {id:137, name:'Greta Weiland',     title:'Sr. Manager, Gate Oxide & Transistor Dev',dept:'RnD',       managerId:48,  hc:11},
+  {id:138, name:'Jovan Petrovic',    title:'Sr. Manager, Metrology & Characterization',dept:'RnD',      managerId:48,  hc:11},
+  {id:139, name:'Linh Nguyen',       title:'Sr. Manager, Integration Process Dev',  dept:'RnD',         managerId:48,  hc:11},
+  // Emerging Devices (Dir 49)
+  {id:140, name:'Bram Van Houten',   title:'Sr. Manager, 2D Materials Research',    dept:'RnD',         managerId:49,  hc:11},
+  {id:141, name:'Emre Yilmaz',       title:'Sr. Manager, FinFET & Nanosheet Dev',   dept:'RnD',         managerId:49,  hc:11},
+  {id:142, name:'Dina El-Khoury',    title:'Sr. Manager, Ferroelectric Research',   dept:'RnD',         managerId:49,  hc:9},
+  // Chiplet Architecture (Dir 50)
+  {id:143, name:'Uri Goldstein',     title:'Sr. Manager, Die-to-Die Interface',     dept:'RnD',         managerId:50,  hc:9},
+  {id:144, name:'Paz Herrera',       title:'Sr. Manager, Chiplet Integration',      dept:'RnD',         managerId:50,  hc:9},
+  {id:145, name:'Bjorn Andersen',    title:'Sr. Manager, UCIe & Open Standards',    dept:'RnD',         managerId:50,  hc:9},
+  // Package Design (Dir 51)
+  {id:146, name:'Chidera Eze',       title:'Sr. Manager, Advanced Package Integration',dept:'RnD',      managerId:51,  hc:9},
+  {id:147, name:'Mads Christensen',  title:'Sr. Manager, Thermal & Mechanical Analysis',dept:'RnD',     managerId:51,  hc:9},
+  {id:148, name:'Yara Al-Saeed',     title:'Sr. Manager, Interposer & Bridge Design',dept:'RnD',        managerId:51,  hc:9},
+  // CPU Architecture (Dir 52)
+  {id:149, name:'Hugo Bernhardt',    title:'Sr. Manager, ISA & Microarchitecture',  dept:'RnD',         managerId:52,  hc:9},
+  {id:150, name:'Amani Diallo',      title:'Sr. Manager, Out-of-Order Core Research',dept:'RnD',        managerId:52,  hc:9},
+  {id:151, name:'Remi Leclerc',      title:'Sr. Manager, CPU Power & Perf Modeling',dept:'RnD',         managerId:52,  hc:9},
+  // Memory Architecture (Dir 53)
+  {id:152, name:'Kirra Walsh',       title:'Sr. Manager, Cache Architecture Research',dept:'RnD',       managerId:53,  hc:9},
+  {id:153, name:'Zev Shapiro',       title:'Sr. Manager, HBM & LPDDR Modeling',     dept:'RnD',         managerId:53,  hc:9},
+  {id:154, name:'Saki Endo',         title:'Sr. Manager, Coherence & Memory Systems',dept:'RnD',        managerId:53,  hc:9},
+  // Fab Coordination (Dir 54)
+  {id:155, name:'Olena Kovalenko',   title:'Sr. Manager, Fab Run Management',       dept:'Operations',  managerId:54,  hc:13},
+  {id:156, name:'Tariq Mansour',     title:'Sr. Manager, Lot Tracking & OEE',       dept:'Operations',  managerId:54,  hc:13},
+  {id:157, name:'Ingrid Berg',       title:'Sr. Manager, Yield Enhancement Ops',    dept:'Operations',  managerId:54,  hc:13},
+  {id:158, name:'Rex Johansson',     title:'Sr. Manager, Engineering Change Control',dept:'Operations',  managerId:54, hc:13},
+  // Assembly & Test (Dir 55)
+  {id:159, name:'Kwame Opoku',       title:'Sr. Manager, Wafer Sort & Probe',       dept:'Operations',  managerId:55,  hc:12},
+  {id:160, name:'Elena Vasilieva',   title:'Sr. Manager, Package Assembly Ops',     dept:'Operations',  managerId:55,  hc:12},
+  {id:161, name:'Daniel Oduya',      title:'Sr. Manager, Final Test & Burn-In',     dept:'Operations',  managerId:55,  hc:12},
+  // Procurement (Dir 56)
+  {id:162, name:'Fatou Diallo',      title:'Sr. Manager, Direct Material Sourcing', dept:'Operations',  managerId:56,  hc:12},
+  {id:163, name:'Kai Lindstrom',     title:'Sr. Manager, EDA & IP Licensing',       dept:'Operations',  managerId:56,  hc:12},
+  {id:164, name:'Solange Ferreira',  title:'Sr. Manager, Vendor Qualification',     dept:'Operations',  managerId:56,  hc:12},
+  // Logistics & Planning (Dir 57)
+  {id:165, name:'Yun Zhang',         title:'Sr. Manager, Demand Planning',          dept:'Operations',  managerId:57,  hc:11},
+  {id:166, name:'Aditi Sharma',      title:'Sr. Manager, Warehouse & Distribution', dept:'Operations',  managerId:57,  hc:11},
+  {id:167, name:'Noa Levi',          title:'Sr. Manager, Global Trade & Export',    dept:'Operations',  managerId:57,  hc:11},
+  // Quality Engineering (Dir 58)
+  {id:168, name:'Carlos Medina',     title:'Sr. Manager, Design Quality Assurance', dept:'Operations',  managerId:58,  hc:12},
+  {id:169, name:'Hana Mori',         title:'Sr. Manager, Customer Quality Eng.',    dept:'Operations',  managerId:58,  hc:12},
+  {id:170, name:'Alba Fontaine',     title:'Sr. Manager, Process Audit & ISO',      dept:'Operations',  managerId:58,  hc:12},
+  // Reliability & FA (Dir 59)
+  {id:171, name:'Finn McCarthy',     title:'Sr. Manager, Product Reliability Eng.', dept:'Operations',  managerId:59,  hc:12},
+  {id:172, name:'Vera Sokolova',     title:'Sr. Manager, Failure Analysis Lab',     dept:'Operations',  managerId:59,  hc:12},
+  {id:173, name:'Emeka Obi',         title:'Sr. Manager, HTOL & JEDEC Qualification',dept:'Operations', managerId:59,  hc:12},
+  // Financial Reporting (Dir 60)
+  {id:174, name:'Petra Wagner',      title:'Sr. Manager, External Reporting & SEC', dept:'Finance',     managerId:60,  hc:9},
+  {id:175, name:'Jake Sorenson',     title:'Sr. Manager, General Ledger & Close',   dept:'Finance',     managerId:60,  hc:9},
+  {id:176, name:'Mia Hollander',     title:'Sr. Manager, Consolidations',           dept:'Finance',     managerId:60,  hc:9},
+  // Tax & Treasury (Dir 61)
+  {id:177, name:'Tobias Ehret',      title:'Sr. Manager, Global Tax Compliance',    dept:'Finance',     managerId:61,  hc:9},
+  {id:178, name:'Xin Li',            title:'Sr. Manager, Transfer Pricing',         dept:'Finance',     managerId:61,  hc:9},
+  {id:179, name:'Sven Karlsson',     title:'Sr. Manager, Treasury & Cash Mgmt',     dept:'Finance',     managerId:61,  hc:9},
+  // Corporate FP&A (Dir 62)
+  {id:180, name:'Julia Andreasen',   title:'Sr. Manager, Annual Planning & Budget', dept:'Finance',     managerId:62,  hc:11},
+  {id:181, name:'Wael Khalil',       title:'Sr. Manager, Business Analytics & BI',  dept:'Finance',     managerId:62,  hc:11},
+  {id:182, name:'Naomi Watanabe',    title:'Sr. Manager, R&D Investment Analysis',  dept:'Finance',     managerId:62,  hc:11},
+  // IP & Patent (Dir 78)
+  {id:183, name:'Guillaume Moreau',  title:'Sr. Manager, Patent Prosecution',       dept:'Finance',     managerId:78,  hc:9},
+  {id:184, name:'Priya Rajan',       title:'Sr. Manager, IP Licensing & Agreements',dept:'Finance',     managerId:78,  hc:9},
+  {id:185, name:'Axel Brandt',       title:'Sr. Manager, IP Litigation Support',    dept:'Finance',     managerId:78,  hc:9},
+  // Compute Products (Dir 63)
+  {id:186, name:'Cai Zhang',         title:'Sr. Manager, CPU Platform Products',    dept:'Marketing',   managerId:63,  hc:9},
+  {id:187, name:'Rosa Alvarez',      title:'Sr. Manager, GPU Compute Products',     dept:'Marketing',   managerId:63,  hc:9},
+  {id:188, name:'Obi Eze',           title:'Sr. Manager, SoC Solutions Marketing',  dept:'Marketing',   managerId:63,  hc:9},
+  // Networking Products (Dir 64)
+  {id:189, name:'Dag Haugen',        title:'Sr. Manager, Ethernet Switch Products', dept:'Marketing',   managerId:64,  hc:9},
+  {id:190, name:'Qi Wang',           title:'Sr. Manager, SmartNIC Products',        dept:'Marketing',   managerId:64,  hc:9},
+  {id:191, name:'Ines Castillo',     title:'Sr. Manager, Optical Interconnect Prod.',dept:'Marketing',  managerId:64,  hc:9},
+  // Automotive Products (Dir 65)
+  {id:192, name:'Beto Cruz',         title:'Sr. Manager, ADAS Platform Products',   dept:'Marketing',   managerId:65,  hc:9},
+  {id:193, name:'Hemi Walker',       title:'Sr. Manager, Infotainment SoC Products',dept:'Marketing',   managerId:65,  hc:9},
+  {id:194, name:'Zoe Christodoulou', title:'Sr. Manager, Functional Safety Products',dept:'Marketing',  managerId:65,  hc:9},
+  // Technical Marketing (Dir 66)
+  {id:195, name:'Boris Ivanov',      title:'Sr. Manager, Application Engineering',  dept:'Marketing',   managerId:66,  hc:9},
+  {id:196, name:'Tara Finnegan',     title:'Sr. Manager, Demo & Lab Engineering',   dept:'Marketing',   managerId:66,  hc:9},
+  {id:197, name:'Piotr Wisniewski',  title:'Sr. Manager, Competitive Analysis',     dept:'Marketing',   managerId:66,  hc:9},
+  // Content & Events (Dir 67)
+  {id:198, name:'Fran Nakamura',     title:'Sr. Manager, Content Strategy',         dept:'Marketing',   managerId:67,  hc:9},
+  {id:199, name:'Eli Katz',          title:'Sr. Manager, Events & Conferences',     dept:'Marketing',   managerId:67,  hc:9},
+  {id:200, name:'Uma Krishnaswamy',  title:'Sr. Manager, Digital Marketing',        dept:'Marketing',   managerId:67,  hc:9},
+  // Hyperscale Accounts (Dir 68)
+  {id:201, name:'Marco Ferrari',     title:'Sr. Manager, Cloud Provider Accounts',  dept:'Sales',       managerId:68,  hc:12},
+  {id:202, name:'Sana Ali',          title:'Sr. Manager, HPC & Research Accounts',  dept:'Sales',       managerId:68,  hc:12},
+  {id:203, name:'Ben Carter',        title:'Sr. Manager, Strategic Alliance Dev.',  dept:'Sales',       managerId:68,  hc:12},
+  // Enterprise Accounts (Dir 69)
+  {id:204, name:'Linh Tran',         title:'Sr. Manager, Enterprise Server Accounts',dept:'Sales',      managerId:69,  hc:11},
+  {id:205, name:'Guo Chen',          title:'Sr. Manager, Edge Computing Accounts',  dept:'Sales',       managerId:69,  hc:11},
+  {id:206, name:"Wren O'Sullivan",   title:'Sr. Manager, Partner & Reseller Mgmt',  dept:'Sales',       managerId:69,  hc:11},
+  // Greater China (Dir 70)
+  {id:207, name:'Fang Wei',          title:'Sr. Manager, Greater China Cloud',      dept:'Sales',       managerId:70,  hc:13},
+  {id:208, name:'Jiaxin Liu',        title:'Sr. Manager, Greater China Enterprise', dept:'Sales',       managerId:70,  hc:13},
+  {id:209, name:'Mei-Ling Tsai',     title:'Sr. Manager, Greater China Automotive', dept:'Sales',       managerId:70,  hc:13},
+  {id:210, name:'Zhou Lei',          title:'Sr. Manager, Greater China Partnerships',dept:'Sales',      managerId:70,  hc:13},
+  // Korea & Japan (Dir 71)
+  {id:211, name:'Ji-ho Park',        title:'Sr. Manager, Korea Accounts',           dept:'Sales',       managerId:71,  hc:12},
+  {id:212, name:'Kenji Oshiro',      title:'Sr. Manager, Japan Enterprise Accounts',dept:'Sales',       managerId:71,  hc:12},
+  {id:213, name:'Noa Kim',           title:'Sr. Manager, APAC Strategic Accounts',  dept:'Sales',       managerId:71,  hc:12},
+  // EMEA (Dir 72)
+  {id:214, name:'Sophie Laurent',    title:'Sr. Manager, Western Europe Accounts',  dept:'Sales',       managerId:72,  hc:13},
+  {id:215, name:'Kaspar Müller',     title:'Sr. Manager, DACH Enterprise Accounts', dept:'Sales',       managerId:72,  hc:13},
+  {id:216, name:'Faizah Al-Rashid',  title:'Sr. Manager, Eastern Europe & MENA',   dept:'Sales',       managerId:72,  hc:13},
+  {id:217, name:'Conor Byrne',       title:'Sr. Manager, EMEA Cloud Accounts',      dept:'Sales',       managerId:72,  hc:13},
+  // HR Business Partners (Dir 73)
+  {id:218, name:'Adaeze Obi',        title:'Sr. Manager, Engineering HR Partner',   dept:'People',      managerId:73,  hc:9},
+  {id:219, name:'Lars Olsen',        title:'Sr. Manager, Operations HR Partner',    dept:'People',      managerId:73,  hc:9},
+  {id:220, name:'Zeynep Demir',      title:'Sr. Manager, Commercial HR Partner',    dept:'People',      managerId:73,  hc:9},
+  // Employee Experience (Dir 74)
+  {id:221, name:'Camille Deschamps', title:'Sr. Manager, Total Rewards & Benefits', dept:'People',      managerId:74,  hc:9},
+  {id:222, name:'Imo Ihejirika',     title:'Sr. Manager, L&D & Culture Programs',   dept:'People',      managerId:74,  hc:9},
+  {id:223, name:'Dag Eriksen',       title:'Sr. Manager, Employee Engagement & DEI',dept:'People',      managerId:74,  hc:9},
+  // Technical Recruiting (Dir 75)
+  {id:224, name:'Astrid Bjork',      title:'Sr. Manager, Engineering Talent Acq.',  dept:'People',      managerId:75,  hc:9},
+  {id:225, name:'Dev Kapoor',        title:'Sr. Manager, Executive & Leadership Hiring',dept:'People',  managerId:75,  hc:9},
+  {id:226, name:'Yuna Seo',          title:'Sr. Manager, University & Intern Programs',dept:'People',   managerId:75,  hc:9},
+  // IT Operations (Dir 76)
+  {id:227, name:'Stephan Weber',     title:'Sr. Manager, End-User Computing',       dept:'Operations',  managerId:76,  hc:9},
+  {id:228, name:'Layla Abboud',      title:'Sr. Manager, Data Center & Cloud Ops',  dept:'Operations',  managerId:76,  hc:9},
+  {id:229, name:'Kazu Ito',          title:'Sr. Manager, Enterprise Applications',  dept:'Operations',  managerId:76,  hc:9},
+  // Cybersecurity (Dir 77)
+  {id:230, name:'Zaid Hassan',       title:'Sr. Manager, Security Operations Center',dept:'Operations', managerId:77,  hc:9},
+  {id:231, name:'Yana Petrov',       title:'Sr. Manager, Identity & Access Mgmt',   dept:'Operations',  managerId:77,  hc:9},
+  {id:232, name:'Wil Thompson',      title:'Sr. Manager, Vulnerability & Pen Testing',dept:'Operations',managerId:77,  hc:9},
+];
+
+// ─── CUSTOM ORG (from import) ─────────────────────────────────
+let isCustomOrg=false;
+try{const _c=sessionStorage.getItem('customOrg');if(_c){ORG=JSON.parse(_c);isCustomOrg=true;}}catch(e){sessionStorage.removeItem('customOrg');}
+if(isCustomOrg){document.getElementById('custom-org-badge').style.display='block';}
+window.clearCustomOrg=function(){sessionStorage.removeItem('customOrg');location.reload();};
+
+// ─── ASSIGN HIRE / DEPARTURE DATES ────────────────────────────
+(function assignOrgDates(){
+  // Seeded PRNG (xorshift32) — deterministic, no collisions with irng
+  let s=0xA5A5A5A5;
+  function rnd(){s^=s<<13;s^=s>>>17;s^=s<<5;s=(s>>>0);return s/4294967296;}
+  function dAdd(str,days){const d=new Date(str+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
+  // Quarter base: which wave this level of hire came in
+  function qBase(id){
+    if(id<=9)  return'2018-01-01'; // CEO + C-Suite
+    if(id<=17) return'2018-04-01'; // Eng + RnD VPs
+    if(id<=29) return'2018-10-01'; // Ops/Finance/Mktg/Sales/People VPs
+    if(id<=31) return'2019-04-01'; // IT + Legal VPs
+    if(id<=47) return'2019-07-01'; // Engineering Directors
+    if(id<=53) return'2020-01-01'; // RnD Directors
+    if(id<=78) return'2020-04-01'; // Ops/Finance/Mktg/Sales/People/IT Directors
+    if(id<=110)return'2021-01-01'; // Sr Managers wave 1
+    if(id<=150)return'2021-07-01'; // Sr Managers wave 2
+    if(id<=185)return'2022-01-01'; // Sr Managers wave 3
+    if(id<=210)return'2022-07-01'; // Sr Managers wave 4
+    return          '2023-01-01';  // Sr Managers wave 5
+  }
+  const endCap=new Date('2025-12-01T00:00:00Z');
+  ORG.forEach(e=>{
+    // Random day within a ~1-quarter spread from the wave base
+    e.startDate=dAdd(qBase(e.id),Math.floor(rnd()*88));
+    e.endDate=null;
+    // ~6% attrition for non-execs; must have at least 18 months tenure
+    if(e.id>9&&rnd()<0.06){
+      const minEnd=dAdd(e.startDate,548);
+      const gap=endCap-new Date(minEnd+'T00:00:00Z');
+      if(gap>0) e.endDate=dAdd(minEnd,Math.floor(rnd()*gap/86400000));
+    }
+  });
+})();
+
+// ─── QUARTERLY TIMELINE HELPERS ──────────────────────────────
+function buildQuarters(startStr,endStr){
+  const q=[];let[y,m]=startStr.split('-').map(Number);
+  const[ey,em]=endStr.split('-').map(Number);
+  while(y<ey||(y===ey&&m<=em)){q.push(`${y}-${String(m).padStart(2,'0')}-01`);m+=3;if(m>12){m-=12;y++;}}
+  return q;
+}
+const QUARTERS=buildQuarters('2018-01-01','2026-04-01');
+function qtrLabel(d){const[y,m]=d.split('-').map(Number);return`Q${Math.ceil(m/3)} ${y}`;}
+function isActiveAt(emp,dateStr){
+  if(!emp.startDate) return true;
+  return emp.startDate<=dateStr&&(!emp.endDate||emp.endDate>dateStr);
+}
+
+const DEPT = {
+  Executive:   {hex:0xffd700,css:'#ffd700',emoji:'✦'},
+  Engineering: {hex:0x00d4ff,css:'#00d4ff',emoji:'⚡'},
+  RnD:         {hex:0x6a8fff,css:'#6a8fff',emoji:'◭'},
+  Operations:  {hex:0xff8c42,css:'#ff8c42',emoji:'◈'},
+  Finance:     {hex:0xffd060,css:'#ffd060',emoji:'◇'},
+  Marketing:   {hex:0xff4fa8,css:'#ff4fa8',emoji:'✿'},
+  Sales:       {hex:0x00e888,css:'#00e888',emoji:'◉'},
+  People:      {hex:0xa06dff,css:'#a06dff',emoji:'☽'},
+};
+
+const DEPT_GROUPS = {
+  technical:  ['Engineering','RnD'],
+  commercial: ['Sales','Marketing'],
+  corporate:  ['Finance','Operations','People','Executive'],
+  all:        Object.keys(DEPT),
+};
+
+// ─── SEEDED RNG ──────────────────────────────────────────────
+let _seed=137;
+const rng=()=>{_seed=(_seed*9301+49297)%233280;return _seed/233280;};
+
+// ─── SCENE ───────────────────────────────────────────────────
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setClearColor(0x000814);
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.0;
+
+const scene=new THREE.Scene();
+const labelScene=new THREE.Scene(); // bypasses bloom
+scene.fog=new THREE.FogExp2(0x000814,0.0007);
+
+const camera=new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,2000);
+camera.position.set(0,30,85); camera.lookAt(0,6,0);
+scene.add(new THREE.AmbientLight(0x080820,1.0));
+
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+const bloomPass=new UnrealBloomPass(new THREE.Vector2(window.innerWidth,window.innerHeight),1.1,0.55,0.35);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true; controls.dampingFactor=0.05;
+controls.autoRotate=false; controls.minDistance=4; controls.maxDistance=380;
+controls.target.set(0,6,0);
+
+// ─── IMPORT / EXPORT ─────────────────────────────────────────
+const VALID_DEPTS=Object.keys(DEPT);
+const INSTRUCTIONS_ROWS=[
+  ['HYPERLANE ORG CHART — Import Format'],[''],
+  ['Sheet 1 (Managers L1-L5) — required columns:'],[''],
+  ['Column','Type','Required?','Description'],
+  ['id','Number','Yes','Unique integer for each person (managers only)'],
+  ['name','String','Yes','Full name'],
+  ['title','String','Yes','Job title'],
+  ['dept','String','Yes',`One of: ${VALID_DEPTS.join(', ')}`],
+  ['managerId','Number or blank','Yes','ID of direct manager. Leave blank for the root/CEO.'],
+  ['hc','Number','No','IC headcount under this leaf manager (drives sphere size)'],
+  ['bu','String','No','Business Unit (free text — used in filters)'],
+  ['func','String','No','Function (free text — used in filters)'],
+  ['loc','String','No','Location / site (free text — used in filters)'],
+  [''],['Notes:'],
+  ['• Exactly one row must have blank managerId (the CEO).'],
+  ['• dept is case-sensitive. Unknown depts render as white.'],
+  ['• Sheet 2 (ICs) is exported for reference but not used on import.'],
+];
+
+function showToast(msg,type='info'){
+  const el=document.getElementById('toast');
+  el.textContent=msg;
+  el.style.borderColor=type==='error'?'rgba(255,80,80,.6)':'rgba(0,212,255,.4)';
+  el.style.color=type==='error'?'#ff6060':'#00d4ff';
+  el.style.opacity='1';
+  clearTimeout(el._t);el._t=setTimeout(()=>{el.style.opacity='0';},3800);
+}
+
+document.getElementById('btn-export').addEventListener('click',()=>{
+  const XLSX=window.XLSX;
+  // Sheet 1 — managers
+  const header=['id','name','title','dept','managerId','hc','bu','func','loc','orgLevel'];
+  const rows=ORG.map(n=>[n.id,n.name,n.title,n.dept,n.managerId??'',n.hc??0,n.bu||'',n.func||'',n.loc||'',n.orgLevel||'']);
+  const ws=XLSX.utils.aoa_to_sheet([header,...rows]);
+  ws['!cols']=[{wch:6},{wch:24},{wch:40},{wch:14},{wch:12},{wch:6},{wch:22},{wch:20},{wch:18},{wch:8}];
+  // Sheet 2 — ICs
+  const hdrIC=['id','name','title','dept','managerId','bu','func','loc','orgLevel'];
+  const rowsIC=IC_DATA.map(ic=>[ic.id,ic.name,ic.title,ic.dept,ic.managerId,ic.bu,ic.func,ic.loc,ic.orgLevel]);
+  const wsIC=XLSX.utils.aoa_to_sheet([hdrIC,...rowsIC]);
+  wsIC['!cols']=[{wch:7},{wch:22},{wch:34},{wch:14},{wch:10},{wch:22},{wch:20},{wch:18},{wch:8}];
+  // Bold the header row
+  header.forEach((_,ci)=>{
+    const ref=XLSX.utils.encode_cell({r:0,c:ci});
+    if(!ws[ref])return;
+    ws[ref].s={font:{bold:true}};
+  });
+  const wsInfo=XLSX.utils.aoa_to_sheet(INSTRUCTIONS_ROWS);
+  wsInfo['!cols']=[{wch:14},{wch:18},{wch:12},{wch:64}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Managers (L1-L5)');
+  XLSX.utils.book_append_sheet(wb,wsIC,'ICs (L6-L7)');
+  XLSX.utils.book_append_sheet(wb,wsInfo,'Instructions');
+  XLSX.writeFile(wb,'hyperlane_org.xlsx');
+  showToast(`↓ Exported ${ORG.length} managers + ${IC_DATA.length} ICs to hyperlane_org.xlsx`);
+});
+
+const fileInput=document.getElementById('org-file-input');
+document.getElementById('btn-import').addEventListener('click',()=>fileInput.click());
+fileInput.addEventListener('change',()=>{
+  const file=fileInput.files[0];if(!file)return;
+  fileInput.value=''; // reset so same file can re-trigger
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const XLSX=window.XLSX;
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+      if(!rows.length)throw new Error('No data rows found in the first sheet');
+      const cols=Object.keys(rows[0]);
+      for(const c of ['id','name','title','dept','managerId']){
+        if(!cols.includes(c))throw new Error(`Missing required column: "${c}"`);
+      }
+      const newOrg=rows.map(r=>({
+        id:Number(r.id),
+        name:String(r.name).trim(),
+        title:String(r.title).trim(),
+        dept:String(r.dept).trim(),
+        managerId:(r.managerId===''||r.managerId==null)?null:Number(r.managerId),
+        hc:Number(r.hc)||0,
+        bu:String(r.bu||'').trim()||undefined,
+        func:String(r.func||'').trim()||undefined,
+        loc:String(r.loc||'').trim()||undefined,
+      }));
+      const roots=newOrg.filter(n=>n.managerId===null);
+      if(!roots.length)throw new Error('No root node found (one row must have blank managerId)');
+      if(roots.length>1)throw new Error(`Multiple root nodes found: ${roots.map(n=>n.name).join(', ')}`);
+      const ids=new Set(newOrg.map(n=>n.id));
+      for(const n of newOrg){if(n.managerId!==null&&!ids.has(n.managerId))throw new Error(`managerId ${n.managerId} for "${n.name}" not found`);}
+      sessionStorage.setItem('customOrg',JSON.stringify(newOrg));
+      showToast(`↑ Imported ${newOrg.length} people — reloading…`);
+      setTimeout(()=>location.reload(),900);
+    }catch(err){
+      showToast(`Import error: ${err.message}`,'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+// ─── ORBIT SPEED CONTROL ─────────────────────────────────────
+const ORBIT_SPEEDS=[{v:0,lbl:'OFF'},{v:0.15,lbl:'SLOW'},{v:0.4,lbl:'MED'},{v:1.0,lbl:'FAST'}];
+let orbitIdx=0;
+document.getElementById('btn-orbit').addEventListener('click',function(){
+  orbitIdx=(orbitIdx+1)%ORBIT_SPEEDS.length;
+  const s=ORBIT_SPEEDS[orbitIdx];
+  controls.autoRotate=s.v>0; controls.autoRotateSpeed=s.v;
+  this.textContent=`⟳ ORBIT: ${s.lbl}`;
+  this.classList.toggle('on',s.v>0);
+});
+
+// ─── STARFIELD ───────────────────────────────────────────────
+const starGroup=new THREE.Group();
+[{n:55000,sz:0.4,range:1600,col:0x5566aa,op:0.38},{n:14000,sz:0.8,range:900,col:0x8899cc,op:0.35},{n:3000,sz:1.5,range:500,col:0xbbccee,op:0.32}]
+.forEach(cfg=>{
+  const pos=new Float32Array(cfg.n*3);
+  for(let i=0;i<cfg.n;i++){const th=rng()*Math.PI*2,ph=Math.acos(2*rng()-1),r=cfg.range*(0.3+rng()*0.7);pos[i*3]=r*Math.sin(ph)*Math.cos(th);pos[i*3+1]=r*Math.sin(ph)*Math.sin(th);pos[i*3+2]=r*Math.cos(ph);}
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  starGroup.add(new THREE.Points(geo,new THREE.PointsMaterial({color:cfg.col,size:cfg.sz,sizeAttenuation:true,blending:THREE.AdditiveBlending,transparent:true,opacity:cfg.op,depthWrite:false})));
+});
+scene.add(starGroup);
+
+// ─── NEBULA ──────────────────────────────────────────────────
+function mkNeb(r,g,b,op){const cv=document.createElement('canvas');cv.width=cv.height=512;const ctx=cv.getContext('2d');const gr=ctx.createRadialGradient(256,256,0,256,256,256);gr.addColorStop(0,`rgba(${r},${g},${b},${op})`);gr.addColorStop(0.35,`rgba(${r},${g},${b},${op*0.5})`);gr.addColorStop(0.7,`rgba(${r},${g},${b},${op*0.15})`);gr.addColorStop(1,`rgba(${r},${g},${b},0)`);ctx.fillStyle=gr;ctx.fillRect(0,0,512,512);return new THREE.CanvasTexture(cv);}
+[{p:[130,-35,-210],s:195,r:255,g:100,b:30,o:0.38},{p:[-185,25,-260],s:235,r:190,g:30,b:110,o:0.32},{p:[55,80,-310],s:170,r:25,g:65,b:200,o:0.35},{p:[-95,-60,-185],s:150,r:110,g:0,b:175,o:0.28},{p:[205,15,-230],s:215,r:30,g:150,b:255,o:0.26},{p:[-50,105,-290],s:175,r:245,g:50,b:70,o:0.22},{p:[150,-80,-255],s:160,r:60,g:195,b:100,o:0.2},{p:[-210,42,-310],s:210,r:245,g:170,b:30,o:0.18}]
+.forEach(n=>{const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:mkNeb(n.r,n.g,n.b,n.o),transparent:true,depthWrite:false,blending:THREE.AdditiveBlending}));spr.position.set(...n.p);spr.scale.set(n.s,n.s,1);scene.add(spr);});
+
+// ─── TREE BUILD + HEADCOUNT ───────────────────────────────────
+function buildTree(orgArr){
+  const nMap={};
+  orgArr.forEach(n=>{nMap[n.id]={...n,children:[]};});
+  let root=null;
+  orgArr.forEach(n=>{if(!n.managerId)root=nMap[n.id];else nMap[n.managerId].children.push(nMap[n.id]);});
+  return{nMap,root};
+}
+function calcHC(id,nMap){const n=nMap[id];if(!n.children.length)return(n.hc||1)+1;return n.children.reduce((s,c)=>s+calcHC(c.id,nMap),0)+1;}
+
+const{nMap:nodeMap,root:treeRoot}=buildTree(ORG);
+const headcounts={};ORG.forEach(n=>{headcounts[n.id]=calcHC(n.id,nodeMap);});
+const maxHC=Math.max(...Object.values(headcounts));
+function nodeRadius(id){const t=Math.log(headcounts[id]||1)/Math.log(maxHC);return 0.55+t*4.25;}
+
+// ─── LAYOUT: BEFORE ──────────────────────────────────────────
+const RADII=[0,22,42,62,84],YLVLS=[22,13,4,-5,-15];
+function leafCount(node){return node.children.length?node.children.reduce((s,c)=>s+leafCount(c),0):1;}
+const pos3D={};
+function placeNode(node,angle,sector,level,outPos){
+  const r=RADII[Math.min(level,RADII.length-1)],y=YLVLS[Math.min(level,YLVLS.length-1)];
+  const jit=[0,1.5,2.2,2.8,3.4][Math.min(level,4)];
+  outPos[node.id]=new THREE.Vector3(
+    level===0?0:r*Math.cos(angle)+(rng()-.5)*jit,
+    y+(rng()-.5)*(level===0?0:1.8),
+    level===0?0:r*Math.sin(angle)+(rng()-.5)*jit
+  );
+  if(!node.children.length)return;
+  const total=node.children.reduce((s,c)=>s+leafCount(c),0);
+  let a=angle-sector/2;
+  node.children.forEach(child=>{const frac=leafCount(child)/total,cs=sector*frac;placeNode(child,a+cs/2,cs,level+1,outPos);a+=cs;});
+}
+placeNode(treeRoot,-Math.PI/2,Math.PI*2,0,pos3D);
+
+// ─── LAYOUT: AFTER (reorg) — disabled for custom orgs ────────
+const reorgEnabled=!isCustomOrg;
+if(isCustomOrg){document.getElementById('btn-reorg').style.display='none';}
+const ORG_AFTER=ORG.map(n=>({...n}));
+if(reorgEnabled){
+  const n13=ORG_AFTER.find(n=>n.id===13);if(n13){n13.managerId=1;n13.title='Chief Platform Officer';}
+  const n31=ORG_AFTER.find(n=>n.id===31);if(n31)n31.managerId=5;
+  ORG_AFTER.push(
+    {id:233,name:'Dr. Kai Chen',  title:'VP Artificial Intelligence',   dept:'Engineering',managerId:2,   hc:0},
+    {id:234,name:'Mira Santos',   title:'Director, ML Infrastructure',  dept:'Engineering',managerId:233, hc:45},
+    {id:235,name:'Zhen Yu',       title:'Director, AI Safety & Align.', dept:'Engineering',managerId:233, hc:40},
+  );
+}
+_seed=137; // same seed → only moved subtrees change position
+const{nMap:nodeMapAfter,root:treeRootAfter}=buildTree(ORG_AFTER);
+const pos3D_after={};
+placeNode(treeRootAfter,-Math.PI/2,Math.PI*2,0,pos3D_after);
+
+// Determine which nodes move significantly
+const reorgMovers=new Set();
+ORG.forEach(n=>{
+  if(pos3D[n.id]&&pos3D_after[n.id]&&pos3D[n.id].distanceTo(pos3D_after[n.id])>4) reorgMovers.add(n.id);
+});
+const reorgNewIds=reorgEnabled?new Set([233,234,235]):new Set();
+
+// ─── CHAIN HELPERS ────────────────────────────────────────────
+function getAncestors(id){const s=new Set();let n=nodeMap[id];while(n.managerId){s.add(n.managerId);n=nodeMap[n.managerId];}return s;}
+function getDescendants(id){const s=new Set(),q=[id];while(q.length){const c=q.shift();nodeMap[c]?.children.forEach(ch=>{s.add(ch.id);q.push(ch.id);});}return s;}
+function getLevel(id){const n=nodeMap[id];return n.managerId?1+getLevel(n.managerId):0;}
+
+// ─── NODE METADATA (bu, func, location) ──────────────────────
+const BUS=['Compute Design','Technology Research','Manufacturing & Ops','Revenue & Growth','Corporate Functions','Executive'];
+const LOCS=['San Jose, CA','Austin, TX','Bangalore, India','Hsinchu, Taiwan','Tokyo, Japan','Munich, Germany','Shanghai, China','Boston, MA','Hillsboro, OR','Portland, OR','London, UK','Seoul, Korea'];
+const BU_BY_L1={1:'Executive',2:'Compute Design',3:'Technology Research',4:'Manufacturing & Ops',5:'Corporate Functions',6:'Revenue & Growth',7:'Revenue & Growth',8:'Corporate Functions',9:'Corporate Functions'};
+const LOC_POOL={
+  'RTL Design':['Bangalore, India','Bangalore, India','San Jose, CA','Austin, TX'],
+  'Design Verification':['Bangalore, India','Bangalore, India','San Jose, CA','Austin, TX'],
+  'Physical Design':['San Jose, CA','Hsinchu, Taiwan','Bangalore, India'],
+  'Firmware':['San Jose, CA','Austin, TX'],
+  'Software & SDK':['San Jose, CA','Austin, TX'],
+  'EDA & CAD':['San Jose, CA','Austin, TX'],
+  'Process Technology':['Hillsboro, OR','Hsinchu, Taiwan'],
+  'Advanced Packaging':['Hsinchu, Taiwan','San Jose, CA'],
+  'Architecture Research':['San Jose, CA','Austin, TX','Boston, MA'],
+  'Manufacturing':['Hsinchu, Taiwan','Portland, OR'],
+  'Supply Chain':['San Jose, CA','Hsinchu, Taiwan','Shanghai, China'],
+  'Quality & Reliability':['San Jose, CA','Hsinchu, Taiwan'],
+  'Finance & Accounting':['San Jose, CA'],
+  'Financial Planning':['San Jose, CA'],
+  'Legal & IP':['San Jose, CA'],
+  'Product Management':['San Jose, CA','Austin, TX'],
+  'Marketing & Comms':['San Jose, CA'],
+  'Sales':['San Jose, CA','Shanghai, China','Munich, Germany','Tokyo, Japan','Austin, TX','London, UK','Seoul, Korea'],
+  'Human Resources':['San Jose, CA','Bangalore, India'],
+  'Talent Acquisition':['San Jose, CA'],
+  'IT & Security':['San Jose, CA','Austin, TX'],
+  'Executive Leadership':['San Jose, CA'],
+  'General':['San Jose, CA'],
+};
+function deriveFuncFromTitle(t){
+  const s=t.toLowerCase();
+  if(/rtl|register transfer/.test(s))return 'RTL Design';
+  if(/verif|formal method/.test(s))return 'Design Verification';
+  if(/physical|floorplan|pnr|timing|signoff|custom layout/.test(s))return 'Physical Design';
+  if(/firmware|fw|boot|secure boot/.test(s))return 'Firmware';
+  if(/driver|sdk|debug sw|tools &/.test(s))return 'Software & SDK';
+  if(/eda|cad|pdk|librar|design auto/.test(s))return 'EDA & CAD';
+  if(/process|cmos|transistor|metrology|emerging dev/.test(s))return 'Process Technology';
+  if(/package|chiplet|ucie|interposer/.test(s))return 'Advanced Packaging';
+  if(/architect|isa|memory arch|microarch/.test(s))return 'Architecture Research';
+  if(/fab|assembly|wafer|test|burn-in/.test(s))return 'Manufacturing';
+  if(/supply|procure|logistic|trade|demand plan|warehouse/.test(s))return 'Supply Chain';
+  if(/quality|reliability|jedec|failure analysis/.test(s))return 'Quality & Reliability';
+  if(/financial report|tax|treasury|ledger|consol|sec /.test(s))return 'Finance & Accounting';
+  if(/fp&a|budget|analytic|bi |strategy/.test(s))return 'Financial Planning';
+  if(/legal|patent|\bip\b|litigation/.test(s))return 'Legal & IP';
+  if(/product m|compute prod|networking prod|automotive prod|smartnic|ethernet/.test(s))return 'Product Management';
+  if(/marketing|content|events|digital/.test(s))return 'Marketing & Comms';
+  if(/sales|account|revenue|reseller|hyperscale|emea|apac|china|korea|japan|americas|enterprise account/.test(s))return 'Sales';
+  if(/\bhr\b|people|total reward|benefit|l&d|engagement|employee exp/.test(s))return 'Human Resources';
+  if(/recruit|talent acq|hiring|university|intern/.test(s))return 'Talent Acquisition';
+  if(/\bit\b|cyber|soc |identity|end-user|data center|enterprise app/.test(s))return 'IT & Security';
+  if(/chief|svp|executive/.test(s))return 'Executive Leadership';
+  return 'General';
+}
+function deriveL1(id){let n=nodeMap[id];while(n.managerId&&nodeMap[n.managerId]?.managerId)n=nodeMap[n.managerId];return n.managerId||n.id;}
+
+let _ms=42;const mrng=()=>{_ms=(_ms*9301+49297)%233280;return _ms/233280;};
+ORG.forEach(n=>{
+  const l1=deriveL1(n.id);
+  n.bu=BU_BY_L1[l1]||'Corporate Functions';
+  n.func=deriveFuncFromTitle(n.title);
+  const pool=LOC_POOL[n.func]||['San Jose, CA'];
+  n.loc=pool[Math.floor(mrng()*pool.length)];
+  n.orgLevel=`L${getLevel(n.id)+1}`;
+});
+const allFuncs=[...new Set(ORG.map(n=>n.func))].sort();
+const allLocs=[...new Set(ORG.map(n=>n.loc))].sort();
+
+// ─── IC GENERATION (named L6/L7 employees) ───────────────────
+const IC_FIRST=['Aiden','Britta','Carlos','Dina','Erik','Farah','Gael','Hana','Ivan','Jana','Kai','Linh','Marco','Nina','Omar','Petra','Quinn','Rosa','Sana','Tae','Uma','Vera','Wei','Xin','Yael','Zara','Abe','Bao','Cris','Dev','Ela','Femi','Guo','Hira','Ike','Jade','Kota','Lena','Mia','Noa','Ola','Pio','Rex','Sia','Tam','Uri','Val','Wren','Ximena','Yun','Zev','Adaeze','Boris','Camila','Diego','Elena','Finn','Grace','Hugo','Ines','Jae','Kirra','Lars','Maya','Niko','Obi','Pita','Raul','Sadie','Tobi','Ulu','Vivi','Wael','Xavi','Yemi','Zola','Akira','Bela','Cyrus','Dara','Emre','Fiona','Gita','Hemi','Isak','Juno','Kira','Leon','Mahi','Nils','Orla','Prem','Remi','Suki','Theo','Uma','Vita','Wren','Zain'];
+const IC_LAST=['Walsh','Jensen','Nakao','Restrepo','Shapiro','Park','Engel','Mensah','Popov','Hassan','Kohl','Qureshi','Gustafsson','Eze','Braun','Suzuki','Fonseca','Malik','Kimura','Kowalski','Holm','Al-Amin','Vermeer','Yildiz','Okafor','Sorensen','Tanaka','Romero','Lindberg','Adeyemi','Novotny','Salinas','Magnusson','Das','Ibrahim','Petersen','Fang','Hansen','Stavros','Adisa','Popescu','Oh','Weiland','Petrovic','Nguyen','Goldstein','Herrera','Andersen','Christensen','Al-Saeed','Bernhardt','Diallo','Leclerc','Kovalenko','Mansour','Berg','Johansson','Opoku','Vasilieva','Oduya','Wagner','Hollander','Ehret','Li','Andreasen','Khalil','Watanabe','Moreau','Rajan','Brandt','McCarthy','Sokolova','Medina','Mori','Fontaine','Ivanov','Santos','Dubois','Chen','Kim','Nakamura','Patel','Smith','Jones','Garcia','Lee','Rodriguez','Wilson','Anderson','Taylor','Thomas','Moore','Jackson','White','Harris'];
+const IC_TITLES={
+  'RTL Design':['RTL Design Engineer','Sr RTL Design Engineer','Staff RTL Engineer'],
+  'Design Verification':['Verification Engineer','Sr Verification Engineer','Staff Verif Engineer'],
+  'Physical Design':['Physical Design Engineer','Sr Physical Design Engr','Layout Engineer'],
+  'Firmware':['Firmware Engineer','Sr Firmware Engineer','Staff Firmware Engineer'],
+  'Software & SDK':['Software Engineer','Sr Software Engineer','Staff Software Engineer'],
+  'EDA & CAD':['CAD Engineer','Sr CAD Engineer','Staff EDA Engineer'],
+  'Process Technology':['Process Engineer','Sr Process Engineer','Staff Process Engineer'],
+  'Advanced Packaging':['Package Engineer','Sr Package Engineer','Staff Packaging Engineer'],
+  'Architecture Research':['Research Engineer','Sr Research Engineer','Principal Architect'],
+  'Manufacturing':['Manufacturing Engineer','Sr Mfg Engineer','Process Integration Engr'],
+  'Supply Chain':['Supply Chain Analyst','Sr Supply Chain Analyst','Supply Chain Specialist'],
+  'Quality & Reliability':['Quality Engineer','Sr Quality Engineer','Reliability Engineer'],
+  'Finance & Accounting':['Financial Analyst','Sr Financial Analyst','Staff Accountant'],
+  'Financial Planning':['FP&A Analyst','Sr FP&A Analyst','Business Analyst'],
+  'Legal & IP':['Patent Analyst','IP Specialist','Legal Analyst'],
+  'Product Management':['Product Manager','Sr Product Manager','Technical Product Mgr'],
+  'Marketing & Comms':['Marketing Manager','Content Manager','Technical Writer'],
+  'Sales':['Account Manager','Sr Account Manager','Sales Engineer'],
+  'Human Resources':['HR Business Partner','Sr HR Business Partner','HR Specialist'],
+  'Talent Acquisition':['Recruiter','Sr Recruiter','Technical Recruiter'],
+  'IT & Security':['IT Engineer','Sr IT Engineer','Security Analyst'],
+  'Executive Leadership':['Chief of Staff','Strategy Analyst','Executive Coordinator'],
+  'General':['Analyst','Sr Analyst','Specialist'],
+};
+let _icId=10000,_ics=43;
+const irng=()=>{_ics=(_ics*9301+49297)%233280;return _ics/233280;};
+const IC_DATA=[],IC_BY_MANAGER={};
+ORG.forEach(n=>{
+  if(!n.hc)return;
+  IC_BY_MANAGER[n.id]=[];
+  const titles=IC_TITLES[n.func]||IC_TITLES['General'];
+  const locPool=LOC_POOL[n.func]||['San Jose, CA'];
+  for(let i=0;i<n.hc;i++){
+    const name=`${IC_FIRST[Math.floor(irng()*IC_FIRST.length)]} ${IC_LAST[Math.floor(irng()*IC_LAST.length)]}`;
+    const ti=i<Math.ceil(n.hc*.08)?2:i<Math.ceil(n.hc*.25)?1:0;
+    const loc=locPool[Math.floor(irng()*locPool.length)];
+    const ic={id:_icId++,name,title:titles[ti]||titles[0],dept:n.dept,managerId:n.id,bu:n.bu,func:n.func,loc,orgLevel:i<Math.ceil(n.hc*.15)?'L6':'L7',hc:0,isIC:true};
+    IC_DATA.push(ic);IC_BY_MANAGER[n.id].push(ic);
+  }
+});
+(function assignICDates(){
+  // Separate seed so IC dates are independent of ORG date PRNG
+  let s=0xDEADBEEF;
+  function rnd(){s^=s<<13;s^=s>>>17;s^=s<<5;s=(s>>>0);return s/4294967296;}
+  function dAdd(str,days){const d=new Date(str+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
+  const orgById=Object.fromEntries(ORG.map(e=>[e.id,e]));
+  const endCap=new Date('2025-12-01T00:00:00Z');
+  IC_DATA.forEach(ic=>{
+    const mgrStart=orgById[ic.managerId]?.startDate||'2021-01-01';
+    // IC joins 0–18 months after their manager (teams build out over time)
+    ic.startDate=dAdd(mgrStart,Math.floor(rnd()*540));
+    ic.endDate=null;
+    // ~8% attrition; must have at least 12 months tenure
+    if(rnd()<0.08){
+      const minEnd=dAdd(ic.startDate,365);
+      const gap=endCap-new Date(minEnd+'T00:00:00Z');
+      if(gap>0) ic.endDate=dAdd(minEnd,Math.floor(rnd()*gap/86400000));
+    }
+  });
+})();
+
+const allIcLocs=[...new Set(IC_DATA.map(n=>n.loc))];
+const ALL_LOCS=[...new Set([...allLocs,...allIcLocs])].sort();
+
+// ─── NODES (size by headcount) ────────────────────────────────
+const nodeDatas=[],nodeMeshes=[];
+ORG.forEach(item=>{
+  const level=getLevel(item.id),r=nodeRadius(item.id),col=DEPT[item.dept]?.hex??0xffffff,pos=pos3D[item.id];
+  const mesh=new THREE.Mesh(new THREE.SphereGeometry(r,28,18),
+    new THREE.MeshLambertMaterial({color:col,emissive:new THREE.Color(col),emissiveIntensity:0.5}));
+  mesh.position.copy(pos);mesh.userData.nodeId=item.id;scene.add(mesh);nodeMeshes.push(mesh);
+  if(level<=1){const pl=new THREE.PointLight(col,level===0?4.5:1.8,level===0?100:40);pl.position.copy(pos);scene.add(pl);}
+  nodeDatas.push({id:item.id,mesh,pos,data:item,level,labelSpr:null,baseRadius:r,filterPass:true});
+});
+
+// ─── LABELS (separate scene, no bloom) ───────────────────────
+function makeLabelTex(name,title,hc,dept){
+  const cv=document.createElement('canvas');cv.width=340;cv.height=84;
+  const ctx=cv.getContext('2d');ctx.clearRect(0,0,340,84);
+  const col=DEPT[dept]?.css??'#fff';ctx.textAlign='center';
+  ctx.font='bold 18px "Courier New"';ctx.fillStyle='#f0f8ff';ctx.shadowColor=col;ctx.shadowBlur=8;ctx.fillText(name,170,28);
+  ctx.font='11px "Courier New"';ctx.fillStyle=col;ctx.shadowBlur=4;ctx.fillText(title,170,52);
+  if(hc>1){ctx.font='10px "Courier New"';ctx.fillStyle='rgba(255,200,50,.9)';ctx.shadowBlur=3;ctx.fillText(`▲ ${hc.toLocaleString()} org`,170,72);}
+  return new THREE.CanvasTexture(cv);
+}
+nodeDatas.forEach(nd=>{
+  const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:makeLabelTex(nd.data.name,nd.data.title,headcounts[nd.id],nd.data.dept),transparent:true,depthTest:false}));
+  const off=nd.baseRadius+1.5;
+  spr.position.copy(nd.pos).add(new THREE.Vector3(0,off,0));
+  const w=nd.level<=1?9:nd.level===2?8:7;
+  spr.scale.set(w,w*0.26,1);
+  labelScene.add(spr);nd.labelSpr=spr;
+});
+
+// ─── CONNECTIONS ──────────────────────────────────────────────
+const pulses=[],connData=[];
+ORG.forEach(item=>{
+  if(!item.managerId)return;
+  const pPos=pos3D[item.managerId],cPos=pos3D[item.id],col=DEPT[item.dept]?.hex??0xffffff;
+  const mid=new THREE.Vector3((pPos.x+cPos.x)/2+(item.id*3.7%5)-2.5,(pPos.y+cPos.y)/2+4+(item.id*1.9%4),(pPos.z+cPos.z)/2);
+  const curve=new THREE.CatmullRomCurve3([pPos.clone(),mid,cPos.clone()]);
+  const tube=new THREE.Mesh(new THREE.TubeGeometry(curve,22,0.05,5,false),
+    new THREE.MeshLambertMaterial({color:col,emissive:new THREE.Color(col),emissiveIntensity:1.0,transparent:true,opacity:0.18}));
+  scene.add(tube);
+  connData.push({parentId:item.managerId,childId:item.id,tube,curve,col});
+  // Forward pulses (parent → child)
+  for(let p=0;p<3;p++){
+    const pm=new THREE.Mesh(new THREE.SphereGeometry(0.16,8,6),new THREE.MeshLambertMaterial({color:0xffffff,emissive:new THREE.Color(col),emissiveIntensity:2.2}));
+    scene.add(pm);pulses.push({mesh:pm,curve,offset:p/3,dir:1,connIdx:connData.length-1});
+  }
+  // Reverse pulses (child → parent) — slightly smaller, staggered offset
+  for(let p=0;p<2;p++){
+    const pm=new THREE.Mesh(new THREE.SphereGeometry(0.11,8,6),new THREE.MeshLambertMaterial({color:0xffffff,emissive:new THREE.Color(col),emissiveIntensity:1.6}));
+    scene.add(pm);pulses.push({mesh:pm,curve,offset:p/2+0.17,dir:-1,connIdx:connData.length-1});
+  }
+});
+
+// ─── REORG NODES (new positions, initially hidden) ────────────
+const reorgNewNodes=[];
+reorgNewIds.forEach(id=>{
+  const item=ORG_AFTER.find(n=>n.id===id);
+  const col=DEPT[item.dept]?.hex??0xffffff;
+  const r=0.55+Math.log(85)/Math.log(maxHC)*4.25; // ~dir-sized
+  const mesh=new THREE.Mesh(new THREE.SphereGeometry(r,18,12),
+    new THREE.MeshLambertMaterial({color:col,emissive:new THREE.Color(col),emissiveIntensity:0.6}));
+  const pos=pos3D_after[id];mesh.position.copy(pos);mesh.scale.setScalar(0);mesh.visible=false;scene.add(mesh);
+  // label
+  const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:makeLabelTex(item.name,item.title,85,item.dept),transparent:true,depthTest:false}));
+  spr.position.copy(pos).add(new THREE.Vector3(0,r+1.5,0));spr.scale.set(8,8*0.26,1);spr.material.opacity=0;labelScene.add(spr);
+  reorgNewNodes.push({id,mesh,spr,pos,data:item});
+});
+
+// Reorg dynamic connection lines (drawn during transition)
+const reorgLinePool=[];
+[...ORG,...ORG_AFTER.filter(n=>reorgNewIds.has(n.id))].forEach(item=>{
+  if(!item.managerId)return;
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6),3));
+  const col=DEPT[item.dept]?.hex??0xffffff;
+  const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:col,transparent:true,opacity:0.45,blending:THREE.AdditiveBlending}));
+  line.visible=false;scene.add(line);
+  reorgLinePool.push({line,geo,parentId:item.managerId,childId:item.id,isNew:reorgNewIds.has(item.id)});
+});
+
+// Reorg comet trails
+const TRAIL_N=9;
+const trailMap=new Map();
+reorgMovers.forEach(id=>{
+  const nd=nodeDatas.find(n=>n.id===id);if(!nd)return;
+  const col=DEPT[nd.data.dept]?.hex??0xffffff;
+  const ghosts=[];
+  for(let i=0;i<TRAIL_N;i++){
+    const frac=1-(i+1)/TRAIL_N;
+    const g=new THREE.Mesh(new THREE.SphereGeometry(nd.baseRadius*(0.25+frac*0.55),7,5),
+      new THREE.MeshLambertMaterial({color:col,emissive:new THREE.Color(col),emissiveIntensity:0.7*frac,transparent:true,opacity:0}));
+    g.visible=false;scene.add(g);ghosts.push(g);
+  }
+  trailMap.set(id,ghosts);
+});
+
+// ─── POPULATION VIEW (InstancedMesh per dept) ─────────────────
+const icMeshes={};
+let populationBuilt=false,populationVisible=false,popFadeT=0;
+function buildPopulation(){
+  if(populationBuilt)return;
+  populationBuilt=true;
+  const deptIdx={};Object.keys(DEPT).forEach(d=>{deptIdx[d]=0;});
+  const deptCounts={};Object.keys(DEPT).forEach(d=>{deptCounts[d]=0;});
+  nodeDatas.forEach(nd=>{if(!nodeMap[nd.id].children.length)deptCounts[nd.data.dept]=(deptCounts[nd.data.dept]||0)+(nd.data.hc||0);});
+  Object.keys(DEPT).forEach(dept=>{
+    const total=deptCounts[dept]||0;if(!total)return;
+    icMeshes[dept]=new THREE.InstancedMesh(new THREE.SphereGeometry(0.2,5,4),
+      new THREE.MeshLambertMaterial({color:DEPT[dept].hex,emissive:new THREE.Color(DEPT[dept].hex),emissiveIntensity:0.55,transparent:true,opacity:0}),total);
+    icMeshes[dept].visible=false;scene.add(icMeshes[dept]);
+  });
+  const dummy=new THREE.Object3D();
+  nodeDatas.forEach(nd=>{
+    if(nodeMap[nd.id].children.length)return;
+    const n=nd.data.hc||0;if(!n)return;
+    const clusterR=Math.sqrt(n)*0.65+nd.baseRadius+0.5;
+    for(let i=0;i<n;i++){
+      const theta=(Math.PI*(3-Math.sqrt(5)))*i,phi=Math.acos(1-2*(i+.5)/n);
+      dummy.position.set(nd.pos.x+clusterR*Math.sin(phi)*Math.cos(theta),nd.pos.y+clusterR*Math.sin(phi)*Math.sin(theta),nd.pos.z+clusterR*Math.cos(phi));
+      dummy.scale.setScalar(1);dummy.updateMatrix();
+      if(icMeshes[nd.data.dept])icMeshes[nd.data.dept].setMatrixAt(deptIdx[nd.data.dept]++,dummy.matrix);
+    }
+  });
+  Object.values(icMeshes).forEach(m=>{if(m)m.instanceMatrix.needsUpdate=true;});
+  // Build population legend
+  const leg=document.getElementById('pop-legend-items');
+  Object.entries(deptCounts).forEach(([dept,count])=>{
+    if(!count)return;
+    const row=document.createElement('div');row.className='pop-row';
+    row.innerHTML=`<div class="pop-dot" style="background:${DEPT[dept].css};box-shadow:0 0 5px ${DEPT[dept].css};"></div><span>${dept}</span><span class="pop-ct">${count.toLocaleString()}</span>`;
+    leg.appendChild(row);
+  });
+}
+
+// ─── SIDEBAR + FILTER STATE ───────────────────────────────────
+const filterState={
+  depts:new Set(Object.keys(DEPT)),
+  levels:new Set([0,1,2,3,4]),
+  bus:new Set(BUS),
+  funcs:new Set(allFuncs),
+  locs:new Set(ALL_LOCS),
+  showL6:true,showL7:true,
+  hcMin:1
+};
+
+// Sidebar dept dots
+const deptDotsEl=document.getElementById('dept-dots');
+Object.keys(DEPT).forEach(dept=>{
+  const d=document.createElement('div');d.className='dept-filter';
+  const dot=document.createElement('span');dot.className='dept-dot';dot.style.background=DEPT[dept].css;dot.style.color=DEPT[dept].css;
+  d.appendChild(dot);d.appendChild(document.createTextNode(dept));deptDotsEl.appendChild(d);
+});
+const totalPeople=ORG.length+IC_DATA.length;
+document.getElementById('sn').textContent=totalPeople.toLocaleString();
+document.getElementById('sd').textContent=Object.keys(DEPT).length;
+document.getElementById('sm').textContent=ORG.filter(n=>nodeMap[n.id].children.length).length;
+document.getElementById('stats-bar').textContent=`${totalPeople.toLocaleString()} employees · ${ORG.length} managers · L1–L7`;
+
+// Filter panel open/close
+document.getElementById('btn-filter').addEventListener('click',()=>{document.getElementById('filter-panel').classList.toggle('open');});
+document.getElementById('fp-close').addEventListener('click',()=>{document.getElementById('filter-panel').classList.remove('open');});
+
+// ── Dept chips
+const fpDeptEl=document.getElementById('fp-dept-chips');
+Object.keys(DEPT).forEach(dept=>{
+  const chip=document.createElement('div');chip.className='fp-chip active';chip.dataset.dept=dept;
+  chip.innerHTML=`<div style="width:7px;height:7px;border-radius:50%;background:${DEPT[dept].css};box-shadow:0 0 4px ${DEPT[dept].css};flex-shrink:0;"></div>${dept}`;
+  chip.addEventListener('click',()=>{
+    if(filterState.depts.has(dept))filterState.depts.delete(dept);else filterState.depts.add(dept);
+    chip.classList.toggle('active',filterState.depts.has(dept));
+    document.querySelectorAll('.fp-preset').forEach(b=>b.classList.remove('active'));
+    runFilter();
+  });
+  fpDeptEl.appendChild(chip);
+});
+
+// ── Level checkboxes L1–L7
+const fpLvlEl=document.getElementById('fp-levels');
+[
+  {codeV:0,l:'L1 — CEO'},{codeV:1,l:'L2 — C-Suite / SVP'},{codeV:2,l:'L3 — VP'},
+  {codeV:3,l:'L4 — Director'},{codeV:4,l:'L5 — Sr Manager'},
+  {codeV:'L6',l:'L6 — IC Lead (show in profiles)'},{codeV:'L7',l:'L7 — Individual Contributor'},
+].forEach(lv=>{
+  const wrap=document.createElement('label');wrap.className='level-check';
+  const cb=document.createElement('input');cb.type='checkbox';cb.checked=true;
+  cb.addEventListener('change',()=>{
+    if(typeof lv.codeV==='number'){if(cb.checked)filterState.levels.add(lv.codeV);else filterState.levels.delete(lv.codeV);}
+    else if(lv.codeV==='L6')filterState.showL6=cb.checked;
+    else filterState.showL7=cb.checked;
+    runFilter();
+  });
+  wrap.appendChild(cb);wrap.appendChild(document.createTextNode(lv.l));fpLvlEl.appendChild(wrap);
+});
+
+// ── Business Unit chips
+const fpBuEl=document.getElementById('fp-bu-chips');
+BUS.forEach(bu=>{
+  const chip=document.createElement('div');chip.className='fp-chip active';chip.dataset.bu=bu;
+  chip.textContent=bu;
+  chip.addEventListener('click',()=>{
+    if(filterState.bus.has(bu))filterState.bus.delete(bu);else filterState.bus.add(bu);
+    chip.classList.toggle('active',filterState.bus.has(bu));runFilter();
+  });
+  fpBuEl.appendChild(chip);
+});
+
+// ── Function chips
+const fpFuncEl=document.getElementById('fp-func-chips');
+allFuncs.forEach(func=>{
+  const chip=document.createElement('div');chip.className='fp-chip active';chip.dataset.func=func;chip.style.fontSize='8px';
+  chip.textContent=func;
+  chip.addEventListener('click',()=>{
+    if(filterState.funcs.has(func))filterState.funcs.delete(func);else filterState.funcs.add(func);
+    chip.classList.toggle('active',filterState.funcs.has(func));runFilter();
+  });
+  fpFuncEl.appendChild(chip);
+});
+
+// ── Location checkboxes
+const fpLocEl=document.getElementById('fp-loc-list');
+ALL_LOCS.forEach(loc=>{
+  const wrap=document.createElement('label');wrap.className='level-check';
+  const cb=document.createElement('input');cb.type='checkbox';cb.checked=true;
+  cb.addEventListener('change',()=>{if(cb.checked)filterState.locs.add(loc);else filterState.locs.delete(loc);runFilter();});
+  wrap.appendChild(cb);wrap.appendChild(document.createTextNode(loc));fpLocEl.appendChild(wrap);
+});
+
+// ── HC slider
+const fpHc=document.getElementById('fp-hc'),fpHcVal=document.getElementById('fp-hc-val');
+fpHc.addEventListener('input',()=>{filterState.hcMin=parseInt(fpHc.value);fpHcVal.textContent=fpHc.value;runFilter();});
+
+// ── Preset buttons
+document.querySelectorAll('.fp-preset').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.fp-preset').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const g=DEPT_GROUPS[btn.dataset.preset]||Object.keys(DEPT);
+    filterState.depts=new Set(g);
+    filterState.funcs=new Set(allFuncs);filterState.bus=new Set(BUS);filterState.locs=new Set(ALL_LOCS);
+    document.querySelectorAll('.fp-chip[data-dept]').forEach(c=>{c.classList.toggle('active',filterState.depts.has(c.dataset.dept));});
+    document.querySelectorAll('.fp-chip[data-bu]').forEach(c=>c.classList.add('active'));
+    document.querySelectorAll('.fp-chip[data-func]').forEach(c=>c.classList.add('active'));
+    document.querySelectorAll('#fp-loc-list input').forEach(c=>{c.checked=true;});
+    runFilter();
+  });
+});
+
+// ── Reset
+document.getElementById('fp-reset-btn').addEventListener('click',()=>{
+  filterState.depts=new Set(Object.keys(DEPT));filterState.levels=new Set([0,1,2,3,4]);
+  filterState.bus=new Set(BUS);filterState.funcs=new Set(allFuncs);filterState.locs=new Set(ALL_LOCS);
+  filterState.showL6=true;filterState.showL7=true;filterState.hcMin=1;
+  fpHc.value=1;fpHcVal.textContent='1';
+  document.querySelectorAll('.fp-chip').forEach(c=>c.classList.add('active'));
+  document.querySelectorAll('#fp-levels input').forEach(c=>{c.checked=true;});
+  document.querySelectorAll('#fp-loc-list input').forEach(c=>{c.checked=true;});
+  document.querySelectorAll('.fp-preset').forEach(b=>b.classList.toggle('active',b.dataset.preset==='all'));
+  runFilter();
+});
+
+function runFilter(){
+  let active=0,total=nodeDatas.length;
+  const tlDate=timelineActive?QUARTERS[timelineQIdx]:null;
+  nodeDatas.forEach(nd=>{
+    const timePass=!tlDate||isActiveAt(nd.data,tlDate);
+    const pass=timePass
+      &&filterState.depts.has(nd.data.dept)
+      &&filterState.levels.has(nd.level)
+      &&filterState.bus.has(nd.data.bu)
+      &&filterState.funcs.has(nd.data.func)
+      &&filterState.locs.has(nd.data.loc)
+      &&headcounts[nd.id]>=filterState.hcMin;
+    nd.filterPass=pass;if(pass)active++;
+  });
+  const filterOn=active<total;
+  document.getElementById('filter-badge').textContent=filterOn?`${total-active}`:'';
+  document.getElementById('filter-badge').classList.toggle('visible',filterOn);
+  document.getElementById('fp-count').textContent=filterOn?`Showing ${active} of ${total} nodes`:`All ${total} nodes visible`;
+  if(tlDate) updateTimelineStats(tlDate);
+}
+
+// ── Search (also matches IC names)
+document.getElementById('search-box').addEventListener('input',function(){
+  const q=this.value.toLowerCase().trim();
+  nodeDatas.forEach(nd=>{
+    const icMatch=q&&IC_BY_MANAGER[nd.id]?.some(ic=>ic.name.toLowerCase().includes(q));
+    nd.searchMatch=!q||nd.data.name.toLowerCase().includes(q)||nd.data.title.toLowerCase().includes(q)||nd.data.dept.toLowerCase().includes(q)||icMatch;
+  });
+});
+
+// ─── TIMELINE SYSTEM ──────────────────────────────────────────
+let timelineActive=false,timelineQIdx=QUARTERS.length-1,tlPlayInterval=null;
+
+function updateTimelineStats(dateStr){
+  // quarter window: dateStr → next quarter
+  const idx=QUARTERS.indexOf(dateStr);
+  const nextQ=QUARTERS[idx+1]||'9999-01-01';
+  // Count active managers + ICs
+  const activeMgrs=ORG.filter(e=>isActiveAt(e,dateStr)).length;
+  const activeICs=IC_DATA.filter(e=>isActiveAt(e,dateStr)).length;
+  const total=activeMgrs+activeICs;
+  // Hires and departures this quarter across all employees
+  const allEmps=[...ORG,...IC_DATA];
+  const joined=allEmps.filter(e=>e.startDate>=dateStr&&e.startDate<nextQ).length;
+  const departed=allEmps.filter(e=>e.endDate&&e.endDate>=dateStr&&e.endDate<nextQ).length;
+  document.getElementById('tl-date').textContent=qtrLabel(dateStr);
+  document.getElementById('tl-hc').textContent=total.toLocaleString();
+  document.getElementById('tl-joined').textContent=`+${joined}`;
+  document.getElementById('tl-departed').textContent=`\u2212${departed}`;
+  // Sync sidebar headcount + manager count
+  document.getElementById('sn').textContent=total.toLocaleString();
+  const mgrs=ORG.filter(e=>isActiveAt(e,dateStr)&&nodeMap[e.id]?.children.length).length;
+  document.getElementById('sm').textContent=mgrs;
+}
+
+function setTimelineQ(idx){
+  timelineQIdx=idx;
+  document.getElementById('tl-slider').value=idx;
+  runFilter();
+}
+
+function tlPlayToggle(){
+  if(tlPlayInterval){clearInterval(tlPlayInterval);tlPlayInterval=null;document.getElementById('tl-play').textContent='▶ PLAY';return;}
+  // restart from beginning if at end
+  if(timelineQIdx>=QUARTERS.length-1) setTimelineQ(0);
+  document.getElementById('tl-play').textContent='⏸ PAUSE';
+  tlPlayInterval=setInterval(()=>{
+    if(timelineQIdx>=QUARTERS.length-1){clearInterval(tlPlayInterval);tlPlayInterval=null;document.getElementById('tl-play').textContent='▶ PLAY';return;}
+    setTimelineQ(timelineQIdx+1);
+  },700);
+}
+
+// Init slider max
+document.getElementById('tl-slider').max=QUARTERS.length-1;
+document.getElementById('tl-slider').value=QUARTERS.length-1;
+
+document.getElementById('btn-timeline').addEventListener('click',()=>{
+  timelineActive=!timelineActive;
+  document.getElementById('timeline-bar').classList.toggle('open',timelineActive);
+  document.getElementById('btn-timeline').classList.toggle('on',timelineActive);
+  if(timelineActive){
+    setTimelineQ(timelineQIdx);
+  } else {
+    if(tlPlayInterval){clearInterval(tlPlayInterval);tlPlayInterval=null;document.getElementById('tl-play').textContent='▶ PLAY';}
+    // restore sidebar stats to full org
+    document.getElementById('sn').textContent=(ORG.length+IC_DATA.length).toLocaleString();
+    document.getElementById('sm').textContent=ORG.filter(n=>nodeMap[n.id].children.length).length;
+    runFilter();
+  }
+});
+document.getElementById('tl-close').addEventListener('click',()=>{
+  document.getElementById('btn-timeline').click();
+});
+document.getElementById('tl-play').addEventListener('click',tlPlayToggle);
+document.getElementById('tl-slider').addEventListener('input',function(){
+  setTimelineQ(parseInt(this.value));
+});
+
+// ─── REORG SYSTEM ─────────────────────────────────────────────
+let reorgOpen=false,reorgT=0,reorgPlaying=false;
+const easeIO=t=>t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+function getCurrentPos(id){
+  const b=pos3D[id],a=pos3D_after[id];
+  if(!b)return a;if(!a)return b;
+  const pos=new THREE.Vector3().lerpVectors(b,a,easeIO(reorgT));
+  // Arc large-distance movers up and over the org — prevents flying through other groups
+  if(reorgMovers.has(id)){
+    const lift=b.distanceTo(a)*0.45*Math.sin(reorgT*Math.PI);
+    pos.y+=lift;
+  }
+  return pos;
+}
+
+document.getElementById('btn-reorg').addEventListener('click',()=>{reorgOpen=!reorgOpen;document.getElementById('reorg-panel').classList.toggle('open',reorgOpen);document.getElementById('btn-reorg').classList.toggle('warn',reorgOpen);});
+document.getElementById('rp-close').addEventListener('click',()=>{reorgOpen=false;reorgPlaying=false;document.getElementById('reorg-panel').classList.remove('open');document.getElementById('btn-reorg').classList.remove('warn');resetReorg();});
+document.getElementById('rp-reset-btn').addEventListener('click',()=>{reorgT=0;reorgPlaying=false;document.getElementById('rp-slider').value=0;document.getElementById('rp-pct').textContent='0%';document.getElementById('rp-play').textContent='▶ PLAY';resetReorg();});
+document.getElementById('rp-slider').addEventListener('input',function(){reorgT=parseInt(this.value)/100;reorgPlaying=false;document.getElementById('rp-play').textContent='▶ PLAY';document.getElementById('rp-pct').textContent=`${this.value}%`;});
+document.getElementById('rp-play').addEventListener('click',function(){
+  if(reorgT>=1){reorgT=0;document.getElementById('rp-slider').value=0;}
+  reorgPlaying=!reorgPlaying;this.textContent=reorgPlaying?'⏸ PAUSE':'▶ PLAY';
+});
+
+function resetReorg(){
+  // restore node positions
+  nodeDatas.forEach(nd=>{nd.mesh.position.copy(nd.pos);if(nd.labelSpr)nd.labelSpr.position.copy(nd.pos).add(new THREE.Vector3(0,nd.baseRadius+1.5,0));});
+  reorgNewNodes.forEach(rn=>{rn.mesh.scale.setScalar(0);rn.mesh.visible=false;rn.spr.material.opacity=0;});
+  reorgLinePool.forEach(rl=>{rl.line.visible=false;});
+  trailMap.forEach(ghosts=>{ghosts.forEach(g=>{g.visible=false;g.material.opacity=0;});});
+  connData.forEach(c=>{c.tube.visible=true;c.tube.material.opacity=0.18;});
+  pulses.forEach(p=>{p.mesh.visible=true;});
+}
+
+function tickReorg(dt){
+  if(!reorgOpen)return;
+  if(reorgPlaying){
+    reorgT=Math.min(1,reorgT+dt/4.0); // 4-second transition
+    const pct=Math.round(reorgT*100);
+    document.getElementById('rp-slider').value=pct;
+    document.getElementById('rp-pct').textContent=`${pct}%`;
+    if(reorgT>=1){reorgPlaying=false;document.getElementById('rp-play').textContent='▶ PLAY';}
+  }
+  const t=easeIO(reorgT);
+  const inTransit=reorgT>0&&reorgT<1;
+
+  // Dim original tubes, show dynamic lines
+  connData.forEach(c=>{c.tube.visible=!inTransit;c.tube.material.opacity=inTransit?0:0.18;});
+  pulses.forEach(p=>{p.mesh.visible=!inTransit;});
+
+  if(inTransit||reorgT>0){
+    reorgLinePool.forEach(rl=>{
+      const pPos=getCurrentPos(rl.parentId),cPos=getCurrentPos(rl.childId);
+      if(!pPos||!cPos){rl.line.visible=false;return;}
+      rl.line.visible=true;
+      const pos=rl.geo.attributes.position;
+      pos.setXYZ(0,pPos.x,pPos.y,pPos.z);pos.setXYZ(1,cPos.x,cPos.y,cPos.z);pos.needsUpdate=true;
+      rl.line.material.opacity=rl.isNew?Math.max(0,(reorgT-.4)*1.5)*0.5:0.4;
+    });
+  } else {
+    reorgLinePool.forEach(rl=>{rl.line.visible=false;});
+  }
+
+  // Move nodes + labels
+  nodeDatas.forEach(nd=>{
+    const pos=getCurrentPos(nd.id);
+    nd.mesh.position.copy(pos);
+    if(nd.labelSpr)nd.labelSpr.position.copy(pos).add(new THREE.Vector3(0,nd.baseRadius+1.5,0));
+  });
+
+  // New nodes appear after 40%
+  reorgNewNodes.forEach(rn=>{
+    const appear=Math.max(0,(reorgT-0.4)/0.3);
+    rn.mesh.visible=appear>0;rn.mesh.scale.setScalar(appear);
+    rn.spr.material.opacity=appear;
+  });
+
+  // Comet trails for moving nodes
+  reorgMovers.forEach(id=>{
+    const nd=nodeDatas.find(n=>n.id===id);if(!nd)return;
+    const b=pos3D[id],a=pos3D_after[id];if(!b||!a)return;
+    const ghosts=trailMap.get(id);if(!ghosts)return;
+    const trailFade=Math.min(reorgT*6,1)*Math.min((1-reorgT)*5,1);
+    ghosts.forEach((g,i)=>{
+      const t_past=Math.max(0,reorgT-(i+1)*0.07);
+      g.position.lerpVectors(b,a,easeIO(t_past));
+      // Trail follows same arc as the live node
+      g.position.y+=b.distanceTo(a)*0.45*Math.sin(t_past*Math.PI);
+      const op=(1-i/TRAIL_N)*0.55*trailFade;
+      g.visible=op>0.01;g.material.opacity=op;
+    });
+  });
+}
+
+// ─── POPULATION TOGGLE ────────────────────────────────────────
+document.getElementById('btn-pop').addEventListener('click',function(){
+  if(!populationBuilt)buildPopulation();
+  populationVisible=!populationVisible;popFadeT=populationVisible?0:1;
+  this.classList.toggle('on',populationVisible);
+  if(populationVisible)Object.values(icMeshes).forEach(m=>{if(m)m.visible=true;});
+  document.getElementById('pop-legend').classList.toggle('visible',populationVisible);
+});
+
+// ─── CHAIN MODE ───────────────────────────────────────────────
+let chainMode=false,chainCenter=null,chainAncs=new Set(),chainDescs=new Set();
+function activateChain(id){chainMode=true;chainCenter=id;chainAncs=getAncestors(id);chainDescs=getDescendants(id);
+  const nd=nodeDatas.find(n=>n.id===id);document.getElementById('chain-hud').classList.add('visible');
+  document.getElementById('chain-label').textContent=`CHAIN: ${nd.data.name.toUpperCase()} (▲${headcounts[id].toLocaleString()})`;
+}
+function clearChain(){chainMode=false;chainCenter=null;chainAncs=new Set();chainDescs=new Set();document.getElementById('chain-hud').classList.remove('visible');}
+document.getElementById('chain-clear').addEventListener('click',clearChain);
+
+// ─── PROFILE CARD ─────────────────────────────────────────────
+let activeNodeId=null;
+document.getElementById('profile-close').addEventListener('click',()=>{hideCard();clearChain();});
+function showCard(id){
+  activeNodeId=id;const nd=nodeDatas.find(n=>n.id===id);if(!nd)return;
+  const col=DEPT[nd.data.dept]?.css??'#fff',emoji=DEPT[nd.data.dept]?.emoji??'◉';
+  const mgr=nd.data.managerId?nodeMap[nd.data.managerId]:null;
+  const rpts=ORG.filter(o=>o.managerId===id);
+  const ics=IC_BY_MANAGER[id]||[];
+  const searchQ=document.getElementById('search-box').value.toLowerCase().trim();
+  const tlDate=timelineActive?QUARTERS[timelineQIdx]:null;
+  const shownIcs=ics.filter(ic=>{
+    if(tlDate&&!isActiveAt(ic,tlDate))return false;
+    if(searchQ&&!ic.name.toLowerCase().includes(searchQ)&&!ic.title.toLowerCase().includes(searchQ))return false;
+    if(!filterState.showL6&&ic.orgLevel==='L6')return false;
+    if(!filterState.showL7&&ic.orgLevel==='L7')return false;
+    if(!filterState.locs.has(ic.loc))return false;
+    return true;
+  });
+  const icHtml=ics.length?`
+    <div class="p-sec">
+      <div class="p-sec-label">INDIVIDUAL CONTRIBUTORS (${shownIcs.length}${shownIcs.length<ics.length?` of ${ics.length}`:''}) — ${nd.data.func}</div>
+      <div class="ic-list">${shownIcs.map(ic=>`<div class="ic-row">
+        <span class="ic-nm">${ic.name}</span>
+        <span class="ic-ttl">${ic.title}</span>
+        <span class="ic-lv">${ic.orgLevel}</span>
+        <span class="ic-loc-sm">${ic.loc}</span>
+      </div>`).join('')}${shownIcs.length===0?`<div style="padding:8px;font-size:9px;color:rgba(160,196,255,.35);text-align:center;">No ICs match current filters</div>`:''}</div>
+    </div>`:'';
+  document.getElementById('profile-content').innerHTML=`
+    <div class="p-avatar" style="color:${col};border-color:${col};background:rgba(0,0,0,.45);box-shadow:0 0 18px ${col}44;">${emoji}</div>
+    <div class="p-name">${nd.data.name}</div>
+    <div class="p-title">${nd.data.title}</div>
+    <div class="p-hc">▲ ${headcounts[id].toLocaleString()} people in org</div>
+    <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;margin-bottom:12px;">
+      <div class="p-badge" style="color:${col};border-color:${col};background:${col}18;">${nd.data.dept.toUpperCase()}</div>
+      <div class="p-badge" style="color:#a0c4ff;border-color:rgba(160,196,255,.3);background:rgba(160,196,255,.06);">${nd.data.orgLevel}</div>
+    </div>
+    <div class="p-sec"><div class="p-sec-label">DETAILS</div>
+      <div class="p-val" style="font-size:10px;line-height:1.8;">
+        <span style="color:rgba(160,196,255,.5);">BU:</span> ${nd.data.bu}<br>
+        <span style="color:rgba(160,196,255,.5);">Function:</span> ${nd.data.func}<br>
+        <span style="color:rgba(160,196,255,.5);">Location:</span> ${nd.data.loc}
+      </div>
+    </div>
+    <button class="p-chain-btn${chainMode&&chainCenter===id?' active':''}" id="chain-toggle">${chainMode&&chainCenter===id?'✕ EXIT CHAIN VIEW':'⬡ HIGHLIGHT CHAIN'}</button>
+    ${mgr?`<div class="p-sec"><div class="p-sec-label">REPORTS TO</div><div class="p-link" data-tid="${mgr.id}">${DEPT[mgr.dept]?.emoji??'◉'} ${mgr.name} <span style="opacity:.5;font-size:9px;">${mgr.title}</span></div></div>`:`<div class="p-sec"><div class="p-sec-label">COMPANY ROOT</div><div class="p-val">Head of organization</div></div>`}
+    ${rpts.length?`<div class="p-sec"><div class="p-sec-label">DIRECT REPORTS (${rpts.length})</div>${rpts.map(r=>`<div class="p-link" data-tid="${r.id}">${DEPT[r.dept]?.emoji??'◉'} ${r.name} <span style="opacity:.5;font-size:9px;">${r.title}</span></div>`).join('')}</div>`:''}
+    ${icHtml}
+    <div class="p-sec"><div class="p-sec-label">CHAIN STATS</div><div class="p-val" style="font-size:10px;">Levels above: ${getAncestors(id).size}<br>Mgrs below: ${getDescendants(id).size}<br>Total org: ${(headcounts[id]-1+ics.length).toLocaleString()}</div></div>`;
+  document.querySelectorAll('.p-link[data-tid]').forEach(el=>el.addEventListener('click',()=>{const tid=parseInt(el.dataset.tid);showCard(tid);if(mode==='overview')flyTo(tid);}));
+  document.getElementById('chain-toggle').addEventListener('click',()=>{if(chainMode&&chainCenter===id)clearChain();else activateChain(id);showCard(id);});
+  document.getElementById('profile-card').classList.add('visible');
+}
+function hideCard(){document.getElementById('profile-card').classList.remove('visible');activeNodeId=null;}
+
+// ─── REORG CHANGES PANEL ─────────────────────────────────────
+// Build the hardcoded changes list
+const HARDCODED_CHANGES=reorgEnabled?[
+  {badge:'rpc-move',text:'Owen Stride — promoted from <b>VP Firmware & Software</b> to <b>Chief Platform Officer</b>, now reporting to CEO'},
+  {badge:'rpc-move',text:'Sam Obi (VP Legal) — reporting line moved from <b>VP IT & Security</b> → <b>CFO</b>'},
+  {badge:'rpc-new', text:'New org: <b>VP Artificial Intelligence</b> (Dr. Kai Chen) under SVP Engineering, with 2 new Director roles'},
+]:[];
+const userProposals=[]; // {sourceId,sourceName,sourceTitle,targetId,targetName,targetTitle}
+
+function renderChangesPanel(){
+  const el=document.getElementById('rp-changes');
+  const allItems=[...HARDCODED_CHANGES.map(c=>({...c,user:false})),...userProposals.map((p,i)=>({badge:'rpc-user',text:`Move <b>${p.sourceName}</b> (${p.sourceTitle}) → reports to <b>${p.targetName}</b>`,user:true,idx:i}))];
+  document.getElementById('rp-changes-toggle').textContent=`${document.getElementById('rp-changes').classList.contains('open')?'▾':'▸'} PROPOSED CHANGES (${allItems.length})`;
+  el.innerHTML=allItems.map((c,i)=>`<div class="rpc-row"><span class="rpc-badge ${c.badge}">${c.badge==='rpc-move'?'MOVE':c.badge==='rpc-new'?'NEW':'PROPOSAL'}</span><span class="rpc-text">${c.text}</span>${c.user?`<button class="rpc-del" data-pi="${c.idx}">✕</button>`:''}</div>`).join('');
+  el.querySelectorAll('.rpc-del').forEach(btn=>btn.addEventListener('click',e=>{userProposals.splice(parseInt(btn.dataset.pi),1);renderChangesPanel();document.getElementById('rp-export-proposals').classList.toggle('visible',userProposals.length>0);}));
+}
+document.getElementById('rp-changes-toggle').addEventListener('click',()=>{
+  document.getElementById('rp-changes').classList.toggle('open');renderChangesPanel();
+});
+renderChangesPanel();
+
+// ─── REORG SUGGEST MODE ───────────────────────────────────────
+let suggestMode=false,suggestSource=null,suggestHighlight=null;
+document.getElementById('rp-suggest-btn').addEventListener('click',function(){
+  suggestMode=!suggestMode;suggestSource=null;suggestHighlight=null;
+  this.classList.toggle('on',suggestMode);
+  document.getElementById('rp-suggest-status').textContent=suggestMode?'① Click a node to MOVE…':'';
+  renderer.domElement.style.cursor=suggestMode?'crosshair':'default';
+});
+
+function completeSuggestion(sourceNd,targetNd){
+  userProposals.push({sourceId:sourceNd.id,sourceName:sourceNd.data.name,sourceTitle:sourceNd.data.title,targetId:targetNd.id,targetName:targetNd.data.name,targetTitle:targetNd.data.title});
+  renderChangesPanel();
+  if(!document.getElementById('rp-changes').classList.contains('open')){document.getElementById('rp-changes').classList.add('open');renderChangesPanel();}
+  document.getElementById('rp-export-proposals').classList.add('visible');
+  showToast(`Proposal: ${sourceNd.data.name} → ${targetNd.data.name}`);
+  suggestSource=null;suggestHighlight=null;
+  document.getElementById('rp-suggest-status').textContent='✓ Added — ① Click next node to move…';
+}
+
+document.getElementById('rp-export-proposals').addEventListener('click',()=>{
+  const XLSX=window.XLSX;
+  const header=['Person','Current Title','Current Manager','→ Proposed Manager','Proposed Manager Title'];
+  const rows=userProposals.map(p=>{
+    const src=nodeMap[p.sourceId],tgt=nodeMap[p.targetId];
+    const curMgr=src?.managerId?nodeMap[src.managerId]?.name??'—':'—';
+    return[p.sourceName,p.sourceTitle,curMgr,p.targetName,p.targetTitle];
+  });
+  const ws=XLSX.utils.aoa_to_sheet([header,...rows]);
+  ws['!cols']=[{wch:22},{wch:38},{wch:22},{wch:22},{wch:38}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Reorg Proposals');
+  XLSX.writeFile(wb,'reorg_proposals.xlsx');
+  showToast(`↓ Exported ${userProposals.length} proposals`);
+});
+
+// ─── FLY-TO ───────────────────────────────────────────────────
+let flyT=1,flyP0=new THREE.Vector3(),flyP1=new THREE.Vector3(),flyC0=new THREE.Vector3(),flyC1=new THREE.Vector3();
+function flyTo(id){const nd=nodeDatas.find(n=>n.id===id);if(!nd)return;
+  flyP0.copy(camera.position);flyC0.copy(controls.target);
+  const d=nd.level===0?42:nd.level===1?26:18;
+  flyP1.copy(nd.pos).add(new THREE.Vector3(d*.4,d*.3,d));flyC1.copy(nd.pos);flyT=0;}
+function tickFlyTo(dt){if(flyT>=1)return;flyT=Math.min(1,flyT+dt*1.1);const t=1-Math.pow(1-flyT,3);
+  camera.position.lerpVectors(flyP0,flyP1,t);controls.target.lerpVectors(flyC0,flyC1,t);}
+
+// ─── RAYCASTING ───────────────────────────────────────────────
+const ray=new THREE.Raycaster(),mouse2=new THREE.Vector2();
+renderer.domElement.addEventListener('click',e=>{
+  if(mode!=='overview')return;
+  mouse2.set((e.clientX/window.innerWidth)*2-1,-(e.clientY/window.innerHeight)*2+1);
+  ray.setFromCamera(mouse2,camera);
+  const hits=ray.intersectObjects(nodeMeshes,false);
+  if(hits.length){
+    const id=hits[0].object.userData.nodeId;
+    if(suggestMode){
+      const nd=nodeDatas.find(n=>n.id===id);
+      if(!suggestSource){
+        suggestSource=nd;suggestHighlight=id;
+        document.getElementById('rp-suggest-status').textContent=`② Now click the NEW MANAGER for ${nd.data.name}…`;
+      } else if(id!==suggestSource.id){
+        completeSuggestion(suggestSource,nd);
+      }
+      return;
+    }
+    showCard(id);flyTo(id);
+  } else {
+    if(suggestMode){suggestSource=null;suggestHighlight=null;document.getElementById('rp-suggest-status').textContent='① Click a node to MOVE…';}
+    else{hideCard();clearChain();}
+  }
+});
+renderer.domElement.addEventListener('mousemove',e=>{
+  if(mode!=='overview')return;
+  mouse2.set((e.clientX/window.innerWidth)*2-1,-(e.clientY/window.innerHeight)*2+1);
+  ray.setFromCamera(mouse2,camera);
+  const hit=ray.intersectObjects(nodeMeshes,false).length>0;
+  if(!suggestMode)renderer.domElement.style.cursor=hit?'pointer':'default';
+});
+
+// ─── MODE SWITCHING ────────────────────────────────────────────
+let mode='overview';
+const keys={};
+let fpYaw=0,fpPitch=0,fpRoll=0,fpRollVel=0;
+let fpVelocity=new THREE.Vector3();
+let fpBoost=false;
+const FP_THRUST=42,FP_BOOST_MULT=4.5,FP_DAMPING=0.87,FP_ROT=1.55,INTERACT_R=11;
+let nearNode=null;
+
+// Mouse look
+let fpMouseLook=false;
+document.addEventListener('mousemove',e=>{
+  if(mode!=='fps'||!fpMouseLook)return;
+  fpYaw  -=e.movementX*0.0018;
+  fpPitch-=e.movementY*0.0018;
+  fpPitch=Math.max(-Math.PI/2+.05,Math.min(Math.PI/2-.05,fpPitch));
+});
+document.addEventListener('click',()=>{if(mode==='fps'&&!fpMouseLook){fpMouseLook=true;document.body.requestPointerLock();}});
+document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)fpMouseLook=false;});
+
+document.addEventListener('keydown',e=>{keys[e.code]=true;
+  if(e.code==='Escape'&&mode==='fps'){if(fpMouseLook){document.exitPointerLock();}else{exitFPS();}}
+  if(e.code==='KeyF'&&mode==='fps'&&nearNode)showCard(nearNode.id);
+});
+document.addEventListener('keyup',e=>{keys[e.code]=false;});
+document.getElementById('btn-mode').addEventListener('click',()=>mode==='overview'?enterFPS():exitFPS());
+function flashText(txt){const el=document.getElementById('mode-text'),ov=document.getElementById('mode-overlay');el.textContent=txt;el.style.opacity='1';ov.style.background='rgba(0,0,20,.5)';setTimeout(()=>{el.style.opacity='0';ov.style.background='rgba(0,0,20,0)';},1100);}
+function enterFPS(){
+  mode='fps';controls.enabled=false;
+  const ceo=pos3D[1];
+  camera.position.set(ceo.x+28,ceo.y+8,ceo.z+28);
+  fpYaw=Math.atan2(ceo.x-camera.position.x,ceo.z-camera.position.z);
+  fpPitch=0;fpRoll=0;fpRollVel=0;
+  fpVelocity.set(0,0,0);fpBoost=false;
+  camera.fov=60;camera.updateProjectionMatrix();
+  document.getElementById('sidebar').classList.add('hidden');
+  document.getElementById('hud').classList.add('visible');
+  document.getElementById('btn-mode').textContent='🌐 MAP VIEW';
+  document.getElementById('btn-mode').classList.add('on');
+  flashText('SPACE FLIGHT MODE');
+}
+function exitFPS(){
+  mode='overview';controls.enabled=true;controls.target.set(0,6,0);
+  camera.position.set(0,30,85);
+  camera.fov=60;camera.updateProjectionMatrix();
+  fpVelocity.set(0,0,0);fpBoost=false;fpRoll=0;fpRollVel=0;
+  if(fpMouseLook)document.exitPointerLock();
+  document.getElementById('sidebar').classList.remove('hidden');
+  document.getElementById('hud').classList.remove('visible');
+  document.getElementById('fp-vignette').classList.remove('on');
+  document.getElementById('fp-warp').classList.remove('on');
+  document.getElementById('btn-mode').textContent='⚡ SPACE FLIGHT';
+  document.getElementById('btn-mode').classList.remove('on');
+  flashText('MAP VIEW');
+}
+
+// ─── FPS MOVEMENT ─────────────────────────────────────────────
+function fpMove(dt){
+  if(document.activeElement===document.getElementById('search-box'))return;
+  // Arrow-key look (fallback when pointer not locked)
+  if(!fpMouseLook){
+    if(keys['ArrowLeft'])fpYaw+=FP_ROT*dt;
+    if(keys['ArrowRight'])fpYaw-=FP_ROT*dt;
+    if(keys['ArrowUp'])fpPitch+=FP_ROT*dt;
+    if(keys['ArrowDown'])fpPitch-=FP_ROT*dt;
+    fpPitch=Math.max(-Math.PI/2+.05,Math.min(Math.PI/2-.05,fpPitch));
+  }
+  // Roll
+  if(keys['KeyE'])fpRollVel-=3.5*dt;
+  if(keys['KeyR'])fpRollVel+=3.5*dt;
+  fpRollVel*=0.82;fpRoll+=fpRollVel;
+  camera.quaternion.setFromEuler(new THREE.Euler(fpPitch,fpYaw,fpRoll,'YXZ'));
+
+  // Boost
+  fpBoost=keys['ShiftLeft']||keys['ShiftRight'];
+  const thrust=FP_THRUST*(fpBoost?FP_BOOST_MULT:1);
+  const targetFov=fpBoost?88:60;
+  camera.fov+=(targetFov-camera.fov)*0.1;
+  camera.updateProjectionMatrix();
+
+  // Thrust vectors
+  const fwd=new THREE.Vector3();camera.getWorldDirection(fwd);
+  const right=new THREE.Vector3().crossVectors(fwd,camera.up).normalize();
+  const accel=new THREE.Vector3();
+  if(keys['KeyW'])accel.addScaledVector(fwd, thrust);
+  if(keys['KeyS'])accel.addScaledVector(fwd,-thrust);
+  if(keys['KeyA'])accel.addScaledVector(right,-thrust);
+  if(keys['KeyD'])accel.addScaledVector(right, thrust);
+  if(keys['Space'])accel.y+=thrust;
+  if(keys['KeyQ'])accel.y-=thrust;
+  fpVelocity.addScaledVector(accel,dt);
+  fpVelocity.multiplyScalar(Math.pow(FP_DAMPING,dt*60));
+  camera.position.addScaledVector(fpVelocity,dt);
+
+  // HUD updates
+  const spd=Math.round(fpVelocity.length()*3.6);
+  const spdEl=document.getElementById('fp-speed-val');
+  spdEl.textContent=String(spd).padStart(3,'0');
+  spdEl.className=fpBoost?'boost':'';
+  const hdg=(((-fpYaw*180/Math.PI)%360)+360)%360;
+  document.getElementById('fp-hdg-val').textContent=Math.round(hdg).toString().padStart(3,'0')+'°';
+  const p=camera.position;
+  document.getElementById('fp-pos-val').textContent=`${Math.round(p.x)}·${Math.round(p.y)}·${Math.round(p.z)}`;
+  document.getElementById('fp-vignette').classList.toggle('on',fpBoost);
+  document.getElementById('fp-warp').classList.toggle('on',fpBoost);
+}
+
+function fpProximity(){
+  nearNode=null;let minD=INTERACT_R;
+  nodeDatas.forEach(nd=>{const d=camera.position.distanceTo(nd.mesh.position);if(d<minD){minD=d;nearNode=nd;}});
+  const el=document.getElementById('interact-prompt');
+  const ret=document.getElementById('fp-reticle');
+  if(nearNode){
+    el.textContent=`⬡ PRESS F — ${nearNode.data.name} | ▲${headcounts[nearNode.id].toLocaleString()}`;
+    el.classList.add('visible');ret.classList.add('target');
+  } else {
+    el.classList.remove('visible');ret.classList.remove('target');
+  }
+}
+
+// ─── MINI-MAP ─────────────────────────────────────────────────
+const mmCtx=document.getElementById('mm').getContext('2d');
+const MH=68,SC=1.12;
+function drawMinimap(){
+  const W=136;mmCtx.clearRect(0,0,W,W);
+  mmCtx.fillStyle='rgba(0,4,14,.9)';mmCtx.beginPath();mmCtx.arc(MH,MH,MH,0,Math.PI*2);mmCtx.fill();
+  ORG.forEach(item=>{if(!item.managerId)return;const p=pos3D[item.managerId],c=pos3D[item.id];
+    mmCtx.strokeStyle='rgba(0,212,255,.12)';mmCtx.lineWidth=0.5;mmCtx.beginPath();mmCtx.moveTo(MH+p.x/SC,MH+p.z/SC);mmCtx.lineTo(MH+c.x/SC,MH+c.z/SC);mmCtx.stroke();});
+  nodeDatas.forEach(nd=>{const x=MH+nd.pos.x/SC,y=MH+nd.pos.z/SC;if(x<0||x>136||y<0||y>136)return;
+    mmCtx.fillStyle=DEPT[nd.data.dept]?.css??'#fff';const r=Math.max(1,[2.8,2.2,1.6,1.1][Math.min(nd.level,3)]);mmCtx.beginPath();mmCtx.arc(x,y,r,0,Math.PI*2);mmCtx.fill();});
+  const px=MH+camera.position.x/SC,pz=MH+camera.position.z/SC;
+  const fx=Math.max(2,Math.min(134,px)),fz=Math.max(2,Math.min(134,pz));
+  mmCtx.fillStyle='#fff';mmCtx.beginPath();mmCtx.arc(fx,fz,3,0,Math.PI*2);mmCtx.fill();
+  const fwd=new THREE.Vector3();camera.getWorldDirection(fwd);
+  mmCtx.strokeStyle='rgba(255,255,255,.75)';mmCtx.lineWidth=1.5;mmCtx.beginPath();mmCtx.moveTo(fx,fz);mmCtx.lineTo(Math.max(2,Math.min(134,fx+fwd.x*13)),Math.max(2,Math.min(134,fz+fwd.z*13)));mmCtx.stroke();
+  mmCtx.globalCompositeOperation='destination-in';mmCtx.beginPath();mmCtx.arc(MH,MH,MH-1,0,Math.PI*2);mmCtx.fill();mmCtx.globalCompositeOperation='source-over';
+}
+
+// ─── ANIMATE LOOP ─────────────────────────────────────────────
+const clock=new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),.05),time=clock.elapsedTime;
+
+  starGroup.rotation.y+=mode==='fps'&&fpBoost?0.00072:0.000032;
+
+  // ── Reorg animation
+  tickReorg(dt);
+
+  // ── Population fade
+  if(populationBuilt){
+    if(populationVisible&&popFadeT<1){popFadeT=Math.min(1,popFadeT+dt*1.2);}
+    else if(!populationVisible&&popFadeT>0){popFadeT=Math.max(0,popFadeT-dt*1.2);}
+    Object.values(icMeshes).forEach(m=>{if(!m)return;m.material.opacity=popFadeT;m.material.transparent=popFadeT<1;m.visible=popFadeT>0.01;});
+  }
+
+  // ── Node pulse + filter + chain dim + suggest highlight
+  const searchQ=document.getElementById('search-box').value.trim();
+  nodeDatas.forEach((nd,i)=>{
+    const mat=nd.mesh.material;
+    const isNear=nearNode&&nearNode.id===nd.id,isSel=activeNodeId===nd.id;
+    const isSuggestSrc=suggestHighlight!==null&&nd.id===suggestHighlight;
+    let opacity=1,emissive=0.38+Math.sin(time*0.82+i*0.65)*0.18;
+    if(suggestMode&&suggestHighlight!==null){
+      if(isSuggestSrc){emissive=2.8+Math.sin(time*6)*.4;nd.mesh.scale.setScalar(1.08+Math.sin(time*5)*.04);}
+      else{opacity=0.45;emissive=0.12;nd.mesh.scale.setScalar(1.0);}
+    } else if(searchQ){
+      const hit=nd.searchMatch!==false;
+      opacity=hit?1:0.07;emissive=hit?2.6:0.05;
+    } else if(chainMode){
+      const inChain=nd.id===chainCenter||chainAncs.has(nd.id)||chainDescs.has(nd.id);
+      if(nd.id===chainCenter){emissive=2.2+Math.sin(time*3)*.3;nd.mesh.scale.setScalar(1+Math.sin(time*4)*.04);}
+      else if(chainAncs.has(nd.id)){emissive=1.6;nd.mesh.scale.setScalar(1.05);}
+      else if(chainDescs.has(nd.id)){emissive=0.9;nd.mesh.scale.setScalar(1.0);}
+      else{opacity=0.05;emissive=0.03;nd.mesh.scale.setScalar(1.0);}
+    } else if(!nd.filterPass){
+      opacity=0.06;emissive=0.03;nd.mesh.scale.setScalar(1.0);
+    } else {
+      emissive=isNear?2.4:isSel?1.9:emissive;
+      nd.mesh.scale.setScalar(isNear?1+Math.sin(time*4)*.05:isSel?1.06:1.0);
+    }
+    mat.transparent=opacity<1;mat.opacity=opacity;mat.emissiveIntensity=emissive;
+    if(nd.labelSpr){nd.labelSpr.material.opacity=(opacity>0.2)?1:0;}
+    const tubeDim=chainMode?(!chainAncs.has(nd.id)&&nd.id!==chainCenter&&!chainDescs.has(nd.id)):!nd.filterPass;
+    if(!reorgOpen){connData.forEach(c=>{if(c.childId===nd.id)c.tube.material.opacity=tubeDim?0.02:0.18;});}
+  });
+
+  // ── Chain tube highlight
+  if(chainMode&&!reorgOpen){
+    connData.forEach(c=>{
+      const inChain=(chainAncs.has(c.parentId)||c.parentId===chainCenter)&&(chainDescs.has(c.childId)||c.childId===chainCenter)||(chainAncs.has(c.childId)&&(chainAncs.has(c.parentId)||c.parentId===chainCenter));
+      c.tube.material.opacity=inChain?0.55:0.02;c.tube.material.emissiveIntensity=inChain?1.8:0.1;
+    });
+  }
+
+  // ── Energy pulses (only when reorg not playing)
+  if(!reorgOpen||reorgT===0){
+    pulses.forEach(p=>{
+      const raw=((time*0.26+p.offset)%1.0);
+      const t=p.dir>0?raw:1-raw;
+      const fade=Math.sin(raw*Math.PI);
+      p.mesh.position.copy(p.curve.getPointAt(t));
+      p.mesh.material.emissiveIntensity=(p.dir>0?2.2:1.6)*fade;
+      p.mesh.visible=fade>0.04;
+    });
+  }
+
+  // ── Camera
+  if(mode==='overview'){controls.update();tickFlyTo(dt);}
+  else{fpMove(dt);fpProximity();drawMinimap();}
+
+  composer.render();
+  renderer.autoClear=false;renderer.render(labelScene,camera);renderer.autoClear=true;
+}
+
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  composer.setSize(window.innerWidth,window.innerHeight);
+  bloomPass.resolution.set(window.innerWidth,window.innerHeight);
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ─── ORG HEALTH DASHBOARD ─────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+function buildAnalytics(){
+  const el=document.getElementById('ap-content');
+
+  // ── Span of control (ORG-to-ORG direct reports)
+  const spans={};
+  ORG.forEach(n=>{if(n.managerId){spans[n.managerId]=(spans[n.managerId]||0)+1;}});
+
+  // ── Key numbers
+  const totalMgrs=ORG.length,totalICs=IC_DATA.length,totalPpl=totalMgrs+totalICs;
+  const avgSpan=Object.keys(spans).length?(Object.values(spans).reduce((a,b)=>a+b,0)/Object.keys(spans).length).toFixed(1):'—';
+  const maxDepth=(function maxD(id){const kids=nodeMap[id].children;return kids.length?1+Math.max(...kids.map(c=>maxD(c.id))):1;})(treeRoot.id);
+  const icRatio=(totalICs/Math.max(1,totalMgrs)).toFixed(1);
+  const leafMgrs=ORG.filter(n=>n.hc>0);
+  const avgHC=leafMgrs.reduce((s,n)=>s+n.hc,0)/Math.max(1,leafMgrs.length);
+
+  // ── Structure anomalies
+  const wideSpan=Object.entries(spans).filter(([,v])=>v>=5).sort(([,a],[,b])=>b-a);
+  const narrowSpan=Object.entries(spans).filter(([,v])=>v<=2).sort(([,a],[,b])=>a-b);
+  const icOverloaded=leafMgrs.filter(n=>n.hc>=14).map(n=>[String(n.id),n.hc]).sort(([,a],[,b])=>b-a);
+  const icSparse=leafMgrs.filter(n=>n.hc<=9).map(n=>[String(n.id),n.hc]).sort(([,a],[,b])=>a-b);
+  const deepHeavy=leafMgrs.filter(n=>{const nd=nodeDatas.find(x=>x.id===n.id);return nd&&nd.level>=4&&n.hc>=13;}).map(n=>[String(n.id),n.hc]).sort(([,a],[,b])=>b-a);
+
+  // ── Attrition metrics
+  const MS_2YR=730*86400000;
+  const allEmps=[...ORG,...IC_DATA];
+  const totalEverEmployed=allEmps.length;
+  const totalInactive=allEmps.filter(e=>e.endDate).length;
+  const allTimeAttritionPct=(totalInactive/Math.max(1,totalEverEmployed)*100).toFixed(1);
+
+  // Per-dept IC turnover (all-time)
+  const deptTurnover={};
+  Object.keys(DEPT).forEach(dept=>{
+    const dICs=IC_DATA.filter(ic=>ic.dept===dept);
+    const dep=dICs.filter(ic=>ic.endDate).length;
+    deptTurnover[dept]=dICs.length?parseFloat((dep/dICs.length*100).toFixed(1)):0;
+  });
+  const maxDeptTurnover=Math.max(...Object.values(deptTurnover),1);
+
+  // Departed ORG managers
+  const departedMgrs=ORG.filter(e=>e.endDate);
+
+  // Per leaf-manager IC attrition
+  const leafAttrData=leafMgrs.map(mgr=>{
+    const ics=IC_BY_MANAGER[mgr.id]||[];
+    if(!ics.length)return null;
+    const dep=ics.filter(ic=>ic.endDate).length;
+    const shortDep=ics.filter(ic=>{
+      if(!ic.endDate||!ic.startDate)return false;
+      return(new Date(ic.endDate+'T00:00:00Z')-new Date(ic.startDate+'T00:00:00Z'))<MS_2YR;
+    }).length;
+    return{id:mgr.id,dep,shortDep,total:ics.length,rate:dep/ics.length*100};
+  }).filter(Boolean);
+
+  const highAttritionMgrs=leafAttrData.filter(d=>d.rate>=12)
+    .sort((a,b)=>b.rate-a.rate).map(d=>[String(d.id),d.rate]);
+  const shortTenureHeavy=leafAttrData.filter(d=>d.shortDep>=1)
+    .sort((a,b)=>b.shortDep-a.shortDep).map(d=>[String(d.id),d.shortDep]);
+  const totalShortTenureExits=leafAttrData.reduce((s,d)=>s+d.shortDep,0);
+
+  // ── Combined anomaly count
+  const anomalyCount=wideSpan.length+narrowSpan.length+icOverloaded.length+icSparse.length+highAttritionMgrs.length;
+
+  // ── Span distribution
+  const spanBuckets={'1':0,'2-3':0,'4-6':0,'7-9':0,'10+':0};
+  Object.values(spans).forEach(s=>{if(s===1)spanBuckets['1']++;else if(s<=3)spanBuckets['2-3']++;else if(s<=6)spanBuckets['4-6']++;else if(s<=9)spanBuckets['7-9']++;else spanBuckets['10+']++;});
+  const maxBucket=Math.max(...Object.values(spanBuckets));
+
+  // ── Dept headcount + location
+  const deptHC={};
+  ORG.forEach(n=>{deptHC[n.dept]=(deptHC[n.dept]||0)+1;});
+  IC_DATA.forEach(ic=>{deptHC[ic.dept]=(deptHC[ic.dept]||0)+1;});
+  const maxDeptHC=Math.max(...Object.values(deptHC));
+  const locHC={};
+  ORG.forEach(n=>{locHC[n.loc]=(locHC[n.loc]||0)+1;});
+  IC_DATA.forEach(ic=>{locHC[ic.loc]=(locHC[ic.loc]||0)+1;});
+  const locEntries=Object.entries(locHC).sort(([,a],[,b])=>b-a);
+  const maxLocHC=locEntries[0]?.[1]||1;
+  const lvlCounts={};
+  nodeDatas.forEach(nd=>{lvlCounts[nd.level]=(lvlCounts[nd.level]||0)+1;});
+
+  // ── Helpers
+  function barChart(entries,maxVal,colorFn,suffix=''){
+    return entries.map(([lbl,val])=>{
+      const pct=Math.round(val/Math.max(maxVal,1)*100),col=colorFn?colorFn(lbl,val):'#00d4ff';
+      return`<div class="ap-bar-row"><div class="ap-bar-lbl" title="${lbl}">${lbl}</div><div class="ap-bar-track"><div class="ap-bar-fill" style="width:${pct}%;background:${col};"></div></div><div class="ap-bar-val">${typeof val==='number'&&!Number.isInteger(val)?val.toFixed(1):val}${suffix}</div></div>`;
+    }).join('');
+  }
+  const flagRows=(arr,cls,labelFn)=>arr.slice(0,10).map(([id,val])=>{
+    const nd=nodeDatas.find(n=>n.id===parseInt(id));if(!nd)return'';
+    const col=DEPT[nd.data.dept]?.css??'#fff';
+    return`<div class="ap-flag-row ap-flag-link" data-node-id="${id}">
+      <div class="ap-flag-dot" style="background:${col};box-shadow:0 0 4px ${col};"></div>
+      <div class="ap-flag-name" title="${nd.data.name}">${nd.data.name}</div>
+      <span class="ap-flag-badge ${cls}">${labelFn(val)}</span>
+    </div>`;
+  }).join('');
+
+  // Attrition color: green→yellow→red by rate
+  const attrColor=r=>r>15?'#ff6060':r>8?'#ffc832':'#00ffa0';
+
+  el.innerHTML=`
+  <div class="ap-sec">
+    <div class="ap-lbl">COMPANY SNAPSHOT</div>
+    <div class="ap-stat-grid">
+      <div class="ap-stat"><div class="ap-stat-val">${totalPpl.toLocaleString()}</div><div class="ap-stat-lbl">Total Employees</div></div>
+      <div class="ap-stat"><div class="ap-stat-val">${totalMgrs}</div><div class="ap-stat-lbl">Managers (L1–L5)</div></div>
+      <div class="ap-stat"><div class="ap-stat-val">${totalICs.toLocaleString()}</div><div class="ap-stat-lbl">Individual Contributors</div></div>
+      <div class="ap-stat"><div class="ap-stat-val">${icRatio}x</div><div class="ap-stat-lbl">IC-to-Manager Ratio</div></div>
+      <div class="ap-stat"><div class="ap-stat-val">${avgSpan}</div><div class="ap-stat-lbl">Avg Span of Control</div></div>
+      <div class="ap-stat"><div class="ap-stat-val">${maxDepth}</div><div class="ap-stat-lbl">Org Layers (depth)</div></div>
+      <div class="ap-stat ${anomalyCount>30?'danger':anomalyCount>15?'warn':''}"><div class="ap-stat-val">${anomalyCount}</div><div class="ap-stat-lbl">⚠ Structural Anomalies</div></div>
+      <div class="ap-stat ${highAttritionMgrs.length>20?'danger':highAttritionMgrs.length>10?'warn':''}"><div class="ap-stat-val">${highAttritionMgrs.length}</div><div class="ap-stat-lbl">High-Attrition Mgrs</div></div>
+    </div>
+  </div>
+
+  <div class="ap-sec">
+    <div class="ap-lbl">ATTRITION OVERVIEW</div>
+    <div class="ap-stat-grid">
+      <div class="ap-stat ${parseFloat(allTimeAttritionPct)>12?'danger':parseFloat(allTimeAttritionPct)>7?'warn':''}">
+        <div class="ap-stat-val">${allTimeAttritionPct}%</div><div class="ap-stat-lbl">All-Time Attrition</div></div>
+      <div class="ap-stat"><div class="ap-stat-val">${totalInactive.toLocaleString()}</div><div class="ap-stat-lbl">Total Departed</div></div>
+      <div class="ap-stat ${departedMgrs.length>8?'danger':departedMgrs.length>3?'warn':''}">
+        <div class="ap-stat-val">${departedMgrs.length}</div><div class="ap-stat-lbl">Managers Departed</div></div>
+      <div class="ap-stat ${totalShortTenureExits>30?'danger':totalShortTenureExits>15?'warn':''}">
+        <div class="ap-stat-val">${totalShortTenureExits}</div><div class="ap-stat-lbl">Short-Tenure Exits (&lt;2yr)</div></div>
+    </div>
+  </div>
+
+  <div class="ap-sec">
+    <div class="ap-lbl">IC TURNOVER BY DEPARTMENT (%)</div>
+    ${barChart(Object.entries(deptTurnover).sort(([,a],[,b])=>b-a),maxDeptTurnover,(dept,v)=>attrColor(v),'%')}
+  </div>
+
+  <div class="ap-sec">
+    <div class="ap-lbl">SPAN OF CONTROL DISTRIBUTION</div>
+    ${barChart(Object.entries(spanBuckets),maxBucket,lbl=>lbl==='4-6'?'#00ffa0':lbl==='10+'?'#ff6060':lbl==='1'?'#ffc832':'#00d4ff')}
+  </div>
+
+  <div class="ap-sec">
+    <div class="ap-lbl">HEADCOUNT BY DEPARTMENT</div>
+    ${barChart(Object.entries(deptHC).sort(([,a],[,b])=>b-a),maxDeptHC,dept=>DEPT[dept]?.css??'#fff')}
+  </div>
+
+  <div class="ap-sec">
+    <div class="ap-lbl">MANAGERS BY LEVEL</div>
+    ${barChart(Object.entries(lvlCounts).sort(([a],[b])=>a-b).map(([l,c])=>[['L1 CEO','L2 C-Suite/SVP','L3 VP','L4 Director','L5 Sr Manager'][parseInt(l)]||`L${l}`,c]),Math.max(...Object.values(lvlCounts)),()=>'#00d4ff')}
+  </div>
+
+  <div class="ap-sec">
+    <div class="ap-lbl">HEADCOUNT BY LOCATION (top 8)</div>
+    ${barChart(locEntries.slice(0,8),maxLocHC,()=>'#6a8fff')}
+  </div>
+
+  <div class="ap-sec">
+    <div class="ap-lbl" style="color:rgba(255,96,96,.75);">⚠ ANOMALIES — click any row to zoom &amp; highlight</div>
+    <div style="font-size:8px;color:rgba(160,196,255,.3);letter-spacing:.5px;margin-top:-4px;margin-bottom:8px;">${anomalyCount} structural + ${highAttritionMgrs.length} attrition issues · avg team size ${avgHC.toFixed(1)} ICs</div>
+  </div>
+
+  ${highAttritionMgrs.length?`<div class="ap-sec">
+    <div class="ap-lbl">◈ HIGH IC ATTRITION (≥12% team turnover all-time)</div>
+    ${flagRows(highAttritionMgrs,'ap-flag-over',v=>`${v.toFixed(1)}% attrition`)}
+  </div>`:''}
+
+  ${shortTenureHeavy.length?`<div class="ap-sec">
+    <div class="ap-lbl">◈ SHORT-TENURE EXITS (ICs left within 2 years)</div>
+    ${flagRows(shortTenureHeavy,'ap-flag-over',v=>`${v} short exits`)}
+  </div>`:''}
+
+  ${departedMgrs.length?`<div class="ap-sec">
+    <div class="ap-lbl">⚡ DEPARTED MANAGERS (inactive nodes)</div>
+    ${departedMgrs.slice(0,10).map(e=>{
+      const nd=nodeDatas.find(n=>n.id===e.id);if(!nd)return'';
+      const col=DEPT[e.dept]?.css??'#fff';
+      const tenureMs=new Date(e.endDate+'T00:00:00Z')-new Date(e.startDate+'T00:00:00Z');
+      const tenureYr=(tenureMs/31536000000).toFixed(1);
+      return`<div class="ap-flag-row ap-flag-link" data-node-id="${e.id}">
+        <div class="ap-flag-dot" style="background:${col};box-shadow:0 0 4px ${col};"></div>
+        <div class="ap-flag-name" title="${e.name}">${e.name}</div>
+        <span class="ap-flag-badge ap-flag-under">${tenureYr}yr tenure</span>
+      </div>`;
+    }).join('')}
+  </div>`:''}
+
+  ${icOverloaded.length?`<div class="ap-sec">
+    <div class="ap-lbl">◈ IC-OVERLOADED (≥14 direct ICs)</div>
+    ${flagRows(icOverloaded,'ap-flag-over',v=>`${v} ICs`)}
+  </div>`:''}
+
+  ${wideSpan.length?`<div class="ap-sec">
+    <div class="ap-lbl">◈ WIDE ORG SPAN (5+ direct reports)</div>
+    ${flagRows(wideSpan,'ap-flag-over',v=>`span ${v}`)}
+  </div>`:''}
+
+  ${deepHeavy.length?`<div class="ap-sec">
+    <div class="ap-lbl">◈ DEEP + HEAVY (L5 · ≥13 ICs)</div>
+    ${flagRows(deepHeavy,'ap-flag-over',v=>`L5 · ${v} ICs`)}
+  </div>`:''}
+
+  ${narrowSpan.length?`<div class="ap-sec">
+    <div class="ap-lbl">⚡ NARROW SPAN (≤2 direct reports)</div>
+    ${flagRows(narrowSpan,'ap-flag-under',v=>`span ${v}`)}
+  </div>`:''}
+
+  ${icSparse.length?`<div class="ap-sec">
+    <div class="ap-lbl">⚡ LEAN TEAM (≤9 direct ICs)</div>
+    ${flagRows(icSparse,'ap-flag-under',v=>`${v} ICs`)}
+  </div>`:''}`;
+
+  // ── Click any flag row → fly + chain highlight
+  el.querySelectorAll('.ap-flag-link[data-node-id]').forEach(row=>{
+    row.addEventListener('click',()=>{
+      const id=parseInt(row.dataset.nodeId);
+      flyTo(id);activateChain(id);
+    });
+  });
+}
+
+document.getElementById('btn-analytics').addEventListener('click',function(){
+  const panel=document.getElementById('analytics-panel');
+  const open=panel.classList.toggle('visible');
+  this.classList.toggle('on',open);
+  if(open){
+    // close profile card to avoid overlap
+    document.getElementById('profile-card').classList.remove('visible');
+    buildAnalytics();
+  }
+});
+document.getElementById('ap-close').addEventListener('click',()=>{
+  document.getElementById('analytics-panel').classList.remove('visible');
+  document.getElementById('btn-analytics').classList.remove('on');
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ─── SPAN-OF-CONTROL OVERLAY ──────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+let spanViewOn=false;
+const spanColor={healthy:0x00ffa0,narrow:0xffc832,wide:0xff6060,leaf:0xff8c42};
+const _origColors={};
+nodeDatas.forEach(nd=>{_origColors[nd.id]=nd.mesh.material.color.getHex();});
+
+document.getElementById('btn-span').addEventListener('click',function(){
+  spanViewOn=!spanViewOn;
+  if(spanViewOn&&costViewOn){document.getElementById('btn-cost').click();} // mutual exclusion
+  this.classList.toggle('span-on',spanViewOn);
+  nodeDatas.forEach(nd=>{
+    const directReports=ORG.filter(n=>n.managerId===nd.id).length;
+    const col=spanViewOn?(
+      directReports===0?spanColor.leaf:
+      directReports<=3?spanColor.narrow:
+      directReports<=8?spanColor.healthy:spanColor.wide
+    ):_origColors[nd.id];
+    nd.mesh.material.color.setHex(col);
+    nd.mesh.material.emissive.setHex(col);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ─── COST / BUDGET OVERLAY ────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+let costViewOn=false;
+// Mid-point annual cost per level (USD)
+const LEVEL_COST=[1200000,550000,320000,210000,160000]; // L1–L5
+function orgCost(id){
+  // sum all people in subtree
+  const descs=[...getDescendants(id)];
+  let total=0;
+  descs.forEach(did=>{
+    const nd=nodeDatas.find(n=>n.id===did);
+    if(nd)total+=LEVEL_COST[Math.min(nd.level,4)]||LEVEL_COST[4];
+    // ICs under leaf managers counted as L5 equivalent + a bit less
+    const ics=IC_BY_MANAGER[did];
+    if(ics)total+=ics.length*120000;
+  });
+  // include self
+  const selfNd=nodeDatas.find(n=>n.id===id);
+  if(selfNd)total+=LEVEL_COST[Math.min(selfNd.level,4)]||LEVEL_COST[4];
+  // ICs directly under this node
+  const selfICs=IC_BY_MANAGER[id];
+  if(selfICs)total+=selfICs.length*120000;
+  return total;
+}
+function fmtCost(v){return v>=1e9?`$${(v/1e9).toFixed(1)}B`:v>=1e6?`$${(v/1e6).toFixed(1)}M`:`$${(v/1e3).toFixed(0)}K`;}
+// Interpolate between two hex colors by t ∈ [0,1]
+function lerpColor(a,b,t){
+  const ar=(a>>16)&0xff,ag=(a>>8)&0xff,ab=a&0xff;
+  const br=(b>>16)&0xff,bg=(b>>8)&0xff,bb=b&0xff;
+  return((Math.round(ar+(br-ar)*t)<<16)|(Math.round(ag+(bg-ag)*t)<<8)|Math.round(ab+(bb-ab)*t));
+}
+const costValues={};
+nodeDatas.forEach(nd=>{costValues[nd.id]=orgCost(nd.id);});
+const maxCostVal=Math.max(...Object.values(costValues));
+
+document.getElementById('btn-cost').addEventListener('click',function(){
+  costViewOn=!costViewOn;
+  if(costViewOn&&spanViewOn){spanViewOn=false;document.getElementById('btn-span').classList.remove('span-on');}
+  this.classList.toggle('cost-on',costViewOn);
+  nodeDatas.forEach(nd=>{
+    const t=Math.log(costValues[nd.id]+1)/Math.log(maxCostVal+1);
+    const col=costViewOn?lerpColor(0x0044aa,0xffd700,t):_origColors[nd.id];
+    nd.mesh.material.color.setHex(col);
+    nd.mesh.material.emissive.setHex(col);
+  });
+  // Update stats bar
+  if(costViewOn){
+    const totalCost=orgCost(treeRoot.id);
+    document.getElementById('stats-bar').textContent=`Est. total cost: ${fmtCost(totalCost)} · ${IC_DATA.length+ORG.length} people`;
+  } else {
+    document.getElementById('stats-bar').textContent=`${(ORG.length+IC_DATA.length).toLocaleString()} employees · ${ORG.length} managers · L1–L7`;
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ─── PNG EXPORT ───────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+document.getElementById('btn-png').addEventListener('click',()=>{
+  // Render one frame of each scene into the real canvas
+  composer.render();
+  renderer.autoClear=false;renderer.render(labelScene,camera);renderer.autoClear=true;
+  // The WebGL canvas already has the pixels — preserveDrawingBuffer must be true
+  // We set it via a workaround: read back via toDataURL (works if renderer was created with preserveDrawingBuffer)
+  // Since we didn't set it, do a blit: create a 2D canvas, draw the webgl canvas onto it
+  const out=document.createElement('canvas');
+  out.width=renderer.domElement.width;out.height=renderer.domElement.height;
+  const ctx2=out.getContext('2d');
+  ctx2.drawImage(renderer.domElement,0,0);
+  const link=document.createElement('a');
+  link.download=`hyperlane_org_${new Date().toISOString().slice(0,10)}.png`;
+  link.href=out.toDataURL('image/png');link.click();
+  showToast('⬇ Screenshot saved as PNG');
+});
+// Note: WebGL canvas needs preserveDrawingBuffer=true to reliably read pixels.
+// Patch renderer creation — done below if needed. We re-create safely at init.
+// (Works in most browsers as-is on the same frame tick.)
+
+// ═══════════════════════════════════════════════════════════════
+// ─── SAVED VIEWS ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+const BUILTIN_VIEWS=[
+  {name:'Full Company',  filter:{preset:'all'},  cam:{x:0,y:30,z:85},  tgt:{x:0,y:6,z:0}},
+  {name:'Engineering',   filter:{preset:'technical'}, cam:{x:18,y:22,z:60}, tgt:{x:0,y:6,z:0}},
+  {name:'Sales Galaxy',  filter:{preset:'commercial'},cam:{x:-18,y:22,z:60},tgt:{x:0,y:6,z:0}},
+  {name:'Corporate HQ',  filter:{preset:'corporate'}, cam:{x:0,y:35,z:70}, tgt:{x:0,y:6,z:0}},
+];
+function loadSavedViews(){return JSON.parse(localStorage.getItem('hyperlane_views')||'[]');}
+function saveSavedViews(arr){localStorage.setItem('hyperlane_views',JSON.stringify(arr));}
+
+function applyView(v){
+  // Apply filter preset if present
+  if(v.filter?.preset){
+    document.querySelectorAll('.fp-preset').forEach(b=>{
+      if(b.dataset.preset===v.filter.preset)b.click();
+    });
+  }
+  // Fly camera
+  if(v.cam){flyP0.copy(camera.position);flyC0.copy(controls.target);
+    flyP1.set(v.cam.x,v.cam.y,v.cam.z);flyC1.set(v.tgt?.x??0,v.tgt?.y??6,v.tgt?.z??0);flyT=0;}
+}
+
+function renderViewsList(){
+  const saved=loadSavedViews();
+  const el=document.getElementById('vp-list');
+  const allViews=[...BUILTIN_VIEWS.map(v=>({...v,builtin:true})),...saved.map(v=>({...v,builtin:false}))];
+  el.innerHTML=allViews.map((v,i)=>`
+    <div class="vp-chip" data-vi="${i}">
+      <span>${v.builtin?'◇':'📌'}</span>
+      <span style="flex:1;">${v.name}</span>
+      ${!v.builtin?`<button class="vp-chip-del" data-si="${i-BUILTIN_VIEWS.length}">✕</button>`:''}
+    </div>`).join('');
+  el.querySelectorAll('.vp-chip').forEach(chip=>{
+    chip.addEventListener('click',e=>{
+      if(e.target.classList.contains('vp-chip-del'))return;
+      applyView(allViews[parseInt(chip.dataset.vi)]);
+    });
+  });
+  el.querySelectorAll('.vp-chip-del').forEach(btn=>{
+    btn.addEventListener('click',e=>{e.stopPropagation();
+      const arr=loadSavedViews();arr.splice(parseInt(btn.dataset.si),1);saveSavedViews(arr);renderViewsList();
+    });
+  });
+}
+
+document.getElementById('btn-views').addEventListener('click',()=>{
+  document.getElementById('views-panel').classList.toggle('open');renderViewsList();
+});
+document.getElementById('vp-close').addEventListener('click',()=>document.getElementById('views-panel').classList.remove('open'));
+document.getElementById('vp-save-btn').addEventListener('click',()=>{
+  const inp=document.getElementById('vp-name-input');
+  inp.style.display=inp.style.display==='block'?'none':'block';
+  if(inp.style.display==='block')inp.focus();
+});
+document.getElementById('vp-name-input').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){
+    const name=e.target.value.trim();if(!name)return;
+    const arr=loadSavedViews();
+    arr.push({name,cam:{x:camera.position.x,y:camera.position.y,z:camera.position.z},
+      tgt:{x:controls.target.x,y:controls.target.y,z:controls.target.z},
+      filter:{depts:[...filterState.depts],bus:[...filterState.bus],funcs:[...filterState.funcs]}});
+    saveSavedViews(arr);e.target.value='';e.target.style.display='none';
+    renderViewsList();showToast(`📌 Saved view: ${name}`);
+  }
+  if(e.key==='Escape')e.target.style.display='none';
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ─── COMMAND PALETTE ──────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+const COMMANDS=[
+  {icon:'⚡',label:'Enter Space Flight Mode',type:'CMD',action:()=>{if(mode==='overview')enterFPS();}},
+  {icon:'🌐',label:'Return to Map View',type:'CMD',action:()=>{if(mode==='fps')exitFPS();}},
+  {icon:'◈',label:'Toggle Org Health Dashboard',type:'CMD',action:()=>document.getElementById('btn-analytics').click()},
+  {icon:'◉',label:'Toggle Span of Control View',type:'CMD',action:()=>document.getElementById('btn-span').click()},
+  {icon:'$',label:'Toggle Cost / Budget View',type:'CMD',action:()=>document.getElementById('btn-cost').click()},
+  {icon:'⬇',label:'Export PNG Screenshot',type:'CMD',action:()=>document.getElementById('btn-png').click()},
+  {icon:'↓',label:'Export to Excel',type:'CMD',action:()=>document.getElementById('btn-export').click()},
+  {icon:'◉',label:'Show Population Dots',type:'CMD',action:()=>document.getElementById('btn-pop').click()},
+  {icon:'⇄',label:'Open Reorg Studio',type:'CMD',action:()=>document.getElementById('btn-reorg').click()},
+  {icon:'⚙',label:'Open Filters Panel',type:'CMD',action:()=>document.getElementById('btn-filter').click()},
+  {icon:'⟳',label:'Cycle Orbit Speed',type:'CMD',action:()=>document.getElementById('btn-orbit').click()},
+];
+let cmdIdx=0,cmdResults=[];
+function renderCmdResults(q){
+  const qlo=q.toLowerCase().trim();
+  // People matches (managers + ICs)
+  const pplMatches=qlo?[...nodeDatas.filter(nd=>nd.data.name.toLowerCase().includes(qlo)||nd.data.title.toLowerCase().includes(qlo)).slice(0,6).map(nd=>({icon:DEPT[nd.data.dept]?.emoji??'◉',label:`${nd.data.name} — ${nd.data.title}`,type:`${nd.data.dept} ${nd.data.orgLevel}`,action:()=>{showCard(nd.id);flyTo(nd.id);if(mode==='fps')exitFPS();closeCmdPalette();}}))]
+    :[];
+  const cmdMatches=COMMANDS.filter(c=>!qlo||c.label.toLowerCase().includes(qlo));
+  cmdResults=[...pplMatches,...cmdMatches.map(c=>({...c,action:()=>{c.action();closeCmdPalette();}}))];
+  if(!cmdResults.length&&qlo){
+    // IC search
+    const icMatches=IC_DATA.filter(ic=>ic.name.toLowerCase().includes(qlo)).slice(0,5);
+    icMatches.forEach(ic=>{const mgr=nodeMap[ic.managerId];cmdResults.push({icon:DEPT[ic.dept]?.emoji??'◉',label:`${ic.name} — ${ic.title}`,type:`${ic.orgLevel} · ${ic.loc}`,action:()=>{showCard(ic.managerId);flyTo(ic.managerId);closeCmdPalette();}});});
+  }
+  cmdIdx=0;
+  document.getElementById('cmd-results').innerHTML=cmdResults.map((r,i)=>`
+    <div class="cmd-row${i===0?' active':''}" data-ci="${i}">
+      <span class="cmd-row-icon">${r.icon}</span>
+      <span class="cmd-row-label">${r.label}</span>
+      <span class="cmd-row-type">${r.type||''}</span>
+    </div>`).join('');
+  document.querySelectorAll('.cmd-row').forEach(row=>{
+    row.addEventListener('mouseenter',()=>{cmdIdx=parseInt(row.dataset.ci);highlightCmd();});
+    row.addEventListener('click',()=>{cmdResults[parseInt(row.dataset.ci)]?.action?.();});
+  });
+}
+function highlightCmd(){
+  document.querySelectorAll('.cmd-row').forEach((r,i)=>r.classList.toggle('active',i===cmdIdx));
+  document.querySelectorAll('.cmd-row')[cmdIdx]?.scrollIntoView({block:'nearest'});
+}
+function openCmdPalette(){
+  document.getElementById('cmd-palette').classList.add('open');
+  const inp=document.getElementById('cmd-input');inp.value='';inp.focus();
+  renderCmdResults('');
+}
+function closeCmdPalette(){document.getElementById('cmd-palette').classList.remove('open');}
+document.getElementById('cmd-input').addEventListener('input',e=>renderCmdResults(e.target.value));
+document.getElementById('cmd-input').addEventListener('keydown',e=>{
+  if(e.key==='ArrowDown'){e.preventDefault();cmdIdx=Math.min(cmdIdx+1,cmdResults.length-1);highlightCmd();}
+  else if(e.key==='ArrowUp'){e.preventDefault();cmdIdx=Math.max(0,cmdIdx-1);highlightCmd();}
+  else if(e.key==='Enter'){e.preventDefault();cmdResults[cmdIdx]?.action?.();}
+  else if(e.key==='Escape')closeCmdPalette();
+});
+document.getElementById('cmd-palette').addEventListener('click',e=>{if(e.target===document.getElementById('cmd-palette'))closeCmdPalette();});
+document.addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();openCmdPalette();}
+  if(e.key==='/'&&mode==='overview'&&document.activeElement!==document.getElementById('search-box')){e.preventDefault();openCmdPalette();}
+});
+
+animate();
+</script>
+</body>
+</html>
