@@ -902,33 +902,33 @@ if(isCustomOrg){document.getElementById('custom-org-badge').style.display='block
 window.clearCustomOrg=function(){sessionStorage.removeItem('customOrg');location.reload();};
 
 // ─── ASSIGN HIRE / DEPARTURE DATES ────────────────────────────
+// Growth narrative: founded 2016 with tiny team, slow build 2016-2021,
+// Series B/C + hypergrowth 2022-2024, some attrition through 2025.
 (function assignOrgDates(){
-  // Seeded PRNG (xorshift32) — deterministic, no collisions with irng
   let s=0xA5A5A5A5;
   function rnd(){s^=s<<13;s^=s>>>17;s^=s<<5;s=(s>>>0);return s/4294967296;}
   function dAdd(str,days){const d=new Date(str+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
-  // Quarter base: which wave this level of hire came in
   function qBase(id){
-    if(id<=9)  return'2018-01-01'; // CEO + C-Suite
-    if(id<=17) return'2018-04-01'; // Eng + RnD VPs
-    if(id<=29) return'2018-10-01'; // Ops/Finance/Mktg/Sales/People VPs
-    if(id<=31) return'2019-04-01'; // IT + Legal VPs
-    if(id<=47) return'2019-07-01'; // Engineering Directors
-    if(id<=53) return'2020-01-01'; // RnD Directors
-    if(id<=78) return'2020-04-01'; // Ops/Finance/Mktg/Sales/People/IT Directors
-    if(id<=110)return'2021-01-01'; // Sr Managers wave 1
-    if(id<=150)return'2021-07-01'; // Sr Managers wave 2
-    if(id<=185)return'2022-01-01'; // Sr Managers wave 3
-    if(id<=210)return'2022-07-01'; // Sr Managers wave 4
-    return          '2023-01-01';  // Sr Managers wave 5
+    if(id===1)   return'2016-01-01'; // CEO — Day 1
+    if(id<=5)    return'2016-04-01'; // Co-founders / CTO, CFO, COO
+    if(id<=9)    return'2016-10-01'; // Rest of C-suite (Seed round)
+    if(id<=17)   return'2017-07-01'; // VPs Engineering + RnD (Series A)
+    if(id<=29)   return'2018-07-01'; // VPs Ops/Finance/Mktg/Sales/People
+    if(id<=31)   return'2019-04-01'; // VPs IT + Legal
+    if(id<=47)   return'2019-10-01'; // Engineering Directors (Series B)
+    if(id<=53)   return'2020-04-01'; // RnD Directors
+    if(id<=78)   return'2021-01-01'; // Ops/Finance/Mktg/Sales/People/IT Directors — slow scale
+    if(id<=110)  return'2022-01-01'; // Sr Managers wave 1 — Series C, rapid growth begins
+    if(id<=150)  return'2022-07-01'; // Sr Managers wave 2 — hypergrowth
+    if(id<=185)  return'2023-01-01'; // Sr Managers wave 3
+    if(id<=210)  return'2023-07-01'; // Sr Managers wave 4
+    return            '2024-01-01';  // Sr Managers wave 5 — peak hiring
   }
   const endCap=new Date('2025-12-01T00:00:00Z');
   ORG.forEach(e=>{
-    // Random day within a ~1-quarter spread from the wave base
     e.startDate=dAdd(qBase(e.id),Math.floor(rnd()*88));
     e.endDate=null;
-    // ~6% attrition for non-execs; must have at least 18 months tenure
-    if(e.id>9&&rnd()<0.06){
+    if(e.id>9&&rnd()<0.07){
       const minEnd=dAdd(e.startDate,548);
       const gap=endCap-new Date(minEnd+'T00:00:00Z');
       if(gap>0) e.endDate=dAdd(minEnd,Math.floor(rnd()*gap/86400000));
@@ -943,7 +943,7 @@ function buildQuarters(startStr,endStr){
   while(y<ey||(y===ey&&m<=em)){q.push(`${y}-${String(m).padStart(2,'0')}-01`);m+=3;if(m>12){m-=12;y++;}}
   return q;
 }
-const QUARTERS=buildQuarters('2018-01-01','2026-04-01');
+const QUARTERS=buildQuarters('2016-01-01','2026-07-01');
 function qtrLabel(d){const[y,m]=d.split('-').map(Number);return`Q${Math.ceil(m/3)} ${y}`;}
 function isActiveAt(emp,dateStr){
   if(!emp.startDate) return true;
@@ -1649,15 +1649,60 @@ function setTimelineQ(idx){
   runFilter();
 }
 
+// ─── TIMELINE REORG EVENTS ────────────────────────────────────
+// Quarters (date strings) where auto-reorg fires during playback
+const TL_REORG_EVENTS={
+  '2022-07-01':'⟳ SERIES C — ORG RESTRUCTURE',
+};
+let tlAutoReorgPending=false,tlAutoReorgFired=false;
+
+function tlReorgReset(){
+  // Silently reset reorg state without opening/touching the panel
+  reorgT=0;reorgPlaying=false;reorgOpen=false;
+  resetReorg();
+}
+
 function tlPlayToggle(){
-  if(tlPlayInterval){clearInterval(tlPlayInterval);tlPlayInterval=null;document.getElementById('tl-play').textContent='▶ PLAY';return;}
-  // restart from beginning if at end
-  if(timelineQIdx>=QUARTERS.length-1) setTimelineQ(0);
+  if(tlPlayInterval){
+    clearInterval(tlPlayInterval);tlPlayInterval=null;
+    document.getElementById('tl-play').textContent='▶ PLAY';
+    return;
+  }
+  // Restart from beginning if at end
+  if(timelineQIdx>=QUARTERS.length-1){
+    setTimelineQ(0);
+    tlReorgReset();
+  }
+  tlAutoReorgFired=false;
+  tlAutoReorgPending=false;
   document.getElementById('tl-play').textContent='⏸ PAUSE';
+
   tlPlayInterval=setInterval(()=>{
-    if(timelineQIdx>=QUARTERS.length-1){clearInterval(tlPlayInterval);tlPlayInterval=null;document.getElementById('tl-play').textContent='▶ PLAY';return;}
-    setTimelineQ(timelineQIdx+1);
-  },700);
+    // Hold timeline while reorg animation is playing
+    if(tlAutoReorgPending){
+      if(!reorgPlaying&&reorgT>=1){
+        // Reorg done — keep nodes in reorged positions, resume timeline
+        tlAutoReorgPending=false;
+      }
+      return;
+    }
+    if(timelineQIdx>=QUARTERS.length-1){
+      clearInterval(tlPlayInterval);tlPlayInterval=null;
+      document.getElementById('tl-play').textContent='▶ PLAY';
+      return;
+    }
+    const nextIdx=timelineQIdx+1;
+    setTimelineQ(nextIdx);
+    const qDate=QUARTERS[nextIdx];
+    // Fire reorg event if scheduled and not yet fired this playback
+    if(!tlAutoReorgFired&&TL_REORG_EVENTS[qDate]){
+      tlAutoReorgFired=true;
+      tlAutoReorgPending=true;
+      reorgOpen=true;reorgT=0;reorgPlaying=true;
+      flashText(TL_REORG_EVENTS[qDate]);
+      showToast(TL_REORG_EVENTS[qDate]);
+    }
+  },620);
 }
 
 // Init slider max
