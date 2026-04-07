@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HYPERLANE — Org Chart Simulator</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#000610;color:#a0c4ff;font-family:'Courier New',monospace;min-height:100vh;overflow-x:hidden;}
+
+  /* Starfield */
+  canvas#stars{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;}
+
+  .page{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:40px 20px;}
+
+  /* Grid lines */
+  .grid-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:0;pointer-events:none;
+    background-image:linear-gradient(rgba(0,212,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.03) 1px,transparent 1px);
+    background-size:60px 60px;}
+
+  /* Top bar */
+  .topbar{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;gap:16px;
+    padding:0 28px;height:48px;background:rgba(0,4,16,.9);border-bottom:1px solid rgba(0,212,255,.1);
+    backdrop-filter:blur(12px);}
+  .topbar-logo{font-size:11px;letter-spacing:4px;color:#00d4ff;text-shadow:0 0 18px rgba(0,212,255,.6);}
+  .topbar-sep{width:1px;height:20px;background:rgba(0,212,255,.15);}
+  .topbar-sub{font-size:9px;letter-spacing:2.5px;color:rgba(160,196,255,.4);}
+  .topbar-right{margin-left:auto;display:flex;gap:10px;align-items:center;}
+  .topbar-link{font-size:9px;letter-spacing:2px;color:rgba(160,196,255,.45);text-decoration:none;transition:color .15s;}
+  .topbar-link:hover{color:#00d4ff;}
+
+  /* Hero */
+  .hero{text-align:center;margin-top:48px;padding:80px 20px 60px;}
+  .hero-eyebrow{font-size:9px;letter-spacing:5px;color:rgba(0,212,255,.5);margin-bottom:24px;text-transform:uppercase;}
+  .hero-title{font-size:clamp(32px,6vw,68px);letter-spacing:6px;color:#e0f0ff;line-height:1.1;
+    text-shadow:0 0 60px rgba(0,212,255,.25);margin-bottom:10px;font-weight:normal;}
+  .hero-title span{color:#00d4ff;text-shadow:0 0 30px rgba(0,212,255,.7);}
+  .hero-sub{font-size:clamp(11px,1.4vw,14px);color:rgba(160,196,255,.55);letter-spacing:2px;
+    margin-bottom:48px;line-height:1.8;max-width:560px;margin-left:auto;margin-right:auto;}
+  .hero-cta{display:inline-flex;align-items:center;gap:12px;padding:14px 36px;
+    background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.4);border-radius:4px;
+    color:#00d4ff;font-family:'Courier New',monospace;font-size:12px;letter-spacing:3px;
+    text-decoration:none;transition:all .18s;cursor:pointer;}
+  .hero-cta:hover{background:rgba(0,212,255,.16);border-color:rgba(0,212,255,.7);
+    box-shadow:0 0 30px rgba(0,212,255,.2);color:#fff;}
+  .hero-cta-arrow{font-size:16px;transition:transform .18s;}
+  .hero-cta:hover .hero-cta-arrow{transform:translateX(4px);}
+
+  /* Stats strip */
+  .stats-strip{display:flex;gap:0;border:1px solid rgba(0,212,255,.1);border-radius:6px;
+    overflow:hidden;margin:60px 0;width:100%;max-width:760px;}
+  .stat-cell{flex:1;padding:22px 18px;text-align:center;border-right:1px solid rgba(0,212,255,.08);}
+  .stat-cell:last-child{border-right:none;}
+  .stat-val{font-size:clamp(20px,3vw,30px);color:#00d4ff;letter-spacing:3px;
+    text-shadow:0 0 20px rgba(0,212,255,.5);}
+  .stat-lbl{font-size:8px;letter-spacing:2px;color:rgba(160,196,255,.35);margin-top:6px;text-transform:uppercase;}
+
+  /* Feature grid */
+  .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;
+    width:100%;max-width:900px;margin-bottom:60px;}
+  .feat{background:rgba(0,212,255,.03);border:1px solid rgba(0,212,255,.09);border-radius:6px;
+    padding:22px 20px;transition:all .18s;}
+  .feat:hover{background:rgba(0,212,255,.07);border-color:rgba(0,212,255,.22);transform:translateY(-2px);}
+  .feat-icon{font-size:22px;margin-bottom:12px;}
+  .feat-title{font-size:10px;letter-spacing:2.5px;color:#00d4ff;margin-bottom:8px;text-transform:uppercase;}
+  .feat-desc{font-size:10px;color:rgba(160,196,255,.5);line-height:1.8;letter-spacing:.5px;}
+
+  /* Footer */
+  footer{width:100%;max-width:900px;padding:24px 0;border-top:1px solid rgba(0,212,255,.08);
+    display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
+  .footer-left{font-size:9px;letter-spacing:2px;color:rgba(160,196,255,.25);}
+  .footer-right{display:flex;gap:20px;}
+  .footer-link{font-size:9px;letter-spacing:1.5px;color:rgba(160,196,255,.3);text-decoration:none;transition:color .15s;}
+  .footer-link:hover{color:#00d4ff;}
+
+  /* Scan line animation */
+  @keyframes scan{0%{transform:translateY(-100%);}100%{transform:translateY(100vh);}}
+  .scanline{position:fixed;top:0;left:0;right:0;height:2px;background:rgba(0,212,255,.04);
+    animation:scan 6s linear infinite;pointer-events:none;z-index:2;}
+
+  /* Pulse glow on title */
+  @keyframes glow-pulse{0%,100%{text-shadow:0 0 60px rgba(0,212,255,.25);}50%{text-shadow:0 0 90px rgba(0,212,255,.45);}}
+  .hero-title{animation:glow-pulse 4s ease-in-out infinite;}
+</style>
+</head>
+<body>
+<canvas id="stars"></canvas>
+<div class="grid-overlay"></div>
+<div class="scanline"></div>
+
+<nav class="topbar">
+  <span class="topbar-logo">HYPERLANE</span>
+  <div class="topbar-sep"></div>
+  <span class="topbar-sub">ORG INTELLIGENCE</span>
+  <div class="topbar-right">
+    <a class="topbar-link" href="https://github.com/unique-name27/org-chart-simulator" target="_blank">GITHUB</a>
+    <a class="topbar-link" href="org_sim.html">LAUNCH →</a>
+  </div>
+</nav>
+
+<main class="page">
+  <div class="hero">
+    <div class="hero-eyebrow">◈ Interactive 3D Org Intelligence Platform</div>
+    <h1 class="hero-title">ORG CHART<br><span>SIMULATOR</span></h1>
+    <p class="hero-sub">Explore your entire organization in 3D space. Analyze structure, track growth over time, and fly through your company hierarchy at warp speed.</p>
+    <a class="hero-cta" href="org_sim.html">
+      LAUNCH SIMULATOR <span class="hero-cta-arrow">→</span>
+    </a>
+  </div>
+
+  <div class="stats-strip">
+    <div class="stat-cell">
+      <div class="stat-val">1,800+</div>
+      <div class="stat-lbl">Employees Simulated</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-val">232</div>
+      <div class="stat-lbl">Manager Nodes</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-val">8</div>
+      <div class="stat-lbl">Departments</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-val">7yr</div>
+      <div class="stat-lbl">Growth Timeline</div>
+    </div>
+  </div>
+
+  <div class="features">
+    <div class="feat">
+      <div class="feat-icon">🌐</div>
+      <div class="feat-title">3D Org Tree</div>
+      <div class="feat-desc">Radial hierarchy rendered in WebGL with energy pulses flowing bidirectionally along every connection.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">◷</div>
+      <div class="feat-title">Growth Timeline</div>
+      <div class="feat-desc">Scrub through quarterly company history from 2018 to present. Watch headcount grow in real time.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">⚡</div>
+      <div class="feat-title">Spaceship FPS Mode</div>
+      <div class="feat-desc">Fly through your org chart in first-person with momentum, warp boost, roll, and a targeting reticle.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">◈</div>
+      <div class="feat-title">Org Health Analytics</div>
+      <div class="feat-desc">Span-of-control warnings, IC burden, deep hierarchy flags, attrition rates, and high-turnover managers.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">⟳</div>
+      <div class="feat-title">Reorg Simulator</div>
+      <div class="feat-desc">Drag entire teams to new managers with animated parabolic arc transitions. Preview before committing.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">⬡</div>
+      <div class="feat-title">Chain & Filter</div>
+      <div class="feat-desc">Click any node to trace its full reporting chain. Filter by department, level, or search by name.</div>
+    </div>
+  </div>
+
+  <footer>
+    <span class="footer-left">HYPERLANE ORG CHART SIMULATOR — BUILT WITH THREE.JS</span>
+    <div class="footer-right">
+      <a class="footer-link" href="https://github.com/unique-name27/org-chart-simulator" target="_blank">SOURCE</a>
+      <a class="footer-link" href="org_sim.html">LAUNCH</a>
+    </div>
+  </footer>
+</main>
+
+<script>
+// Starfield
+const canvas=document.getElementById('stars');
+const ctx=canvas.getContext('2d');
+let stars=[];
+function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;stars=Array.from({length:220},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.2+.2,o:Math.random()*.7+.15,s:Math.random()*.4+.05}));}
+window.addEventListener('resize',resize);resize();
+function drawStars(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.o+=Math.sin(Date.now()*0.001*s.s)*0.005;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fillStyle=`rgba(160,210,255,${Math.max(.05,Math.min(.85,s.o))})`;ctx.fill();});requestAnimationFrame(drawStars);}
+drawStars();
+</script>
+</body>
+</html>
