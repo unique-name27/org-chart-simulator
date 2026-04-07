@@ -270,6 +270,12 @@ body{background:#000814;overflow:hidden;font-family:'Courier New',monospace;colo
 .ap-flag-under{background:rgba(255,200,50,.08);border:1px solid rgba(255,200,50,.3);color:#ffc832;}
 .ap-flag-link{cursor:pointer;border-radius:3px;transition:background .12s;}
 .ap-flag-link:hover{background:rgba(0,212,255,.07);}
+.ap-clickable{cursor:pointer;transition:background .12s,border-color .12s;}
+.ap-bar-row.ap-clickable:hover{background:rgba(0,212,255,.08);border-radius:3px;}
+.ap-stat.ap-clickable:hover{background:rgba(0,212,255,.1);border-color:rgba(0,212,255,.3);}
+.ap-stat.ap-hl-active{border-color:rgba(0,212,255,.55)!important;box-shadow:0 0 10px rgba(0,212,255,.2);}
+.ap-lbl.ap-clickable:hover{color:rgba(0,212,255,.9);}
+.ap-lbl.ap-clickable{cursor:pointer;transition:color .12s;}
 
 /* ── SPAN VIEW / COST VIEW overlays ── */
 .tbtn.span-on{background:rgba(0,255,160,.09);border-color:rgba(0,255,160,.42);color:#00ffa0;}
@@ -1834,6 +1840,16 @@ document.getElementById('btn-pop').addEventListener('click',function(){
   document.getElementById('pop-legend').classList.toggle('visible',populationVisible);
 });
 
+// ─── ANALYTICS HIGHLIGHT MODE ─────────────────────────────────
+let apHighlightMode=false,apHighlightIds=new Set();
+function apHighlight(ids){
+  apHighlightIds=new Set(ids.map(Number).filter(Boolean));
+  apHighlightMode=apHighlightIds.size>0;
+  // mark active stat card visually
+  document.querySelectorAll('.ap-stat.ap-hl-active,.ap-lbl.ap-hl-active').forEach(el=>el.classList.remove('ap-hl-active'));
+}
+function clearApHighlight(){apHighlightMode=false;apHighlightIds.clear();document.querySelectorAll('.ap-hl-active').forEach(el=>el.classList.remove('ap-hl-active'));}
+
 // ─── CHAIN MODE ───────────────────────────────────────────────
 let chainMode=false,chainCenter=null,chainAncs=new Set(),chainDescs=new Set();
 function activateChain(id){chainMode=true;chainCenter=id;chainAncs=getAncestors(id);chainDescs=getDescendants(id);
@@ -1985,7 +2001,7 @@ renderer.domElement.addEventListener('click',e=>{
     showCard(id);flyTo(id);
   } else {
     if(suggestMode){suggestSource=null;suggestHighlight=null;document.getElementById('rp-suggest-status').textContent='① Click a node to MOVE…';}
-    else{hideCard();clearChain();}
+    else{hideCard();clearChain();clearApHighlight();}
   }
 });
 renderer.domElement.addEventListener('mousemove',e=>{
@@ -2018,6 +2034,7 @@ document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockEleme
 
 document.addEventListener('keydown',e=>{keys[e.code]=true;
   if(e.code==='Escape'&&mode==='fps'){if(fpMouseLook){document.exitPointerLock();}else{exitFPS();}}
+  if(e.code==='Escape'&&apHighlightMode)clearApHighlight();
   if(e.code==='KeyF'&&mode==='fps'&&nearNode)showCard(nearNode.id);
 });
 document.addEventListener('keyup',e=>{keys[e.code]=false;});
@@ -2171,6 +2188,11 @@ function animate(){
       else if(chainAncs.has(nd.id)){emissive=1.6;nd.mesh.scale.setScalar(1.05);}
       else if(chainDescs.has(nd.id)){emissive=0.9;nd.mesh.scale.setScalar(1.0);}
       else{opacity=0.05;emissive=0.03;nd.mesh.scale.setScalar(1.0);}
+    } else if(apHighlightMode){
+      if(apHighlightIds.has(nd.id)){
+        emissive=2.0+Math.sin(time*2.8+i*.4)*.5;
+        nd.mesh.scale.setScalar(1.05+Math.sin(time*3+i*.3)*.03);
+      } else {opacity=0.05;emissive=0.03;nd.mesh.scale.setScalar(1.0);}
     } else if(!nd.filterPass){
       opacity=0.06;emissive=0.03;nd.mesh.scale.setScalar(1.0);
     } else {
@@ -2301,17 +2323,38 @@ function buildAnalytics(){
   const lvlCounts={};
   nodeDatas.forEach(nd=>{lvlCounts[nd.level]=(lvlCounts[nd.level]||0)+1;});
 
+  // ── Pre-compute ID groups for highlight click-through
+  const spanBucketIds={'1':[],'2-3':[],'4-6':[],'7-9':[],'10+':[]};
+  Object.entries(spans).forEach(([mid,s])=>{
+    const key=s===1?'1':s<=3?'2-3':s<=6?'4-6':s<=9?'7-9':'10+';
+    spanBucketIds[key].push(mid);
+  });
+  const levelLabelMap=['L1 CEO','L2 C-Suite/SVP','L3 VP','L4 Director','L5 Sr Manager'];
+  const levelIds={};
+  nodeDatas.forEach(nd=>{const lbl=levelLabelMap[nd.level]||`L${nd.level}`;if(!levelIds[lbl])levelIds[lbl]=[];levelIds[lbl].push(String(nd.id));});
+  const deptNodeIds={};ORG.forEach(n=>{if(!deptNodeIds[n.dept])deptNodeIds[n.dept]=[];deptNodeIds[n.dept].push(String(n.id));});
+  const locNodeIds={};ORG.forEach(n=>{if(!locNodeIds[n.loc])locNodeIds[n.loc]=[];locNodeIds[n.loc].push(String(n.id));});
+  const anomalyIds=[...new Set([...wideSpan,...narrowSpan,...icOverloaded,...icSparse,...highAttritionMgrs,...deepHeavy].map(([id])=>id))];
+  const departedMgrIds=departedMgrs.map(e=>String(e.id));
+  const hiAttrIds=highAttritionMgrs.map(([id])=>id);
+  const shortTenureIds=shortTenureHeavy.map(([id])=>id);
+  const widestIds=wideSpan.slice(0,10).map(([id])=>id);
+  const narrowIds=narrowSpan.slice(0,10).map(([id])=>id);
+
   // ── Helpers
-  function barChart(entries,maxVal,colorFn,suffix=''){
+  function barChart(entries,maxVal,colorFn,suffix='',idsForRow=null){
     return entries.map(([lbl,val])=>{
       const pct=Math.round(val/Math.max(maxVal,1)*100),col=colorFn?colorFn(lbl,val):'#00d4ff';
-      return`<div class="ap-bar-row"><div class="ap-bar-lbl" title="${lbl}">${lbl}</div><div class="ap-bar-track"><div class="ap-bar-fill" style="width:${pct}%;background:${col};"></div></div><div class="ap-bar-val">${typeof val==='number'&&!Number.isInteger(val)?val.toFixed(1):val}${suffix}</div></div>`;
+      const ids=idsForRow?idsForRow(lbl,val):[];
+      const cls=ids.length?'ap-clickable':'';
+      const attr=ids.length?`data-ap-ids="${ids.join(',')}" title="Click to highlight ${ids.length} node${ids.length>1?'s':''}"`:'' ;
+      return`<div class="ap-bar-row ${cls}" ${attr}><div class="ap-bar-lbl" title="${lbl}">${lbl}</div><div class="ap-bar-track"><div class="ap-bar-fill" style="width:${pct}%;background:${col};"></div></div><div class="ap-bar-val">${typeof val==='number'&&!Number.isInteger(val)?val.toFixed(1):val}${suffix}</div></div>`;
     }).join('');
   }
   const flagRows=(arr,cls,labelFn)=>arr.slice(0,10).map(([id,val])=>{
     const nd=nodeDatas.find(n=>n.id===parseInt(id));if(!nd)return'';
     const col=DEPT[nd.data.dept]?.css??'#fff';
-    return`<div class="ap-flag-row ap-flag-link" data-node-id="${id}">
+    return`<div class="ap-flag-row ap-flag-link" data-node-id="${id}" data-ap-ids="${id}" title="Click to fly to ${nd.data.name}">
       <div class="ap-flag-dot" style="background:${col};box-shadow:0 0 4px ${col};"></div>
       <div class="ap-flag-name" title="${nd.data.name}">${nd.data.name}</div>
       <span class="ap-flag-badge ${cls}">${labelFn(val)}</span>
@@ -2325,57 +2368,57 @@ function buildAnalytics(){
   <div class="ap-sec">
     <div class="ap-lbl">COMPANY SNAPSHOT</div>
     <div class="ap-stat-grid">
-      <div class="ap-stat"><div class="ap-stat-val">${totalPpl.toLocaleString()}</div><div class="ap-stat-lbl">Total Employees</div></div>
-      <div class="ap-stat"><div class="ap-stat-val">${totalMgrs}</div><div class="ap-stat-lbl">Managers (L1–L5)</div></div>
-      <div class="ap-stat"><div class="ap-stat-val">${totalICs.toLocaleString()}</div><div class="ap-stat-lbl">Individual Contributors</div></div>
-      <div class="ap-stat"><div class="ap-stat-val">${icRatio}x</div><div class="ap-stat-lbl">IC-to-Manager Ratio</div></div>
-      <div class="ap-stat"><div class="ap-stat-val">${avgSpan}</div><div class="ap-stat-lbl">Avg Span of Control</div></div>
-      <div class="ap-stat"><div class="ap-stat-val">${maxDepth}</div><div class="ap-stat-lbl">Org Layers (depth)</div></div>
-      <div class="ap-stat ${anomalyCount>30?'danger':anomalyCount>15?'warn':''}"><div class="ap-stat-val">${anomalyCount}</div><div class="ap-stat-lbl">⚠ Structural Anomalies</div></div>
-      <div class="ap-stat ${highAttritionMgrs.length>20?'danger':highAttritionMgrs.length>10?'warn':''}"><div class="ap-stat-val">${highAttritionMgrs.length}</div><div class="ap-stat-lbl">High-Attrition Mgrs</div></div>
+      <div class="ap-stat ap-clickable" data-ap-ids="${ORG.map(n=>n.id).join(',')}" title="Click to highlight all managers"><div class="ap-stat-val">${totalPpl.toLocaleString()}</div><div class="ap-stat-lbl">Total Employees</div></div>
+      <div class="ap-stat ap-clickable" data-ap-ids="${ORG.map(n=>n.id).join(',')}" title="Click to highlight all manager nodes"><div class="ap-stat-val">${totalMgrs}</div><div class="ap-stat-lbl">Managers (L1–L5)</div></div>
+      <div class="ap-stat ap-clickable" data-ap-ids="${leafMgrs.map(n=>n.id).join(',')}" title="Click to highlight IC-carrying managers"><div class="ap-stat-val">${totalICs.toLocaleString()}</div><div class="ap-stat-lbl">Individual Contributors</div></div>
+      <div class="ap-stat ap-clickable" data-ap-ids="${leafMgrs.map(n=>n.id).join(',')}" title="Click to highlight leaf managers"><div class="ap-stat-val">${icRatio}x</div><div class="ap-stat-lbl">IC-to-Manager Ratio</div></div>
+      <div class="ap-stat ap-clickable" data-ap-ids="${widestIds.join(',')}" title="Click to highlight widest-span managers"><div class="ap-stat-val">${avgSpan}</div><div class="ap-stat-lbl">Avg Span of Control</div></div>
+      <div class="ap-stat ap-clickable" data-ap-ids="${(levelIds['L5 Sr Manager']||[]).join(',')}" title="Click to highlight deepest layer"><div class="ap-stat-val">${maxDepth}</div><div class="ap-stat-lbl">Org Layers (depth)</div></div>
+      <div class="ap-stat ap-clickable ${anomalyCount>30?'danger':anomalyCount>15?'warn':''}" data-ap-ids="${anomalyIds.join(',')}" title="Click to highlight all anomaly nodes"><div class="ap-stat-val">${anomalyCount}</div><div class="ap-stat-lbl">⚠ Structural Anomalies</div></div>
+      <div class="ap-stat ap-clickable ${highAttritionMgrs.length>20?'danger':highAttritionMgrs.length>10?'warn':''}" data-ap-ids="${hiAttrIds.join(',')}" title="Click to highlight high-attrition managers"><div class="ap-stat-val">${highAttritionMgrs.length}</div><div class="ap-stat-lbl">High-Attrition Mgrs</div></div>
     </div>
   </div>
 
   <div class="ap-sec">
     <div class="ap-lbl">ATTRITION OVERVIEW</div>
     <div class="ap-stat-grid">
-      <div class="ap-stat ${parseFloat(allTimeAttritionPct)>12?'danger':parseFloat(allTimeAttritionPct)>7?'warn':''}">
+      <div class="ap-stat ap-clickable ${parseFloat(allTimeAttritionPct)>12?'danger':parseFloat(allTimeAttritionPct)>7?'warn':''}" data-ap-ids="${departedMgrIds.join(',')}" title="Click to highlight departed managers">
         <div class="ap-stat-val">${allTimeAttritionPct}%</div><div class="ap-stat-lbl">All-Time Attrition</div></div>
-      <div class="ap-stat"><div class="ap-stat-val">${totalInactive.toLocaleString()}</div><div class="ap-stat-lbl">Total Departed</div></div>
-      <div class="ap-stat ${departedMgrs.length>8?'danger':departedMgrs.length>3?'warn':''}">
+      <div class="ap-stat ap-clickable" data-ap-ids="${departedMgrIds.join(',')}" title="Click to highlight all departed managers"><div class="ap-stat-val">${totalInactive.toLocaleString()}</div><div class="ap-stat-lbl">Total Departed</div></div>
+      <div class="ap-stat ap-clickable ${departedMgrs.length>8?'danger':departedMgrs.length>3?'warn':''}" data-ap-ids="${departedMgrIds.join(',')}" title="Click to highlight departed managers">
         <div class="ap-stat-val">${departedMgrs.length}</div><div class="ap-stat-lbl">Managers Departed</div></div>
-      <div class="ap-stat ${totalShortTenureExits>30?'danger':totalShortTenureExits>15?'warn':''}">
+      <div class="ap-stat ap-clickable ${totalShortTenureExits>30?'danger':totalShortTenureExits>15?'warn':''}" data-ap-ids="${shortTenureIds.join(',')}" title="Click to highlight short-tenure managers">
         <div class="ap-stat-val">${totalShortTenureExits}</div><div class="ap-stat-lbl">Short-Tenure Exits (&lt;2yr)</div></div>
     </div>
   </div>
 
   <div class="ap-sec">
-    <div class="ap-lbl">IC TURNOVER BY DEPARTMENT (%)</div>
-    ${barChart(Object.entries(deptTurnover).sort(([,a],[,b])=>b-a),maxDeptTurnover,(dept,v)=>attrColor(v),'%')}
+    <div class="ap-lbl ap-clickable" data-ap-ids="${Object.values(deptNodeIds).flat().join(',')}" title="Click to highlight all dept nodes">IC TURNOVER BY DEPARTMENT (%)</div>
+    ${barChart(Object.entries(deptTurnover).sort(([,a],[,b])=>b-a),maxDeptTurnover,(dept,v)=>attrColor(v),'%',(dept)=>deptNodeIds[dept]||[])}
   </div>
 
   <div class="ap-sec">
-    <div class="ap-lbl">SPAN OF CONTROL DISTRIBUTION</div>
-    ${barChart(Object.entries(spanBuckets),maxBucket,lbl=>lbl==='4-6'?'#00ffa0':lbl==='10+'?'#ff6060':lbl==='1'?'#ffc832':'#00d4ff')}
+    <div class="ap-lbl ap-clickable" data-ap-ids="${Object.values(spanBucketIds).flat().join(',')}" title="Click to highlight all manager nodes">SPAN OF CONTROL DISTRIBUTION</div>
+    ${barChart(Object.entries(spanBuckets),maxBucket,lbl=>lbl==='4-6'?'#00ffa0':lbl==='10+'?'#ff6060':lbl==='1'?'#ffc832':'#00d4ff','',lbl=>spanBucketIds[lbl]||[])}
   </div>
 
   <div class="ap-sec">
-    <div class="ap-lbl">HEADCOUNT BY DEPARTMENT</div>
-    ${barChart(Object.entries(deptHC).sort(([,a],[,b])=>b-a),maxDeptHC,dept=>DEPT[dept]?.css??'#fff')}
+    <div class="ap-lbl ap-clickable" data-ap-ids="${Object.values(deptNodeIds).flat().join(',')}" title="Click to highlight all dept nodes">HEADCOUNT BY DEPARTMENT</div>
+    ${barChart(Object.entries(deptHC).sort(([,a],[,b])=>b-a),maxDeptHC,dept=>DEPT[dept]?.css??'#fff','',dept=>deptNodeIds[dept]||[])}
   </div>
 
   <div class="ap-sec">
-    <div class="ap-lbl">MANAGERS BY LEVEL</div>
-    ${barChart(Object.entries(lvlCounts).sort(([a],[b])=>a-b).map(([l,c])=>[['L1 CEO','L2 C-Suite/SVP','L3 VP','L4 Director','L5 Sr Manager'][parseInt(l)]||`L${l}`,c]),Math.max(...Object.values(lvlCounts)),()=>'#00d4ff')}
+    <div class="ap-lbl ap-clickable" data-ap-ids="${Object.values(levelIds).flat().join(',')}" title="Click to highlight all manager levels">MANAGERS BY LEVEL</div>
+    ${barChart(Object.entries(lvlCounts).sort(([a],[b])=>a-b).map(([l,c])=>[(levelLabelMap[parseInt(l)]||`L${l}`),c]),Math.max(...Object.values(lvlCounts)),()=>'#00d4ff','',lbl=>levelIds[lbl]||[])}
   </div>
 
   <div class="ap-sec">
     <div class="ap-lbl">HEADCOUNT BY LOCATION (top 8)</div>
-    ${barChart(locEntries.slice(0,8),maxLocHC,()=>'#6a8fff')}
+    ${barChart(locEntries.slice(0,8),maxLocHC,()=>'#6a8fff','',loc=>locNodeIds[loc]||[])}
   </div>
 
   <div class="ap-sec">
-    <div class="ap-lbl" style="color:rgba(255,96,96,.75);">⚠ ANOMALIES — click any row to zoom &amp; highlight</div>
+    <div class="ap-lbl ap-clickable" data-ap-ids="${anomalyIds.join(',')}" style="color:rgba(255,96,96,.75);" title="Click to highlight all anomaly nodes">⚠ ANOMALIES — click anything to highlight on screen</div>
     <div style="font-size:8px;color:rgba(160,196,255,.3);letter-spacing:.5px;margin-top:-4px;margin-bottom:8px;">${anomalyCount} structural + ${highAttritionMgrs.length} attrition issues · avg team size ${avgHC.toFixed(1)} ICs</div>
   </div>
 
@@ -2429,12 +2472,40 @@ function buildAnalytics(){
     ${flagRows(icSparse,'ap-flag-under',v=>`${v} ICs`)}
   </div>`:''}`;
 
-  // ── Click any flag row → fly + chain highlight
-  el.querySelectorAll('.ap-flag-link[data-node-id]').forEach(row=>{
-    row.addEventListener('click',()=>{
-      const id=parseInt(row.dataset.nodeId);
+  // ── Unified click handler — works for flag rows, stat cards, bar rows, section labels
+  el.addEventListener('click',e=>{
+    // Single-node flag row: fly + chain + highlight
+    const flagRow=e.target.closest('[data-node-id]');
+    if(flagRow){
+      const id=parseInt(flagRow.dataset.nodeId);
+      apHighlight([id]);
       flyTo(id);activateChain(id);
-    });
+      document.querySelectorAll('.ap-hl-active').forEach(x=>x.classList.remove('ap-hl-active'));
+      flagRow.classList.add('ap-hl-active');
+      return;
+    }
+    // Multi-node: stat cards, bar rows, section labels
+    const idsEl=e.target.closest('[data-ap-ids]');
+    if(idsEl){
+      const ids=idsEl.dataset.apIds.split(',').map(Number).filter(Boolean);
+      if(!ids.length)return;
+      apHighlight(ids);
+      document.querySelectorAll('.ap-hl-active').forEach(x=>x.classList.remove('ap-hl-active'));
+      idsEl.classList.add('ap-hl-active');
+      if(ids.length===1){flyTo(ids[0]);activateChain(ids[0]);}
+      else{
+        // Fly camera to centroid of the group
+        let cx=0,cy=0,cz=0,n=0;
+        ids.forEach(id=>{const nd=nodeDatas.find(x=>x.id===id);if(nd){cx+=nd.pos.x;cy+=nd.pos.y;cz+=nd.pos.z;n++;}});
+        if(n&&mode==='overview'){
+          flyP0.copy(camera.position);flyC0.copy(controls.target);
+          const spread=Math.max(40,n*0.8);
+          flyP1.set(cx/n,cy/n+spread*.35,cz/n+spread);flyC1.set(cx/n,cy/n,cz/n);flyT=0;
+        }
+        clearChain();
+      }
+      showToast(`◈ Highlighting ${ids.length} node${ids.length>1?'s':''}`);
+    }
   });
 }
 
