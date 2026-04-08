@@ -280,6 +280,48 @@ body{background:#000814;overflow:hidden;font-family:'Courier New',monospace;colo
 /* ── SPAN VIEW / COST VIEW overlays ── */
 .tbtn.span-on{background:rgba(0,255,160,.09);border-color:rgba(0,255,160,.42);color:#00ffa0;}
 .tbtn.cost-on{background:rgba(255,200,50,.09);border-color:rgba(255,200,50,.42);color:#ffc832;}
+.tbtn.share-on{background:rgba(0,255,160,.09);border-color:rgba(0,255,160,.42);color:#00ffa0;}
+
+/* ── IMPORT COLUMN MAPPER MODAL ── */
+#import-modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:600;
+  align-items:center;justify-content:center;}
+#import-modal.open{display:flex;}
+.im-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,14,.75);}
+.im-box{position:relative;width:540px;max-height:82vh;background:rgba(0,6,20,.98);
+  border:1px solid rgba(0,212,255,.3);border-radius:6px;overflow:hidden;display:flex;
+  flex-direction:column;box-shadow:0 0 60px rgba(0,212,255,.12);}
+.im-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px 12px;
+  border-bottom:1px solid rgba(0,212,255,.1);}
+.im-title{font-size:10px;letter-spacing:3px;color:#00d4ff;}
+#im-cancel{background:none;border:1px solid rgba(0,212,255,.2);color:rgba(160,196,255,.5);
+  font-size:12px;width:24px;height:24px;border-radius:3px;cursor:pointer;font-family:monospace;}
+.im-body{overflow-y:auto;padding:14px 18px;flex:1;}
+.im-info{font-size:9px;color:rgba(160,196,255,.45);letter-spacing:.5px;line-height:1.7;
+  margin-bottom:14px;padding:8px 10px;background:rgba(0,212,255,.04);border-radius:3px;
+  border:1px solid rgba(0,212,255,.08);}
+.im-map-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;}
+.im-field{display:flex;flex-direction:column;gap:4px;}
+.im-field-lbl{font-size:8px;letter-spacing:2px;color:rgba(0,212,255,.6);}
+.im-field-lbl .req{color:#ff6060;}
+.im-field select{background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.2);
+  border-radius:3px;color:#a0c4ff;font-family:'Courier New',monospace;font-size:10px;
+  padding:5px 8px;outline:none;cursor:pointer;}
+.im-field select:focus{border-color:rgba(0,212,255,.5);}
+.im-preview-lbl{font-size:8px;letter-spacing:2px;color:rgba(0,212,255,.4);margin-bottom:6px;}
+.im-preview-table{width:100%;border-collapse:collapse;font-size:9px;margin-bottom:14px;}
+.im-preview-table th{text-align:left;padding:4px 6px;color:rgba(0,212,255,.5);font-weight:normal;
+  border-bottom:1px solid rgba(0,212,255,.1);letter-spacing:1px;}
+.im-preview-table td{padding:3px 6px;color:rgba(160,196,255,.65);border-bottom:1px solid rgba(0,212,255,.04);}
+.im-preview-table tr:hover td{background:rgba(0,212,255,.04);}
+.im-footer{padding:12px 18px;border-top:1px solid rgba(0,212,255,.1);display:flex;gap:10px;justify-content:flex-end;}
+#im-apply{background:rgba(0,212,255,.12);border:1px solid rgba(0,212,255,.4);border-radius:3px;
+  color:#00d4ff;font-family:'Courier New',monospace;font-size:10px;letter-spacing:2px;
+  padding:7px 20px;cursor:pointer;}
+#im-apply:hover{background:rgba(0,212,255,.22);border-color:#00d4ff;}
+#im-cancel-btn{background:none;border:1px solid rgba(160,196,255,.15);border-radius:3px;
+  color:rgba(160,196,255,.4);font-family:'Courier New',monospace;font-size:10px;letter-spacing:1px;
+  padding:7px 14px;cursor:pointer;}
+#im-cancel-btn:hover{border-color:rgba(160,196,255,.35);color:rgba(160,196,255,.7);}
 
 /* ── SAVED VIEWS PANEL ── */
 #views-panel{position:fixed;top:52px;left:0;width:220px;background:rgba(0,6,18,.96);
@@ -386,6 +428,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   <button class="tbtn" id="btn-png">⬇ PNG</button>
   <button class="tbtn" id="btn-export">↓ EXPORT</button>
   <button class="tbtn" id="btn-import">↑ IMPORT</button>
+  <button class="tbtn" id="btn-share">📤 SHARE</button>
   <button class="tbtn" id="btn-mode">⚡ SPACE FLIGHT</button>
   <button class="tbtn" id="btn-timeline">◷ TIMELINE</button>
   <div id="stats-bar"></div>
@@ -403,7 +446,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 </div>
 
 <!-- FILTER PANEL -->
-<div id="filter-panel">
+<div id="filter-panel" class="open">
   <div class="fp-head"><span>FILTERS &amp; SLICERS</span><button id="fp-close">✕</button></div>
 
   <div class="fp-sec">
@@ -569,6 +612,31 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 <div id="mode-overlay"><div id="mode-text"></div></div>
 <input type="file" id="org-file-input" accept=".xlsx,.csv" style="display:none">
+
+<!-- IMPORT COLUMN MAPPER MODAL -->
+<div id="import-modal">
+  <div class="im-overlay"></div>
+  <div class="im-box">
+    <div class="im-head">
+      <span class="im-title">↑ MAP COLUMNS TO IMPORT</span>
+      <button id="im-cancel">✕</button>
+    </div>
+    <div class="im-body">
+      <div class="im-info">
+        Match your spreadsheet's column headers to the required fields below.<br>
+        Required fields: <span style="color:#ff6060;">ID · Name · Title · Dept · Manager ID</span><br>
+        Optional: HC (team size) · BU · Function · Location
+      </div>
+      <div class="im-map-grid" id="im-map-grid"></div>
+      <div class="im-preview-lbl">PREVIEW — FIRST 3 ROWS</div>
+      <div style="overflow-x:auto;"><table class="im-preview-table" id="im-preview-table"></table></div>
+    </div>
+    <div class="im-footer">
+      <button id="im-cancel-btn">CANCEL</button>
+      <button id="im-apply">↑ IMPORT ROWS</button>
+    </div>
+  </div>
+</div>
 <div id="custom-org-badge" style="display:none;position:fixed;top:58px;right:14px;z-index:95;
   background:rgba(0,255,180,.1);border:1px solid rgba(0,255,180,.4);border-radius:3px;
   padding:4px 10px;font-size:9px;color:#00ffb8;font-family:monospace;letter-spacing:1px;">
@@ -901,11 +969,25 @@ let ORG = [
   {id:232, name:'Wil Thompson',      title:'Sr. Manager, Vulnerability & Pen Testing',dept:'Operations',managerId:77,  hc:9},
 ];
 
-// ─── CUSTOM ORG (from import) ─────────────────────────────────
+// ─── CUSTOM ORG (from import / URL / localStorage) ───────────
 let isCustomOrg=false;
-try{const _c=sessionStorage.getItem('customOrg');if(_c){ORG=JSON.parse(_c);isCustomOrg=true;}}catch(e){sessionStorage.removeItem('customOrg');}
+(function loadCustomOrg(){
+  // Priority: ?org= URL param > localStorage
+  try{
+    const params=new URLSearchParams(window.location.search);
+    const urlOrg=params.get('org');
+    if(urlOrg){
+      const decoded=JSON.parse(decodeURIComponent(atob(urlOrg)));
+      if(Array.isArray(decoded)&&decoded.length){ORG=decoded;isCustomOrg=true;return;}
+    }
+  }catch(e){}
+  try{
+    const _c=localStorage.getItem('customOrg');
+    if(_c){ORG=JSON.parse(_c);isCustomOrg=true;}
+  }catch(e){localStorage.removeItem('customOrg');}
+})();
 if(isCustomOrg){document.getElementById('custom-org-badge').style.display='block';}
-window.clearCustomOrg=function(){sessionStorage.removeItem('customOrg');location.reload();};
+window.clearCustomOrg=function(){localStorage.removeItem('customOrg');const u=new URL(location.href);u.searchParams.delete('org');history.replaceState(null,'',u);location.reload();};
 
 // ─── ASSIGN HIRE / DEPARTURE DATES ────────────────────────────
 // Growth narrative: founded 2016 with tiny team, slow build 2016-2021,
@@ -1064,47 +1146,124 @@ document.getElementById('btn-export').addEventListener('click',()=>{
   showToast(`↓ Exported ${ORG.length} managers + ${IC_DATA.length} ICs to hyperlane_org.xlsx`);
 });
 
+// ─── IMPORT WITH COLUMN MAPPER ────────────────────────────────
 const fileInput=document.getElementById('org-file-input');
+let _importRows=[];  // raw parsed rows held between file read and modal confirm
+
+const IM_FIELDS=[
+  {key:'id',       label:'ID',         required:true,  aliases:['id','emp_id','employee_id','person_id','eid']},
+  {key:'name',     label:'Full Name',  required:true,  aliases:['name','full_name','employee_name','display_name']},
+  {key:'title',    label:'Job Title',  required:true,  aliases:['title','job_title','position','role','job_role']},
+  {key:'dept',     label:'Department', required:true,  aliases:['dept','department','division','org','team']},
+  {key:'managerId',label:'Manager ID', required:true,  aliases:['managerid','manager_id','reports_to','mgr_id','supervisor_id']},
+  {key:'hc',       label:'Team Size',  required:false, aliases:['hc','headcount','team_size','direct_ic_count']},
+  {key:'bu',       label:'Business Unit',required:false,aliases:['bu','business_unit','business unit','biz_unit']},
+  {key:'func',     label:'Function',   required:false, aliases:['func','function','sub_function','job_function']},
+  {key:'loc',      label:'Location',   required:false, aliases:['loc','location','office','city','site']},
+];
+
+function autoMap(cols){
+  const map={};
+  IM_FIELDS.forEach(f=>{
+    const hit=cols.find(c=>f.aliases.includes(c.toLowerCase().replace(/\s+/g,'_')));
+    map[f.key]=hit||'';
+  });
+  return map;
+}
+
+function openImportModal(rows,cols){
+  _importRows=rows;
+  const map=autoMap(cols);
+  const grid=document.getElementById('im-map-grid');
+  grid.innerHTML=IM_FIELDS.map(f=>`
+    <div class="im-field">
+      <div class="im-field-lbl">${f.label}${f.required?` <span class="req">✱</span>`:''}</div>
+      <select id="im-sel-${f.key}">
+        ${f.required?'':'<option value="">(skip)</option>'}
+        ${cols.map(c=>`<option value="${c}"${map[f.key]===c?' selected':''}>${c}</option>`).join('')}
+      </select>
+    </div>`).join('');
+  // Live-update preview when mapping changes
+  grid.querySelectorAll('select').forEach(s=>s.addEventListener('change',renderImPreview));
+  renderImPreview();
+  document.getElementById('import-modal').classList.add('open');
+}
+
+function renderImPreview(){
+  const cols=IM_FIELDS.map(f=>({key:f.key,label:f.label,col:document.getElementById(`im-sel-${f.key}`)?.value||''}));
+  const tbl=document.getElementById('im-preview-table');
+  const preview=_importRows.slice(0,3);
+  tbl.innerHTML=`<tr>${cols.map(c=>`<th>${c.label}</th>`).join('')}</tr>`
+    +preview.map(r=>`<tr>${cols.map(c=>`<td>${c.col?r[c.col]??'—':'—'}</td>`).join('')}</tr>`).join('');
+}
+
+function closeImportModal(){document.getElementById('import-modal').classList.remove('open');_importRows=[];}
+
+document.getElementById('im-cancel').addEventListener('click',closeImportModal);
+document.getElementById('im-cancel-btn').addEventListener('click',closeImportModal);
+document.getElementById('import-modal').querySelector('.im-overlay').addEventListener('click',closeImportModal);
+
+document.getElementById('im-apply').addEventListener('click',()=>{
+  try{
+    const getCol=key=>document.getElementById(`im-sel-${key}`)?.value||'';
+    const req=['id','name','title','dept','managerId'];
+    for(const k of req){if(!getCol(k))throw new Error(`Required field "${k}" not mapped`);}
+    const newOrg=_importRows.map((r,i)=>{
+      const mid=r[getCol('managerId')];
+      return{
+        id:Number(r[getCol('id')])||i+1,
+        name:String(r[getCol('name')]||'').trim(),
+        title:String(r[getCol('title')]||'').trim(),
+        dept:String(r[getCol('dept')]||'Engineering').trim(),
+        managerId:(mid===''||mid==null)?null:Number(mid),
+        hc:Number(r[getCol('hc')])||0,
+        bu:String(r[getCol('bu')]||'').trim()||undefined,
+        func:String(r[getCol('func')]||'').trim()||undefined,
+        loc:String(r[getCol('loc')]||'').trim()||undefined,
+      };
+    });
+    const roots=newOrg.filter(n=>n.managerId===null);
+    if(!roots.length)throw new Error('No root node found — one row must have a blank Manager ID');
+    if(roots.length>1)throw new Error(`Multiple root nodes: ${roots.map(n=>n.name).join(', ')}`);
+    const ids=new Set(newOrg.map(n=>n.id));
+    for(const n of newOrg){if(n.managerId!==null&&!ids.has(n.managerId))throw new Error(`Manager ID ${n.managerId} for "${n.name}" not found`);}
+    localStorage.setItem('customOrg',JSON.stringify(newOrg));
+    closeImportModal();
+    showToast(`↑ Imported ${newOrg.length} people — reloading…`);
+    setTimeout(()=>location.reload(),900);
+  }catch(err){showToast(`Import error: ${err.message}`,'error');}
+});
+
 document.getElementById('btn-import').addEventListener('click',()=>fileInput.click());
 fileInput.addEventListener('change',()=>{
   const file=fileInput.files[0];if(!file)return;
-  fileInput.value=''; // reset so same file can re-trigger
+  fileInput.value='';
   const reader=new FileReader();
   reader.onload=e=>{
     try{
-      const XLSX=window.XLSX;
-      const wb=XLSX.read(e.target.result,{type:'array'});
+      const wb=window.XLSX.read(e.target.result,{type:'array'});
       const ws=wb.Sheets[wb.SheetNames[0]];
-      const rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+      const rows=window.XLSX.utils.sheet_to_json(ws,{defval:''});
       if(!rows.length)throw new Error('No data rows found in the first sheet');
-      const cols=Object.keys(rows[0]);
-      for(const c of ['id','name','title','dept','managerId']){
-        if(!cols.includes(c))throw new Error(`Missing required column: "${c}"`);
-      }
-      const newOrg=rows.map(r=>({
-        id:Number(r.id),
-        name:String(r.name).trim(),
-        title:String(r.title).trim(),
-        dept:String(r.dept).trim(),
-        managerId:(r.managerId===''||r.managerId==null)?null:Number(r.managerId),
-        hc:Number(r.hc)||0,
-        bu:String(r.bu||'').trim()||undefined,
-        func:String(r.func||'').trim()||undefined,
-        loc:String(r.loc||'').trim()||undefined,
-      }));
-      const roots=newOrg.filter(n=>n.managerId===null);
-      if(!roots.length)throw new Error('No root node found (one row must have blank managerId)');
-      if(roots.length>1)throw new Error(`Multiple root nodes found: ${roots.map(n=>n.name).join(', ')}`);
-      const ids=new Set(newOrg.map(n=>n.id));
-      for(const n of newOrg){if(n.managerId!==null&&!ids.has(n.managerId))throw new Error(`managerId ${n.managerId} for "${n.name}" not found`);}
-      sessionStorage.setItem('customOrg',JSON.stringify(newOrg));
-      showToast(`↑ Imported ${newOrg.length} people — reloading…`);
-      setTimeout(()=>location.reload(),900);
-    }catch(err){
-      showToast(`Import error: ${err.message}`,'error');
-    }
+      openImportModal(rows,Object.keys(rows[0]));
+    }catch(err){showToast(`Read error: ${err.message}`,'error');}
   };
   reader.readAsArrayBuffer(file);
+});
+
+// ─── SHARE LINK ───────────────────────────────────────────────
+document.getElementById('btn-share').addEventListener('click',function(){
+  const data=isCustomOrg?ORG:ORG; // always share current org
+  try{
+    const encoded=btoa(encodeURIComponent(JSON.stringify(data)));
+    if(encoded.length>200000){showToast('Org too large for a URL — use ↓ EXPORT instead','error');return;}
+    const url=new URL(location.href);url.searchParams.set('org',encoded);
+    navigator.clipboard.writeText(url.toString()).then(()=>{
+      this.textContent='✓ COPIED';this.classList.add('share-on');
+      setTimeout(()=>{this.textContent='📤 SHARE';this.classList.remove('share-on');},2200);
+    });
+    showToast('📤 Share link copied to clipboard');
+  }catch(e){showToast('Could not generate link','error');}
 });
 
 // ─── ORBIT SPEED CONTROL ─────────────────────────────────────
