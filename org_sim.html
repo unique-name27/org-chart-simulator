@@ -429,6 +429,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   <button class="tbtn" id="btn-export">↓ EXPORT</button>
   <button class="tbtn" id="btn-import">↑ IMPORT</button>
   <button class="tbtn" id="btn-share">📤 SHARE</button>
+  <button class="tbtn" id="btn-simple">◻ SIMPLE</button>
   <button class="tbtn" id="btn-mode">⚡ SPACE FLIGHT</button>
   <button class="tbtn" id="btn-timeline">◷ TIMELINE</button>
   <div id="stats-bar"></div>
@@ -1264,6 +1265,51 @@ document.getElementById('btn-share').addEventListener('click',function(){
     });
     showToast('📤 Share link copied to clipboard');
   }catch(e){showToast('Could not generate link','error');}
+});
+
+// ─── SIMPLE MODE ─────────────────────────────────────────────
+let simpleMode=false;
+document.getElementById('btn-simple').addEventListener('click',function(){
+  simpleMode=!simpleMode;
+  this.textContent=simpleMode?'◼ FULL MODE':'◻ SIMPLE';
+  this.classList.toggle('on',simpleMode);
+
+  // Starfield
+  starGroup.visible=!simpleMode;
+
+  // Bloom: handled in render loop via simpleMode flag
+  // Pixel ratio: 1 in simple, native in full
+  renderer.setPixelRatio(simpleMode?1:Math.min(window.devicePixelRatio,2));
+
+  // Pulses — hide all
+  pulses.forEach(p=>{ p.mesh.visible=!simpleMode; });
+
+  // Tubes — thicker/simpler opacity
+  connData.forEach(c=>{ if(simpleMode){c.tube.material.opacity=0.35;} });
+
+  // Labels — always visible in simple mode
+  nodeDatas.forEach(nd=>{
+    if(nd.labelSpr) nd.labelSpr.material.opacity=simpleMode?1:undefined; // let render loop handle when not simple
+  });
+
+  // IC population — hide in simple
+  if(simpleMode&&populationVisible){
+    document.getElementById('btn-pop').click(); // toggle off
+  }
+
+  // Fog — disable in simple (easier to see distant nodes)
+  scene.fog=simpleMode?null:new THREE.FogExp2(0x000814,0.0007);
+
+  // Node geometries — swap to low-poly in simple, back in full
+  nodeDatas.forEach(nd=>{
+    const r=nd.baseRadius;
+    nd.mesh.geometry.dispose();
+    nd.mesh.geometry=simpleMode
+      ? new THREE.SphereGeometry(r,8,6)
+      : new THREE.SphereGeometry(r,28,18);
+  });
+
+  showToast(simpleMode?'◻ Simple mode — fast & clean':'◼ Full mode — effects restored');
 });
 
 // ─── ORBIT SPEED CONTROL ─────────────────────────────────────
@@ -2359,9 +2405,9 @@ function animate(){
       nd.mesh.scale.setScalar(isNear?1+Math.sin(time*4)*.05:isSel?1.06:1.0);
     }
     mat.transparent=opacity<1;mat.opacity=opacity;mat.emissiveIntensity=emissive;
-    if(nd.labelSpr){nd.labelSpr.material.opacity=(opacity>0.2)?1:0;}
+    if(nd.labelSpr){nd.labelSpr.material.opacity=simpleMode?opacity:((opacity>0.2)?1:0);}
     const tubeDim=chainMode?(!chainAncs.has(nd.id)&&nd.id!==chainCenter&&!chainDescs.has(nd.id)):!nd.filterPass;
-    if(!reorgOpen){connData.forEach(c=>{if(c.childId===nd.id)c.tube.material.opacity=tubeDim?0.02:0.18;});}
+    if(!reorgOpen){connData.forEach(c=>{if(c.childId===nd.id)c.tube.material.opacity=tubeDim?0.02:(simpleMode?0.35:0.18);});}
   });
 
   // ── Chain tube highlight
@@ -2372,8 +2418,8 @@ function animate(){
     });
   }
 
-  // ── Energy pulses (only when reorg not playing)
-  if(!reorgOpen||reorgT===0){
+  // ── Energy pulses (only when reorg not playing, and not in simple mode)
+  if((!reorgOpen||reorgT===0)&&!simpleMode){
     pulses.forEach(p=>{
       const raw=((time*0.26+p.offset)%1.0);
       const t=p.dir>0?raw:1-raw;
@@ -2388,7 +2434,7 @@ function animate(){
   if(mode==='overview'){controls.update();tickFlyTo(dt);}
   else{fpMove(dt);fpProximity();drawMinimap();}
 
-  composer.render();
+  if(simpleMode){renderer.render(scene,camera);}else{composer.render();}
   renderer.autoClear=false;renderer.render(labelScene,camera);renderer.autoClear=true;
 }
 
