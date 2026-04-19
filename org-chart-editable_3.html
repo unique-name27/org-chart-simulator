@@ -3797,7 +3797,7 @@ function ScenarioView() {
 function DetailPanel() {
   const {
     detailPanel: node, annotations, hotspots, setDetailPanel,
-    setFocusRoot, setInsightHighlightIds, setChainFilterId, setDragMode, getNodeColor, focusChain, setExitSimNode,
+    focusSubtree, setDragMode, getNodeColor, focusChain, setExitSimNode,
     showAnnotationForm, setShowAnnotationForm,
     annotationText, setAnnotationText, annotationType, setAnnotationType,
     saveAnnotation, removeAnnotation,
@@ -3891,7 +3891,7 @@ function DetailPanel() {
         <div className="border-t pt-3">
           <h4 className="text-xs font-bold text-gray-600 mb-2">Actions</h4>
           <div className="flex flex-wrap gap-1">
-            <button onClick={() => { setFocusRoot(node.id); setInsightHighlightIds(new Set()); setChainFilterId(null); setDetailPanel(null); }} className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors flex items-center gap-1"><Eye size={10}/>Focus Subtree</button>
+            <button onClick={() => focusSubtree(node.id)} className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors flex items-center gap-1"><Eye size={10}/>Focus Subtree</button>
             <button onClick={() => focusChain(node.id)} className="text-xs bg-violet-50 text-violet-700 border border-violet-200 px-3 py-1.5 rounded hover:bg-violet-100 transition-colors flex items-center gap-1"><GitMerge size={10}/>Full Chain</button>
             <button onClick={() => { setExitSimNode(node); setDetailPanel(null); }} className="text-xs bg-red-50 text-red-700 border border-red-200 px-3 py-1.5 rounded hover:bg-red-100 transition-colors flex items-center gap-1"><AlertOctagon size={10}/>Simulate Exit</button>
             <button onClick={() => { setDragMode("team"); setDetailPanel(null); }} className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors flex items-center gap-1"><Move size={10}/>Move Team</button>
@@ -4822,6 +4822,24 @@ function OrgChartApp() {
     }, 150);
   }, [tree, setChainFilterId, setInsightHighlightIds, setFocusRoot, setExpandedNodes, setDetailPanel, setView]);
 
+  // Focus Subtree: show full tree but collapse everything except the path from CEO → node → node's children.
+  // Ancestors appear as real OrgNode cards (no grey overlay), siblings are collapsed but visible.
+  const focusSubtree = useCallback((nodeId) => {
+    if (!tree.map[nodeId]) return;
+    const ancestorPath = getAncestorPath(tree.map, nodeId);
+    // Expand every ancestor AND the node itself (so its direct reports are visible)
+    const toExpand = new Set(ancestorPath.map(n => n.id));
+    setFocusRoot(null);
+    setInsightHighlightIds(new Set());
+    setChainFilterId(null);
+    setExpandedNodes(toExpand);
+    setDetailPanel(null);
+    setView("org-chart");
+    setTimeout(() => {
+      document.getElementById(`node-${nodeId}`)?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    }, 200);
+  }, [tree, setFocusRoot, setInsightHighlightIds, setChainFilterId, setExpandedNodes, setDetailPanel, setView]);
+
   // teamDragRef.current is set synchronously in onDragStart — avoids e.shiftKey drop-event unreliability
   const handleDrop = useCallback((targetId) => {
     if (!dragNode || dragNode === targetId) { setDragNode(null); setDragOver(null); teamDragRef.current = false; return; }
@@ -4944,7 +4962,7 @@ function OrgChartApp() {
     teamDragRef, shiftHeldRef,
     activeEmployees, tree, hotspots, hotspotNodeIds, hotspotReasons, departments, locations, businessGroups,
     searchResults, displayRoot,
-    toggleExpand, expandAll, collapseAll, navigateTo, goToInsight, navigateToDept, focusChain, handleDrop, undo,
+    toggleExpand, expandAll, collapseAll, navigateTo, goToInsight, navigateToDept, focusChain, focusSubtree, handleDrop, undo,
     saveAnnotation, removeAnnotation, getNodeColor, getTenureColor, isFiltered, getTimelineMonths,
   };
 
@@ -5160,10 +5178,10 @@ function OrgChartApp() {
               <GitMerge size={12} className={chainFilterId ? "text-violet-600" : "text-blue-600"}/>
               {focusRoot && tree.map[focusRoot] ? (
                 <>
-                  <span className="text-blue-700">Focused on subtree:</span>
+                  <span className="text-blue-700">Subtree view:</span>
                   {getAncestorPath(tree.map, focusRoot).map((n, i, arr) => (
                     <span key={n.id}>
-                      <button onClick={() => { setFocusRoot(i === 0 ? null : n.id); setInsightHighlightIds(new Set()); setChainFilterId(null); }} className="text-blue-600 hover:underline">{n.first} {n.last}</button>
+                      <button onClick={() => focusSubtree(n.id)} className="text-blue-600 hover:underline">{n.first} {n.last}</button>
                       {i < arr.length - 1 && <span className="text-blue-300 mx-1">›</span>}
                     </span>
                   ))}
@@ -5226,41 +5244,6 @@ function OrgChartApp() {
                 {orgViewMode === "tree" && chartDisplayRoot && (
                   <div className="flex-1 overflow-auto">
                     <div style={{ transform: `scale(${zoom})`, transformOrigin: "top left", width: "fit-content", transition: "transform 0.12s ease" }}>
-                      {/* Ancestor chain when focused on a subtree */}
-                      {focusRoot && tree.map[focusRoot] && (() => {
-                        const ancestors = getAncestorPath(tree.map, focusRoot);
-                        if (ancestors.length <= 1) return null;
-                        return (
-                          <div className="inline-block min-w-max mb-2">
-                            <div className="flex flex-col items-center">
-                              {ancestors.slice(0, -1).map((anc, i) => {
-                                const ancColor = (DEPT_COLORS[anc.dept] || "#64748b");
-                                return (
-                                  <div key={anc.id} className="flex flex-col items-center">
-                                    <div
-                                      onClick={() => { setFocusRoot(i === 0 ? null : anc.id); setInsightHighlightIds(new Set()); setChainFilterId(null); }}
-                                      className="cursor-pointer flex items-center gap-2 px-3 py-2 rounded-lg border transition-all hover:shadow-md hover:-translate-y-0.5"
-                                      style={{ background: `${ancColor}08`, borderColor: `${ancColor}30`, borderLeft: `3px solid ${ancColor}` }}>
-                                      <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: ancColor }}>
-                                        {anc.first[0]}{anc.last[0]}
-                                      </div>
-                                      <div className="min-w-0">
-                                        <div className="text-xs font-semibold text-gray-700">{anc.first} {anc.last}</div>
-                                        <div className="text-gray-400 truncate" style={{ fontSize: 9 }}>{anc.title} · {anc.dept}</div>
-                                      </div>
-                                      <div className="text-gray-300 ml-2 flex items-center gap-1" style={{ fontSize: 9 }}>
-                                        <Users size={9}/>{anc._totalReports}
-                                        <ChevronDown size={9}/>
-                                      </div>
-                                    </div>
-                                    <div style={{ width: 2, height: 16, background: `${ancColor}44`, borderRadius: 1 }}/>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })()}
                       <div className="inline-block min-w-max"><OrgNode node={chartDisplayRoot}/></div>
                     </div>
                   </div>
