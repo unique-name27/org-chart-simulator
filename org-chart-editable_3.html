@@ -4404,9 +4404,10 @@ function ScenarioView() {
 // levels (L1-L7 / M1-M4 / E1-E3) so the user only sees the new label set.
 function HeadcountPlanningView() {
   const {
-    activeEmployees,
+    activeEmployees, locations,
     plan, setPlan, planGroupBy: groupBy, setPlanGroupBy: setGroupBy,
     planStartYear, setPlanStartYear, planHorizonQ, setPlanHorizonQ,
+    planLocFilter, setPlanLocFilter, planEmployees,
     // Lifted state (shared with org chart ghost nodes)
     earlyTargetPct, setEarlyTargetPct,
     earlyMode, setEarlyMode,
@@ -4448,6 +4449,53 @@ function HeadcountPlanningView() {
   const clearPlan = () => setPlan({});
 
   const [editGroup, setEditGroup] = useState(null);
+
+  // ── Distribute target across groups ──
+  const [distributeTotal, setDistributeTotal] = useState(growthTarget3Yr);
+  const [distributeMode, setDistributeMode] = useState("proportional"); // "proportional" | "even"
+  const [distributeLevelMode, setDistributeLevelMode] = useState("histogram"); // "histogram" | "l3only"
+
+  const displayLevelHistogram = useMemo(() => {
+    const h = {};
+    ALL_DISPLAY_LEVELS.forEach(lv => { h[lv] = 0; });
+    planEmployees.forEach(e => { const dl = displayLevel(e.level); if (h[dl] !== undefined) h[dl] += 1; });
+    return h;
+  }, [planEmployees]);
+
+  const distributePreview = useMemo(() => {
+    if (!distributeTotal || !groups.length) return [];
+    const weights = distributeMode === "even"
+      ? groups.map(() => 1)
+      : groups.map(g => curRoll[g]?.total || 0);
+    const sumW = weights.reduce((s, w) => s + w, 0);
+    if (!sumW) return [];
+    const sign = distributeTotal < 0 ? -1 : 1;
+    const alloc = largestRemainderAlloc(Math.abs(distributeTotal), weights);
+    return groups.map((g, i) => ({ group: g, delta: sign * alloc[i] })).filter(p => p.delta !== 0);
+  }, [distributeTotal, distributeMode, groups, curRoll]);
+
+  const applyDistributeTarget = useCallback(() => {
+    const newPlan = {};
+    distributePreview.forEach(({ group, delta }) => {
+      newPlan[group] = newPlan[group] || {};
+      if (distributeLevelMode === "l3only") {
+        newPlan[group].L3 = (newPlan[group].L3 || 0) + delta;
+        return;
+      }
+      const lvKeys = ALL_DISPLAY_LEVELS.filter(k => (displayLevelHistogram[k] || 0) > 0);
+      const lvWeights = lvKeys.map(k => displayLevelHistogram[k]);
+      if (!lvWeights.length) {
+        newPlan[group].L3 = (newPlan[group].L3 || 0) + delta;
+        return;
+      }
+      const sign = delta < 0 ? -1 : 1;
+      const lvAlloc = largestRemainderAlloc(Math.abs(delta), lvWeights);
+      lvKeys.forEach((k, i) => {
+        if (lvAlloc[i]) newPlan[group][k] = (newPlan[group][k] || 0) + sign * lvAlloc[i];
+      });
+    });
+    setPlan(newPlan);
+  }, [distributePreview, distributeLevelMode, displayLevelHistogram, setPlan]);
 
   // Chart data: top groups by current size, with current vs projected early%
   const chartData = useMemo(() => {
@@ -4718,6 +4766,11 @@ function HeadcountPlanningView() {
           <h2 className="text-xl font-bold text-gray-900">Headcount Planning</h2>
           <div className="text-xs text-gray-500 mt-0.5">
             Early career = <span className="font-semibold text-emerald-700">L1–L2</span> · Experienced = everyone else (L3–L7, M1–M4, E1–E3)
+            {planLocFilter.size > 0 && (
+              <span className="ml-2 text-blue-700">
+                · planning <span className="font-semibold">{planEmployees.length}</span> of {activeEmployees.length} employees in {planLocFilter.size} site{planLocFilter.size > 1 ? "s" : ""}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -4733,6 +4786,37 @@ function HeadcountPlanningView() {
             Clear plan
           </button>
         </div>
+      </div>
+
+      {/* Location filter — empty selection means "all locations". */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap bg-white rounded-xl border border-gray-100 px-3 py-2">
+        <span className="text-xs font-semibold text-gray-600">Location filter:</span>
+        <button
+          onClick={() => setPlanLocFilter(new Set())}
+          className={`text-xs px-2.5 py-1 rounded-lg transition-colors ${planLocFilter.size === 0 ? "bg-blue-600 text-white font-semibold" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+          All sites
+        </button>
+        {locations.map(loc => {
+          const on = planLocFilter.has(loc);
+          return (
+            <button key={loc}
+              onClick={() => setPlanLocFilter(prev => {
+                const next = new Set(prev);
+                if (next.has(loc)) next.delete(loc); else next.add(loc);
+                return next;
+              })}
+              className={`text-xs px-2.5 py-1 rounded-lg transition-colors ${on ? "bg-blue-600 text-white font-semibold" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              {loc}
+            </button>
+          );
+        })}
+        {planLocFilter.size > 0 && (
+          <button
+            onClick={() => setPlanLocFilter(new Set())}
+            className="ml-auto text-[11px] text-gray-500 hover:text-gray-700 underline">
+            clear
+          </button>
+        )}
       </div>
 
       {/* Tab strip */}
@@ -4767,6 +4851,91 @@ function HeadcountPlanningView() {
             <div className="text-xs text-gray-500 mt-0.5">{k.sub}</div>
           </div>
         ))}
+      </div>
+
+      {/* ── Distribute target across groups ── */}
+      <div className="bg-white rounded-xl border border-gray-100 p-4 mb-5">
+        <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <h3 className="text-sm font-bold text-gray-700">Distribute target across {groupLabel.toLowerCase()}s</h3>
+          <span className="text-xs text-gray-400">Spread an overall headcount target across all {groupLabel.toLowerCase()}s, then refine in the table below.</span>
+        </div>
+        <div className="grid grid-cols-12 gap-3 items-end">
+          {/* Total target */}
+          <div className="col-span-3">
+            <div className="text-[11px] font-semibold text-gray-600 mb-1">Total HC to add</div>
+            <div className="flex items-center gap-2">
+              <input type="number" min="-9999" value={distributeTotal}
+                onChange={e => setDistributeTotal(parseInt(e.target.value || "0", 10))}
+                className="w-full text-right text-sm font-bold text-blue-700 tabular-nums border border-gray-200 rounded px-2 py-1"/>
+              <button onClick={() => setDistributeTotal(growthTarget3Yr)}
+                title="Match the 3yr growth target on the Headcount Plan tab"
+                className="text-[10px] px-1.5 py-1 rounded border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 whitespace-nowrap">
+                = +{growthTarget3Yr}
+              </button>
+            </div>
+          </div>
+
+          {/* Group split mode */}
+          <div className="col-span-3">
+            <div className="text-[11px] font-semibold text-gray-600 mb-1">Spread across {groupLabel.toLowerCase()}s by</div>
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+              <button onClick={() => setDistributeMode("proportional")}
+                className={`flex-1 text-xs px-2 py-1 rounded-md transition-colors ${distributeMode === "proportional" ? "bg-white text-blue-700 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                Current size
+              </button>
+              <button onClick={() => setDistributeMode("even")}
+                className={`flex-1 text-xs px-2 py-1 rounded-md transition-colors ${distributeMode === "even" ? "bg-white text-blue-700 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                Even
+              </button>
+            </div>
+          </div>
+
+          {/* Level split mode */}
+          <div className="col-span-3">
+            <div className="text-[11px] font-semibold text-gray-600 mb-1">Level mix</div>
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+              <button onClick={() => setDistributeLevelMode("histogram")}
+                title="Spread across levels in the same proportions as the current org"
+                className={`flex-1 text-xs px-2 py-1 rounded-md transition-colors ${distributeLevelMode === "histogram" ? "bg-white text-emerald-700 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                Match org
+              </button>
+              <button onClick={() => setDistributeLevelMode("l3only")}
+                title="All hires bucket to L3 (default growth level)"
+                className={`flex-1 text-xs px-2 py-1 rounded-md transition-colors ${distributeLevelMode === "l3only" ? "bg-white text-emerald-700 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                L3 only
+              </button>
+            </div>
+          </div>
+
+          {/* Apply */}
+          <div className="col-span-3 flex items-center justify-end gap-2">
+            <button onClick={() => setPlan({})}
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">
+              Reset
+            </button>
+            <button onClick={applyDistributeTarget}
+              disabled={!distributeTotal || !groups.length}
+              className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">
+              Apply distribution →
+            </button>
+          </div>
+        </div>
+
+        {/* Live preview */}
+        {distributePreview.length > 0 && (
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <div className="text-[11px] font-semibold text-gray-500 mb-1.5">Preview · {distributeTotal > 0 ? "+" : ""}{distributeTotal} across {distributePreview.length} {groupLabel.toLowerCase()}s</div>
+            <div className="flex flex-wrap gap-1.5">
+              {distributePreview.slice(0, 16).map(p => (
+                <span key={p.group} className={`text-[11px] px-2 py-0.5 rounded ${p.delta >= 0 ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-rose-50 text-rose-700 border border-rose-100"}`}>
+                  <span className="font-semibold">{p.group}</span>
+                  <span className="ml-1 tabular-nums">{p.delta >= 0 ? "+" : ""}{p.delta}</span>
+                </span>
+              ))}
+              {distributePreview.length > 16 && <span className="text-[11px] text-gray-400">… and {distributePreview.length - 16} more</span>}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Per-group mix table */}
@@ -6706,6 +6875,10 @@ function OrgChartApp() {
   const [planStartYear, setPlanStartYear] = useState(2026);
   const [planHorizonQ, setPlanHorizonQ] = useState(8);    // quarters
   const [showPlannedInOrgChart, setShowPlannedInOrgChart] = useState(false);
+  // Location filter — empty Set means all locations. When populated, every plan derivation
+  // (current rollups, level histogram, growth model baseline) only considers employees in
+  // the chosen sites, so users can plan a Bangalore-only or HQ-only build-out.
+  const [planLocFilter, setPlanLocFilter] = useState(() => new Set());
   // ── Early-Career calculator inputs (lifted so org chart + planner share) ──
   const [earlyTargetPct, setEarlyTargetPct] = useState(20);
   const [earlyMode, setEarlyMode] = useState("orgMix"); // "orgMix" | "hireMix"
@@ -6768,21 +6941,28 @@ function OrgChartApp() {
   const planGroupKey = { dept: "dept", bg: "bg", fn: "fn" }[planGroupBy];
   const planGroupLabel = { dept: "Department", bg: "Business Group", fn: "Function" }[planGroupBy];
 
+  // Location-filtered employee pool — every downstream rollup uses this. When the filter
+  // is empty, this equals the full active workforce.
+  const planEmployees = useMemo(() => {
+    if (planLocFilter.size === 0) return activeEmployees;
+    return activeEmployees.filter(e => planLocFilter.has(e.location));
+  }, [activeEmployees, planLocFilter]);
+
   const planGroups = useMemo(() => {
-    const s = new Set(activeEmployees.map(e => e[planGroupKey]).filter(Boolean));
+    const s = new Set(planEmployees.map(e => e[planGroupKey]).filter(Boolean));
     return [...s].sort();
-  }, [activeEmployees, planGroupKey]);
+  }, [planEmployees, planGroupKey]);
 
   const planCurrent = useMemo(() => {
     const m = {};
     planGroups.forEach(g => { m[g] = {}; ALL_DISPLAY_LEVELS.forEach(lv => m[g][lv] = 0); });
-    activeEmployees.forEach(e => {
+    planEmployees.forEach(e => {
       const g = e[planGroupKey]; if (!g || !m[g]) return;
       const dl = displayLevel(e.level);
       if (m[g][dl] !== undefined) m[g][dl] += 1;
     });
     return m;
-  }, [activeEmployees, planGroups, planGroupKey]);
+  }, [planEmployees, planGroups, planGroupKey]);
 
   const planProjected = useMemo(() => {
     const m = {};
@@ -6862,17 +7042,17 @@ function OrgChartApp() {
     }).sort((a, b) => b.curTotal - a.curTotal);
   }, [planGroups, planRollups, earlyTargetPct]);
 
-  // Org-wide level histogram from current active workforce — used to drive backfill mix.
+  // Org-wide level histogram from filtered workforce — used to drive backfill mix.
   const levelHistogram = useMemo(() => {
     const h = {};
-    activeEmployees.forEach(e => { h[e.level] = (h[e.level] || 0) + 1; });
+    planEmployees.forEach(e => { h[e.level] = (h[e.level] || 0) + 1; });
     return h;
-  }, [activeEmployees]);
+  }, [planEmployees]);
 
   // 3-year attrition + growth model — drives backfill, growth, and EC reqs in coupled fashion.
   // Must precede earlyCalc / earlyAllocByGroup, which read its outputs.
   const growthModel = useMemo(() => computeAttritionGrowthModel({
-    baseTotal: planRollups.orgTotalProj || activeEmployees.length,
+    baseTotal: planRollups.orgTotalProj || planEmployees.length,
     baseEarly: planRollups.orgEarlyProj || 0,
     levelHistogram,
     attritionPct,
@@ -6885,7 +7065,7 @@ function OrgChartApp() {
     mixPct: hireMixPct,
     internRatio,
     planStartYear,
-  }), [planRollups, activeEmployees.length, levelHistogram, attritionPct, growthTarget3Yr,
+  }), [planRollups, planEmployees.length, levelHistogram, attritionPct, growthTarget3Yr,
        growthShiftPerYear, promoPctPerYear, acquisitionsPerYear,
        earlyMode, earlyTargetPct, hireMixPct, internRatio, planStartYear]);
 
@@ -6924,26 +7104,26 @@ function OrgChartApp() {
 
   const planManagersByGroup = useMemo(() => {
     const m = {};
-    activeEmployees.forEach(e => {
+    planEmployees.forEach(e => {
       if (!e.isManager) return;
       const g = e[planGroupKey]; if (!g) return;
       (m[g] = m[g] || []).push(e);
     });
     return m;
-  }, [activeEmployees, planGroupKey]);
+  }, [planEmployees, planGroupKey]);
 
   // Managers indexed by the level they would supervise (heuristic: a level reports up to a
   // manager 1+ tier above). For backfill assignment we just bucket by displayLevel.
   const planManagersByLevel = useMemo(() => {
     const m = { __any: [] };
-    activeEmployees.forEach(e => {
+    planEmployees.forEach(e => {
       if (!e.isManager) return;
       m.__any.push(e);
       const lv = e.level;
       (m[lv] = m[lv] || []).push(e);
     });
     return m;
-  }, [activeEmployees]);
+  }, [planEmployees]);
 
   // Lazy-init projects from sample once activeEmployees is populated
   useEffect(() => {
@@ -7413,6 +7593,7 @@ function OrgChartApp() {
     showFlightRisk, setShowFlightRisk, flightRisks,
     plan, setPlan, planGroupBy, setPlanGroupBy,
     planStartYear, setPlanStartYear, planHorizonQ, setPlanHorizonQ,
+    planLocFilter, setPlanLocFilter, planEmployees,
     showPlannedInOrgChart, setShowPlannedInOrgChart,
     // Lifted EC + reqs state
     earlyTargetPct, setEarlyTargetPct,
