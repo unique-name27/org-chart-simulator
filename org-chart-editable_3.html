@@ -6693,7 +6693,15 @@ function OrgChartApp() {
   const [orgViewMode, setOrgViewMode] = useState("tree"); // "tree" | "treemap" | "sunburst"
   const [showFlightRisk, setShowFlightRisk] = useState(false);
   // ── Headcount plan (lifted to app scope so org chart and planner share state) ──
-  const [plan, setPlan] = useState({});                 // { [group]: { [displayLevel]: deltaInt } }
+  // Sample seed: a few small department deltas so the Mix / Timeline / EC tabs and the open
+  // reqs view all have something interesting to show on first load. Users overwrite by
+  // editing the plan or importing a JSON.
+  const [plan, setPlan] = useState({
+    "IC Design":     { L1: 6, L2: 4, L3: 2 },
+    "Verification":  { L1: 5, L2: 3 },
+    "Software":      { L2: 4, L3: 2 },
+    "Manufacturing": { L3: -3 },
+  });
   const [planGroupBy, setPlanGroupBy] = useState("dept"); // "dept" | "bg" | "fn"
   const [planStartYear, setPlanStartYear] = useState(2026);
   const [planHorizonQ, setPlanHorizonQ] = useState(8);    // quarters
@@ -6706,12 +6714,18 @@ function OrgChartApp() {
   const [annualExpHiresOverride, setAnnualExpHiresOverride] = useState(null);
   const [reqIncludeECCalc, setReqIncludeECCalc] = useState(true);
   // ── 3-year attrition + growth model inputs ──
+  // Sample seed showcases the new growth-model surface area: an aggressive 3yr growth target,
+  // a Y2 talent acquisition (Edge-AI startup, 30 ppl, 35% EC) and a smaller Y3 design-house
+  // acquisition (18 ppl, 15% EC), and a slightly elevated promotion rate so the L2 to L3
+  // drain on the EC pool is visible in the per-year breakdown.
   const [attritionPct, setAttritionPct] = useState(10);
-  const [growthTarget3Yr, setGrowthTarget3Yr] = useState(120);
-  const [growthShiftPerYear, setGrowthShiftPerYear] = useState([33, 33, 34]);
-  const [promoPctPerYear, setPromoPctPerYear] = useState(15);
+  const [growthTarget3Yr, setGrowthTarget3Yr] = useState(150);
+  const [growthShiftPerYear, setGrowthShiftPerYear] = useState([30, 35, 35]);
+  const [promoPctPerYear, setPromoPctPerYear] = useState(18);
   const [acquisitionsPerYear, setAcquisitionsPerYear] = useState([
-    { count: 0, ecPct: 20 }, { count: 0, ecPct: 20 }, { count: 0, ecPct: 20 },
+    { count: 0,  ecPct: 20 },
+    { count: 30, ecPct: 35 },
+    { count: 18, ecPct: 15 },
   ]);
   const [projects, setProjects] = useState(() => []);
   const [reqOverrides, setReqOverrides] = useState({}); // { reqId: { level?, location?, projectId? } }
