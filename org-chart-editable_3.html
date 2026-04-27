@@ -6073,7 +6073,19 @@ function SunburstOrgView() {
 }
 
 // ─── PRODUCT PIPELINE ───
-const PIPELINE_STAGES = [
+// G&A (Finance/HR/Legal/IT/Facilities) supports every stage of every product line.
+// Target eng:G&A ratio depends on stage category — business stages need more legal/finance
+// per engineer, operations stages have more compliance overhead, engineering stages need
+// the least relative G&A. Cells are flagged "ga_thin" when actual ratio > target × 1.25.
+const GA_DEPTS = ["Finance","HR","Legal","IT","Facilities"];
+const STAGE_CAT_GA_TARGET = {  // engineers per 1 G&A
+  engineering: 10,
+  operations:  8,
+  business:    5,
+};
+const _gaPerPL = (minPerPL, category) => Math.max(1, Math.round(minPerPL / (STAGE_CAT_GA_TARGET[category] || 10)));
+
+const DEFAULT_PIPELINE_STAGES = [
   { id: "concept",      label: "Concept",        sublabel: "Feasibility",   emoji: "💡", depts: ["Corporate Strategy","Applications","Marketing","Sales","Systems Engineering"], minPerPL: 80,  category: "business",     desc: "Market research, product definition, business case, competitive analysis" },
   { id: "architecture", label: "Architecture",   sublabel: "Spec & IP",     emoji: "📐", depts: ["IC Design","Systems Engineering","Applications"],                             minPerPL: 120, category: "engineering",  desc: "System architecture, micro-architecture, IP selection, design partitioning" },
   { id: "rtl",          label: "RTL Design",     sublabel: "Coding",        emoji: "⚙️", depts: ["IC Design","Software"],                                                        minPerPL: 300, category: "engineering",  desc: "RTL design, IP integration, clock/reset strategy, lint & CDC closure" },
@@ -6089,7 +6101,7 @@ const PIPELINE_STAGES = [
   { id: "production",   label: "Production",     sublabel: "Ramp",          emoji: "📈", depts: ["Manufacturing","Supply Chain","Quality & Reliability"],                      minPerPL: 100, category: "operations",   desc: "Volume ramp, supply chain optimization, cost reduction, packaging" },
   { id: "customer",     label: "Customer",       sublabel: "Enablement",    emoji: "🤝", depts: ["Applications","Field Applications","Software"],                              minPerPL: 100, category: "business",     desc: "Reference designs, eval kits, customer design-in support, FAE engagement" },
   { id: "revenue",      label: "Revenue",        sublabel: "Growth",        emoji: "💰", depts: ["Sales","Marketing","Finance"],                                               minPerPL: 80,  category: "business",     desc: "Customer wins, design-ins, revenue recognition, market share growth" },
-];
+].map(s => ({ ...s, gaPerPL: _gaPerPL(s.minPerPL, s.category), gaRatioTarget: STAGE_CAT_GA_TARGET[s.category] || 10 }));
 
 const PRODUCT_LINES = [
   { id: "pl1", name: "Automotive ASIC",  code: "AUTO-4K",  node: "7nm", buAffinity: ["Automotive BU"],   color: "#2563eb", bg: "#eff6ff", textColor: "#1d4ed8", emoji: "🚗" },
@@ -6104,15 +6116,16 @@ const STAGE_CAT_COLORS = {
 
 function computeProductLineAssignments(employees) {
   const active = employees.filter(e => e.status === "Active");
-  const pl1 = [], pl2 = [];
-  const CORP_ONLY = new Set(["Finance","HR","Legal","IT","Facilities"]);
+  const pl1 = [], pl2 = [], ga = [];
+  const GA_SET = new Set(GA_DEPTS);
   active.forEach(e => {
+    if (GA_SET.has(e.dept)) { ga.push(e); return; }
     if (["Automotive BU","Industrial BU"].includes(e.bg))              pl1.push(e);
     else if (["Data Center BU","Consumer BU","IoT BU"].includes(e.bg)) pl2.push(e);
-    else if (e.bg === "Corporate" && !CORP_ONLY.has(e.dept))
+    else if (e.bg === "Corporate")
       (parseInt(e.id.slice(-4)) % 2 === 0 ? pl1 : pl2).push(e);
   });
-  return { pl1, pl2 };
+  return { pl1, pl2, ga };
 }
 
 // ─── PRODUCT PIPELINE VIEW ───
@@ -6122,43 +6135,97 @@ function ProductPipelineView() {
   const [flowPlaying, setFlowPlaying]   = useState(false);
   const [flowPos, setFlowPos]           = useState({ pl1: -1, pl2: -1 });
 
+  // Reorderable pipeline stages — persisted in localStorage so the chosen order survives reload.
+  const [stages, setStages] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("orgSimStageOrder") || "null");
+      if (Array.isArray(saved) && saved.length === DEFAULT_PIPELINE_STAGES.length) {
+        const map = new Map(DEFAULT_PIPELINE_STAGES.map(s => [s.id, s]));
+        const reordered = saved.map(id => map.get(id)).filter(Boolean);
+        if (reordered.length === DEFAULT_PIPELINE_STAGES.length) return reordered;
+      }
+    } catch {}
+    return DEFAULT_PIPELINE_STAGES;
+  });
+  useEffect(() => {
+    try { localStorage.setItem("orgSimStageOrder", JSON.stringify(stages.map(s => s.id))); } catch {}
+  }, [stages]);
+  const moveStage = (idx, dir) => {
+    setStages(s => {
+      const j = idx + dir;
+      if (j < 0 || j >= s.length) return s;
+      const copy = [...s];
+      [copy[idx], copy[j]] = [copy[j], copy[idx]];
+      return copy;
+    });
+  };
+  const resetStageOrder = () => setStages(DEFAULT_PIPELINE_STAGES);
+  const isCustomOrder = useMemo(
+    () => stages.some((s, i) => s.id !== DEFAULT_PIPELINE_STAGES[i].id),
+    [stages]
+  );
+
   const assignments = useMemo(() => computeProductLineAssignments(employees), [employees]);
 
-  const stageEmps = useCallback((stageId, plId) => {
-    const stage = PIPELINE_STAGES.find(s => s.id === stageId);
-    return stage ? (assignments[plId] || []).filter(e => stage.depts.includes(e.dept)) : [];
-  }, [assignments]);
+  // G&A allocation: split G&A pool 50/50 across the two PLs, then weight per stage by minPerPL
+  // share so heavier stages (RTL, Verification) get more support than lighter ones (Concept).
+  const gaAllocByStage = useMemo(() => {
+    const totalMin = stages.reduce((s, st) => s + st.minPerPL, 0) || 1;
+    const gaPerPL  = (assignments.ga?.length || 0) / 2;
+    const out = {};
+    stages.forEach(st => {
+      out[st.id] = Math.max(0, Math.round(gaPerPL * st.minPerPL / totalMin));
+    });
+    return out;
+  }, [stages, assignments.ga]);
 
-  // Full grid: stageId → plId → { emps, warnings, status }
+  const stageEmps = useCallback((stageId, plId) => {
+    const stage = stages.find(s => s.id === stageId);
+    return stage ? (assignments[plId] || []).filter(e => stage.depts.includes(e.dept)) : [];
+  }, [assignments, stages]);
+
+  // Full grid: stageId → plId → { emps, ga, ratio, warnings, status }
   const grid = useMemo(() => {
     const g = {};
-    PIPELINE_STAGES.forEach(stage => {
+    stages.forEach(stage => {
       g[stage.id] = {};
       PRODUCT_LINES.forEach(pl => {
         const emps = stageEmps(stage.id, pl.id);
+        const ga   = gaAllocByStage[stage.id] || 0;
+        const ratio = ga > 0 ? emps.length / ga : (emps.length > 0 ? Infinity : 0);
         const warnings = [];
-        if (emps.length === 0)           warnings.push({ type: "critical",     msg: "No coverage — critical gap" });
-        else if (emps.length < stage.minPerPL) warnings.push({ type: "understaffed", msg: `${emps.length} of ${stage.minPerPL} minimum` });
-        if (emps.length === 1)           warnings.push({ type: "spof",         msg: `SPOF: ${emps[0].first} ${emps[0].last}` });
+        if (emps.length === 0)                  warnings.push({ type: "critical",     msg: "No coverage — critical gap" });
+        else if (emps.length < stage.minPerPL)  warnings.push({ type: "understaffed", msg: `${emps.length} of ${stage.minPerPL} minimum` });
+        if (emps.length === 1)                  warnings.push({ type: "spof",         msg: `SPOF: ${emps[0].first} ${emps[0].last}` });
         const hiRisk = emps.filter(e => (flightRisks?.[e.id]?.score || 0) >= 65);
-        if (hiRisk.length)               warnings.push({ type: "flight",       msg: `${hiRisk.length} high flight-risk employee${hiRisk.length > 1 ? "s" : ""}` });
-        const status = emps.length === 0 ? "critical" : emps.length === 1 ? "spof" : warnings.some(w => w.type === "understaffed") ? "warning" : hiRisk.length ? "flight" : "healthy";
-        g[stage.id][pl.id] = { emps, warnings, status };
+        if (hiRisk.length)                      warnings.push({ type: "flight",       msg: `${hiRisk.length} high flight-risk employee${hiRisk.length > 1 ? "s" : ""}` });
+        // G&A ratio check — only meaningful if there's productive headcount to support
+        if (emps.length > 0) {
+          if (ga === 0)                                       warnings.push({ type: "ga_thin",  msg: `No G&A coverage (target ${stage.gaPerPL} G&A)` });
+          else if (ratio > stage.gaRatioTarget * 1.25)        warnings.push({ type: "ga_thin",  msg: `${ratio.toFixed(1)}:1 eng:G&A · target ${stage.gaRatioTarget}:1` });
+        }
+        const status = emps.length === 0 ? "critical"
+          : emps.length === 1 ? "spof"
+          : warnings.some(w => w.type === "understaffed") ? "warning"
+          : hiRisk.length ? "flight"
+          : warnings.some(w => w.type === "ga_thin") ? "ga_thin"
+          : "healthy";
+        g[stage.id][pl.id] = { emps, ga, ratio, warnings, status };
       });
     });
     return g;
-  }, [stageEmps, flightRisks]);
+  }, [stages, stageEmps, flightRisks, gaAllocByStage]);
 
   const bottlenecks = useMemo(() => {
     const issues = [];
-    PIPELINE_STAGES.forEach(stage => PRODUCT_LINES.forEach(pl => {
+    stages.forEach(stage => PRODUCT_LINES.forEach(pl => {
       (grid[stage.id]?.[pl.id]?.warnings || []).forEach(w =>
-        issues.push({ stage, pl, warning: w, emps: grid[stage.id][pl.id].emps })
+        issues.push({ stage, pl, warning: w, emps: grid[stage.id][pl.id].emps, ga: grid[stage.id][pl.id].ga, ratio: grid[stage.id][pl.id].ratio })
       );
     }));
-    const order = { critical: 0, spof: 1, flight: 2, understaffed: 3 };
+    const order = { critical: 0, spof: 1, flight: 2, understaffed: 3, ga_thin: 4 };
     return issues.sort((a, b) => (order[a.warning.type] ?? 9) - (order[b.warning.type] ?? 9));
-  }, [grid]);
+  }, [grid, stages]);
 
   // Flow simulation: PL1 leads by 2 stages
   useEffect(() => {
@@ -6166,12 +6233,12 @@ function ProductPipelineView() {
     const t = setInterval(() => {
       setFlowPos(prev => {
         const n1 = prev.pl1 + 1, n2 = prev.pl2 + 1;
-        if (n1 > PIPELINE_STAGES.length + 1) { setFlowPlaying(false); return { pl1: -1, pl2: -1 }; }
+        if (n1 > stages.length + 1) { setFlowPlaying(false); return { pl1: -1, pl2: -1 }; }
         return { pl1: n1, pl2: n2 };
       });
     }, 420);
     return () => clearInterval(t);
-  }, [flowPlaying]);
+  }, [flowPlaying, stages.length]);
 
   const STATUS_STYLE = {
     healthy:    { dot: "#16a34a", border: "#bbf7d0" },
@@ -6179,10 +6246,11 @@ function ProductPipelineView() {
     spof:       { dot: "#ea580c", border: "#fed7aa" },
     flight:     { dot: "#7c3aed", border: "#ddd6fe" },
     critical:   { dot: "#dc2626", border: "#fecaca" },
+    ga_thin:    { dot: "#0891b2", border: "#a5f3fc" },
   };
-  const WARN_ICON = { critical: "🔴", spof: "🎯", flight: "✈️", understaffed: "⚠️" };
+  const WARN_ICON = { critical: "🔴", spof: "🎯", flight: "✈️", understaffed: "⚠️", ga_thin: "🧾" };
 
-  const selStage = selectedCell ? PIPELINE_STAGES.find(s => s.id === selectedCell.stageId) : null;
+  const selStage = selectedCell ? stages.find(s => s.id === selectedCell.stageId) : null;
   const selPL    = selectedCell ? PRODUCT_LINES.find(p => p.id === selectedCell.plId) : null;
   const selCell  = selectedCell ? grid[selectedCell.stageId]?.[selectedCell.plId] : null;
 
@@ -6194,9 +6262,14 @@ function ProductPipelineView() {
         <div className="flex items-center justify-between mb-2">
           <div>
             <h2 className="text-xl font-bold text-gray-900">Product Development Pipeline</h2>
-            <p className="text-sm text-gray-500">Cross-functional team coverage across {PIPELINE_STAGES.length} semiconductor NPD stages · 2 active product lines</p>
+            <p className="text-sm text-gray-500">Cross-functional team coverage across {stages.length} semiconductor NPD stages · 2 active product lines · {assignments.ga?.length ?? 0} G&A supporting</p>
           </div>
           <div className="flex items-center gap-2">
+            {isCustomOrder && (
+              <button onClick={resetStageOrder} className="text-xs bg-gray-100 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1.5" title="Restore the default stage order">
+                ↺ Reset order
+              </button>
+            )}
             {flowPlaying
               ? <button onClick={() => { setFlowPlaying(false); setFlowPos({ pl1: -1, pl2: -1 }); }} className="text-xs bg-gray-200 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-300 transition-colors flex items-center gap-1.5"><Pause size={12}/>Stop</button>
               : <button onClick={() => { setFlowPos({ pl1: 0, pl2: -2 }); setFlowPlaying(true); }} className="text-xs bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1.5" style={{ boxShadow: "0 2px 8px rgba(37,99,235,0.3)" }}><Activity size={12}/>Simulate Flow</button>
@@ -6212,8 +6285,14 @@ function ProductPipelineView() {
               <span className="font-semibold" style={{ color: pl.color }}>{assignments[pl.id]?.length ?? 0} eng.</span>
             </div>
           ))}
+          <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-cyan-50 border border-cyan-200">
+            <span>🧾</span>
+            <span className="font-bold text-cyan-700">G&A support</span>
+            <span className="text-gray-400">{assignments.ga?.length ?? 0} across all stages</span>
+            <span className="text-cyan-600 font-semibold">eng:G&A target {STAGE_CAT_GA_TARGET.engineering}/{STAGE_CAT_GA_TARGET.operations}/{STAGE_CAT_GA_TARGET.business}:1 (eng/ops/biz)</span>
+          </div>
           <div className="ml-auto flex items-center gap-3 text-xs text-gray-400 flex-wrap">
-            {[["🔴","Critical gap"],["🎯","SPOF"],["⚠️","Understaffed"],["✈️","Flight risk"]].map(([icon,label]) => (
+            {[["🔴","Critical gap"],["🎯","SPOF"],["⚠️","Understaffed"],["✈️","Flight risk"],["🧾","G&A thin"]].map(([icon,label]) => (
               <span key={label} className="flex items-center gap-1">{icon} {label}</span>
             ))}
           </div>
@@ -6224,15 +6303,34 @@ function ProductPipelineView() {
         {/* ── Pipeline canvas ── */}
         <div className="flex-1 overflow-auto p-4">
           <div className="flex gap-2 min-w-max pb-2">
-            {PIPELINE_STAGES.map((stage, sIdx) => {
+            {stages.map((stage, sIdx) => {
               const hdr = STAGE_CAT_COLORS[stage.category]?.header || "#64748b";
+              const stageGA = gaAllocByStage[stage.id] || 0;
               return (
                 <div key={stage.id} style={{ minWidth: 144 }} className="flex flex-col">
                   {/* Stage header */}
-                  <div className="rounded-t-xl px-2 py-2 text-center text-white" style={{ background: hdr }}>
+                  <div className="rounded-t-xl px-2 py-2 text-center text-white relative" style={{ background: hdr }}>
+                    {/* Reorder chevrons */}
+                    <button
+                      onClick={(ev) => { ev.stopPropagation(); moveStage(sIdx, -1); }}
+                      disabled={sIdx === 0}
+                      title="Move stage left"
+                      className="absolute left-1 top-1 text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed text-xs font-bold leading-none px-1 rounded hover:bg-white/15">
+                      ◀
+                    </button>
+                    <button
+                      onClick={(ev) => { ev.stopPropagation(); moveStage(sIdx, +1); }}
+                      disabled={sIdx === stages.length - 1}
+                      title="Move stage right"
+                      className="absolute right-1 top-1 text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed text-xs font-bold leading-none px-1 rounded hover:bg-white/15">
+                      ▶
+                    </button>
                     <div style={{ fontSize: 18, lineHeight: 1.1 }}>{stage.emoji}</div>
                     <div className="text-xs font-bold mt-0.5 leading-tight">{stage.label}</div>
                     <div style={{ fontSize: 9, opacity: 0.82 }}>{stage.sublabel}</div>
+                    <div className="mt-1 inline-block px-1.5 py-0.5 rounded bg-white/15" style={{ fontSize: 9 }} title={`G&A target ${stage.gaPerPL} per PL (1 G&A per ${stage.gaRatioTarget} eng)`}>
+                      🧾 {stageGA}/PL · 1:{stage.gaRatioTarget}
+                    </div>
                   </div>
 
                   {/* PL swimlane cells */}
@@ -6274,13 +6372,21 @@ function ProductPipelineView() {
                             <div className="w-5 h-5 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center border-2 border-white" style={{ fontSize: 7, fontWeight: 700 }}>+{cell.emps.length - 7}</div>
                           )}
                         </div>
-                        {/* Count + warning icons */}
+                        {/* Count + ratio + warning icons */}
                         <div className="flex items-center justify-between">
                           <span className="font-bold" style={{ fontSize: 10, color: cell.emps.length === 0 ? "#dc2626" : "#374151" }}>
                             {cell.emps.length === 0 ? "—" : `${cell.emps.length} ppl`}
                           </span>
                           <span style={{ fontSize: 11, letterSpacing: "-0.5px" }}>{cell.warnings.map(w => WARN_ICON[w.type]).join("")}</span>
                         </div>
+                        {cell.emps.length > 0 && (
+                          <div className="mt-0.5 flex items-center justify-between text-[9px]" title={`${cell.ga} G&A allocated · ${isFinite(cell.ratio) ? cell.ratio.toFixed(1) : "∞"}:1 eng:G&A · target 1:${stage.gaRatioTarget}`}>
+                            <span className="text-cyan-600 font-semibold">🧾 {cell.ga}</span>
+                            <span className={cell.ga > 0 && cell.ratio > stage.gaRatioTarget * 1.25 ? "text-cyan-700 font-bold" : "text-gray-400"}>
+                              {isFinite(cell.ratio) ? `${cell.ratio.toFixed(1)}:1` : "∞:1"}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -6289,14 +6395,14 @@ function ProductPipelineView() {
                   <div className="h-5 flex items-center justify-center relative">
                     <div className="absolute inset-x-0 top-1/2 h-px bg-gray-200"/>
                     <div className="relative z-10 bg-gray-100 text-gray-400 rounded-full px-1.5" style={{ fontSize: 8 }}>{sIdx + 1}</div>
-                    {sIdx < PIPELINE_STAGES.length - 1 && (
+                    {sIdx < stages.length - 1 && (
                       <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 border-t-2 border-r-2 border-gray-300 rotate-45 z-10 bg-transparent"/>
                     )}
                   </div>
 
                   {/* Min staffing footer */}
                   <div className="border border-t-0 border-gray-100 rounded-b-xl px-2 py-1 text-center text-gray-400 bg-gray-50" style={{ fontSize: 9 }}>
-                    min {stage.minPerPL}/line
+                    min {stage.minPerPL}/line · 🧾 {stage.gaPerPL}
                   </div>
                 </div>
               );
@@ -6321,15 +6427,17 @@ function ProductPipelineView() {
                 <div className="flex gap-2 mt-3 text-xs flex-wrap">
                   <span className="bg-white rounded-lg px-2 py-1 font-bold" style={{ color: selCell.emps.length < selStage.minPerPL ? "#dc2626" : "#16a34a" }}>{selCell.emps.length} assigned</span>
                   <span className="bg-white rounded-lg px-2 py-1 text-gray-500">min {selStage.minPerPL}</span>
-                  <span className="bg-white rounded-lg px-2 py-1 text-gray-500">stage {PIPELINE_STAGES.findIndex(s => s.id === selStage.id) + 1} of {PIPELINE_STAGES.length}</span>
+                  <span className="bg-white rounded-lg px-2 py-1 font-bold" style={{ color: selCell.ga === 0 || (isFinite(selCell.ratio) && selCell.ratio > selStage.gaRatioTarget * 1.25) ? "#0e7490" : "#0891b2" }}>🧾 {selCell.ga} G&A · {isFinite(selCell.ratio) ? selCell.ratio.toFixed(1) : "∞"}:1</span>
+                  <span className="bg-white rounded-lg px-2 py-1 text-gray-500">target 1:{selStage.gaRatioTarget}</span>
+                  <span className="bg-white rounded-lg px-2 py-1 text-gray-500">stage {stages.findIndex(s => s.id === selStage.id) + 1} of {stages.length}</span>
                 </div>
               </div>
               {selCell.warnings.length > 0 && (
                 <div className="px-3 py-2 border-b border-gray-100 space-y-1 shrink-0">
                   {selCell.warnings.map((w, i) => (
                     <div key={i} className="flex items-center gap-2 text-xs rounded-lg px-2 py-1.5"
-                      style={{ background: w.type === "critical" ? "#fef2f2" : w.type === "spof" ? "#fff7ed" : w.type === "flight" ? "#f5f3ff" : "#fffbeb",
-                               color:      w.type === "critical" ? "#dc2626"  : w.type === "spof" ? "#ea580c"  : w.type === "flight" ? "#7c3aed"  : "#d97706" }}>
+                      style={{ background: w.type === "critical" ? "#fef2f2" : w.type === "spof" ? "#fff7ed" : w.type === "flight" ? "#f5f3ff" : w.type === "ga_thin" ? "#ecfeff" : "#fffbeb",
+                               color:      w.type === "critical" ? "#dc2626"  : w.type === "spof" ? "#ea580c"  : w.type === "flight" ? "#7c3aed"  : w.type === "ga_thin" ? "#0e7490"  : "#d97706" }}>
                       <span>{WARN_ICON[w.type]}</span>
                       <span className="font-semibold">{w.msg}</span>
                     </div>
@@ -6384,7 +6492,7 @@ function ProductPipelineView() {
                         <div className="flex-1 min-w-0">
                           <div className="text-xs font-semibold text-gray-800">{b.stage.label} · {b.pl.emoji} {b.pl.code}</div>
                           <div className="text-xs text-gray-500 mt-0.5">{b.warning.msg}</div>
-                          <div className="text-gray-400 mt-0.5" style={{ fontSize: 10 }}>Stage {PIPELINE_STAGES.findIndex(s => s.id === b.stage.id) + 1} · {b.stage.sublabel}</div>
+                          <div className="text-gray-400 mt-0.5" style={{ fontSize: 10 }}>Stage {stages.findIndex(s => s.id === b.stage.id) + 1} · {b.stage.sublabel}{b.warning.type === "ga_thin" ? "" : ` · 🧾 ${b.ga} G&A · ${isFinite(b.ratio) ? b.ratio.toFixed(1) : "∞"}:1`}</div>
                         </div>
                         <ArrowRight size={10} className="text-gray-300 shrink-0 mt-1"/>
                       </div>
@@ -6403,6 +6511,7 @@ function ProductPipelineView() {
           { label: "SPOFs",          count: bottlenecks.filter(b => b.warning.type === "spof").length,          color: "#ea580c" },
           { label: "Understaffed",   count: bottlenecks.filter(b => b.warning.type === "understaffed").length,  color: "#d97706" },
           { label: "Flight Risk",    count: bottlenecks.filter(b => b.warning.type === "flight").length,        color: "#7c3aed" },
+          { label: "G&A Thin",       count: bottlenecks.filter(b => b.warning.type === "ga_thin").length,       color: "#0891b2" },
         ].map(k => (
           <div key={k.label} className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full" style={{ background: k.color }}/>
@@ -6410,7 +6519,7 @@ function ProductPipelineView() {
             <span className="text-gray-400">{k.label}</span>
           </div>
         ))}
-        <div className="ml-auto text-gray-400">Click any cell to inspect · "Simulate Flow" animates the product journey through stages</div>
+        <div className="ml-auto text-gray-400">Click any cell to inspect · ◀▶ to reorder stages · "Simulate Flow" animates the product journey</div>
       </div>
     </div>
   );
@@ -6433,7 +6542,7 @@ function ExitSimModal() {
   const peers = mgr ? (tree.map[mgr.id]?.children || []).filter(c => c.id !== node.id && c.status === "Active") : [];
 
   // Pipeline stages that lose coverage
-  const lostStages = PIPELINE_STAGES.filter(s => s.depts.includes(node.dept));
+  const lostStages = DEFAULT_PIPELINE_STAGES.filter(s => s.depts.includes(node.dept));
 
   // Additional flight risk triggered for peers (disruptionRisk factor)
   const peersAtRisk = peers.filter(p => {
