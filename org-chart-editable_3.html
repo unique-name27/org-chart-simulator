@@ -18,7 +18,7 @@
   <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext, memo } = React;
 const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, AreaChart, Area, CartesianGrid, Legend, ReferenceLine } = Recharts;
-const { Search, ChevronDown, ChevronRight, Users, Building2, MapPin, TrendingUp, AlertTriangle, MessageSquare, GripVertical, Play, Pause, SkipBack, SkipForward, Download, Plus, Eye, EyeOff, Filter, BarChart3, Clock, Zap, Target, Layers, Globe, ChevronLeft, X, Check, Flag, Edit3, Trash2, Move, ArrowRight, Info, AlertCircle, Activity, GitMerge, AlertOctagon } = LucideReact;
+const { Search, ChevronDown, ChevronRight, Users, Building2, MapPin, TrendingUp, AlertTriangle, MessageSquare, GripVertical, Play, Pause, SkipBack, SkipForward, Download, Plus, Eye, EyeOff, Filter, BarChart3, Clock, Zap, Target, Layers, Globe, ChevronLeft, X, Check, Flag, Edit3, Trash2, Move, ArrowRight, Info, AlertCircle, Activity, GitMerge, AlertOctagon, UserPlus, Minus } = LucideReact;
 
 
 
@@ -70,6 +70,13 @@ function getDimColor(dim, val, idx) {
 }
 
 const LOCATIONS = ["San Jose HQ", "Austin", "Portland", "Shanghai", "Munich", "Bangalore", "Hsinchu", "Boston"];
+const COUNTRY_BY_LOCATION = {
+  "San Jose HQ": "USA", "Austin": "USA", "Portland": "USA", "Boston": "USA",
+  "Shanghai": "China", "Munich": "Germany", "Bangalore": "India", "Hsinchu": "Taiwan",
+};
+function countryFor(location) { return COUNTRY_BY_LOCATION[location] || "USA"; }
+const COUNTRIES = [...new Set(Object.values(COUNTRY_BY_LOCATION))].sort();
+const EMPLOYMENT_TYPES = ["FTE", "Contract"];
 
 const SEMI_TITLES = {
   "IC Design": ["RTL Design Engineer", "Sr. Design Engineer", "Principal Design Engineer", "Design Architect", "Analog Design Engineer", "Mixed-Signal Engineer"],
@@ -169,10 +176,12 @@ function generateSemiCompany() {
   const BND = { "C-Suite":"Band-E","SVP":"Band-D","VP":"Band-D","Director":"Band-C","Manager":"Band-B" };
   const rmo = (a,b) => a + Math.floor(Math.random()*(b-a+1));
   function mk(title, dept, fn, bg, mgrId, level, mo, locs) {
+    const location = rn(locs||LOCATIONS);
     return {
       id: rid(), ...rName(), title, dept, fn, bg,
       managerId: mgrId, level, band: BND[level]||"Band-2",
-      location: rn(locs||LOCATIONS),
+      location, country: countryFor(location),
+      employmentType: "FTE",
       startDate: fmt(addMonths(foundingDate, mo)),
       endDate: null, status: "Active",
       costCenter: `CC-${dept.slice(0,3).toUpperCase().replace(/ /g,"")}${nextId}`
@@ -333,10 +342,15 @@ function generateSemiCompany() {
         const d = pickEndDate(startDate, startMo);
         if (d) { endDate = d; status = "Terminated"; }
       }
+      const icLoc = Math.random() < 0.78 ? mgr.location : rn(LOCATIONS);
+      // ~12% of ICs are contractors — concentrated in offshore locations
+      const contractBias = ["Bangalore","Hsinchu","Shanghai"].includes(icLoc) ? 0.20 : 0.08;
+      const employmentType = Math.random() < contractBias ? "Contract" : "FTE";
       employees.push({
         id: rid(), ...rName(), dept: mgr.dept, title: rn(titles),
         bg: mgr.bg, fn: mgr.fn, managerId: mgr.id,
-        location: Math.random() < 0.78 ? mgr.location : rn(LOCATIONS),
+        location: icLoc, country: countryFor(icLoc),
+        employmentType,
         startDate: fmt(startDate), endDate: endDate ? fmt(endDate) : null, status, level,
         band: IC_BD[level] || "Band-2", costCenter: mgr.costCenter,
       });
@@ -653,6 +667,19 @@ function generateSemiCompany() {
       });
     });
   }
+
+  // ── Normalize: ensure every employee has country + employmentType ──
+  // Late-injected "weirdness" employees skip the mk() helper, so backfill here.
+  employees.forEach(e => {
+    if (!e.country) e.country = countryFor(e.location);
+    if (!e.employmentType) {
+      // Contract workers concentrate in offshore tech depts and IC ranks
+      const isOffshore = ["Bangalore","Hsinchu","Shanghai"].includes(e.location);
+      const isIC       = e.level && e.level.startsWith("IC");
+      const bias = isOffshore && isIC ? 0.20 : isIC ? 0.08 : 0.02;
+      e.employmentType = Math.random() < bias ? "Contract" : "FTE";
+    }
+  });
 
   return employees;
 }
@@ -1745,33 +1772,22 @@ function FlightRiskView() {
       </div>
 
       {/* Summary KPIs */}
-      {(() => {
-        const atRiskCost = ranked.filter(e => e.risk !== "low").reduce((s, e) => s + replacementCost(e.level), 0);
-        return (
-          <div className="grid grid-cols-4 gap-4 mb-6">
-            {[
-              { label: "High Risk", count: highRisk, pct: Math.round(highRisk/ranked.length*100), color: "#dc2626", bg: "#fef2f2", filter: "high" },
-              { label: "Medium Risk", count: medRisk, pct: Math.round(medRisk/ranked.length*100), color: "#d97706", bg: "#fffbeb", filter: "medium" },
-              { label: "Low Risk", count: lowRisk, pct: Math.round(lowRisk/ranked.length*100), color: "#16a34a", bg: "#f0fdf4", filter: "low" },
-            ].map(k => (
-              <div key={k.label} className={`rounded-xl p-4 border cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 ${riskFilter === k.filter ? "ring-2 ring-offset-1" : ""}`}
-                style={{ background: k.bg, borderColor: k.color+"33", ...(riskFilter === k.filter ? { ringColor: k.color } : {}) }}
-                onClick={() => setRiskFilter(prev => prev === k.filter ? "all" : k.filter)}>
-                <div className="text-3xl font-black" style={{ color: k.color }}>{k.count}</div>
-                <div className="text-sm font-semibold text-gray-700">{k.label}</div>
-                <div className="text-xs text-gray-500">{k.pct}% of active workforce</div>
-                {riskFilter === k.filter && <div className="text-xs mt-1 font-medium" style={{ color: k.color }}>✓ Filtered — click to clear</div>}
-              </div>
-            ))}
-            <div className="rounded-xl p-4 border border-amber-200 bg-amber-50">
-              <div className="text-3xl font-black text-amber-700">{fmtCost(atRiskCost)}</div>
-              <div className="text-sm font-semibold text-gray-700">At-Risk Payroll</div>
-              <div className="text-xs text-gray-500">est. replacement cost</div>
-              <div className="text-xs text-amber-600 mt-1">@ 1.5× base salary</div>
-            </div>
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        {[
+          { label: "High Risk", count: highRisk, pct: Math.round(highRisk/ranked.length*100), color: "#dc2626", bg: "#fef2f2", filter: "high" },
+          { label: "Medium Risk", count: medRisk, pct: Math.round(medRisk/ranked.length*100), color: "#d97706", bg: "#fffbeb", filter: "medium" },
+          { label: "Low Risk", count: lowRisk, pct: Math.round(lowRisk/ranked.length*100), color: "#16a34a", bg: "#f0fdf4", filter: "low" },
+        ].map(k => (
+          <div key={k.label} className={`rounded-xl p-4 border cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 ${riskFilter === k.filter ? "ring-2 ring-offset-1" : ""}`}
+            style={{ background: k.bg, borderColor: k.color+"33", ...(riskFilter === k.filter ? { ringColor: k.color } : {}) }}
+            onClick={() => setRiskFilter(prev => prev === k.filter ? "all" : k.filter)}>
+            <div className="text-3xl font-black" style={{ color: k.color }}>{k.count}</div>
+            <div className="text-sm font-semibold text-gray-700">{k.label}</div>
+            <div className="text-xs text-gray-500">{k.pct}% of active workforce</div>
+            {riskFilter === k.filter && <div className="text-xs mt-1 font-medium" style={{ color: k.color }}>✓ Filtered — click to clear</div>}
           </div>
-        );
-      })()}
+        ))}
+      </div>
 
       <div className="grid grid-cols-2 gap-4 mb-6">
         {/* Histogram */}
@@ -1818,12 +1834,12 @@ function FlightRiskView() {
           <h3 className="text-sm font-bold text-gray-700 flex-1">At-Risk Employees</h3>
           <button onClick={() => {
             const atRisk = ranked.filter(e => e.risk !== "low");
-            const cols = ["Name","Dept","Level","Manager","Risk Score","Risk Level","Replacement Cost","Reasons"];
+            const cols = ["Name","Dept","Level","Manager","Risk Score","Risk Level","Reasons"];
             const rows = atRisk.map(e => {
               const mgr = employees.find(m => m.id === e.managerId);
               return [`"${e.first} ${e.last}"`, `"${e.dept}"`, `"${e.level}"`,
                 `"${mgr ? mgr.first + " " + mgr.last : "—"}"`, e.score, `"${e.risk.toUpperCase()}"`,
-                `"${fmtCost(replacementCost(e.level))}"`, `"${e.reasons.join("; ")}"`].join(",");
+                `"${e.reasons.join("; ")}"`].join(",");
             });
             const blob = new Blob([[cols.join(","), ...rows].join("\n")], { type: "text/csv" });
             const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "flight-risk-report.csv"; a.click();
@@ -1865,7 +1881,7 @@ function FlightRiskView() {
                       </div>
                     </td>
                     <td className="px-4 py-2 text-gray-500 text-xs">{e.dept}</td>
-                    <td className="px-4 py-2 text-gray-500 text-xs">{e.level}</td>
+                    <td className="px-4 py-2 text-gray-500 text-xs">{displayLevel(e.level)}</td>
                     <td className="px-4 py-2 text-gray-500" style={{ maxWidth: 220 }}>
                       {e.reasons.length > 0
                         ? <ul className="list-none space-y-0.5">{e.reasons.map((r, i) => (
@@ -1933,7 +1949,7 @@ const MODES = ["simple", "advanced", "expert"];
 const MODE_LEVEL = { simple: 0, advanced: 1, expert: 2 };
 function atLeast(current, required) { return MODE_LEVEL[current] >= MODE_LEVEL[required]; }
 // Minimum mode required to display each view — used to redirect on mode downgrade
-const VIEW_MIN_MODE = { "org-chart": "simple", "timeline": "advanced", "dashboards": "advanced", "scenarios": "advanced", "analytics": "advanced", "flight-risk": "advanced", "pipeline": "expert" };
+const VIEW_MIN_MODE = { "org-chart": "simple", "timeline": "advanced", "dashboards": "advanced", "scenarios": "advanced", "headcount": "advanced", "analytics": "advanced", "flight-risk": "advanced", "pipeline": "expert" };
 
 const MODE_META = {
   simple:   { label: "Simple",   color: "#2563eb", desc: "Org chart & people search" },
@@ -2054,6 +2070,503 @@ const LEVEL_SALARY = {
 function replacementCost(level) { return Math.round((LEVEL_SALARY[level] || 120000) * 1.5); }
 function fmtCost(n) { return n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : `$${Math.round(n / 1000)}K`; }
 
+// ─── LEVEL DISPLAY MAPPING (L1-L7 / M1-M4 / E1-E3) ───
+// Internal data still uses IC1..C-Suite; UI surfaces the new labels via displayLevel().
+const LEVEL_LABELS = {
+  IC1: "L1", IC2: "L2", IC3: "L3", IC4: "L4", IC5: "L5", IC6: "L6",
+  Manager: "M1", Director: "M2",
+  VP: "E1", SVP: "E2", "C-Suite": "E3",
+};
+const ALL_DISPLAY_LEVELS = ["L1","L2","L3","L4","L5","L6","L7","M1","M2","M3","M4","E1","E2","E3"];
+const EARLY_DISPLAY_LEVELS = new Set(["L1","L2"]);
+function displayLevel(level) { return LEVEL_LABELS[level] || level; }
+function isEarlyCareer(level) { return EARLY_DISPLAY_LEVELS.has(displayLevel(level)); }
+function levelTier(displayLvl) {
+  if (displayLvl?.startsWith("L")) return "IC";
+  if (displayLvl?.startsWith("M")) return "Manager";
+  if (displayLvl?.startsWith("E")) return "Executive";
+  return "Other";
+}
+
+// ─── REQUISITION HELPERS (shared by HeadcountPlanningView + OrgChartApp) ───
+function seededRand(seedStr) {
+  let h = 2166136261;
+  for (let i = 0; i < seedStr.length; i++) { h ^= seedStr.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return () => {
+    h += 0x6D2B79F5; let t = h;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function pickTitleForReq(group, displayLvl, rng) {
+  const tier = levelTier(displayLvl);
+  const pool = SEMI_TITLES[group] || SEMI_TITLES["Software"] || [`${group} Specialist`];
+  let base = pool[Math.floor(rng() * pool.length)];
+  if (displayLvl === "L1") base = base.replace(/^(Sr\.|Principal)\s+/, "") + " I";
+  else if (displayLvl === "L2") base = base.replace(/^(Sr\.|Principal)\s+/, "") + " II";
+  else if (tier === "Manager") base = `${displayLvl === "M1" ? "Manager" : displayLvl === "M2" ? "Director" : "Sr. Director"}, ${group}`;
+  else if (tier === "Executive") base = `${displayLvl === "E1" ? "VP" : displayLvl === "E2" ? "SVP" : "C-Level"}, ${group}`;
+  return base;
+}
+// Builds plan-only requisitions deterministically. Both the planner and the org chart use this
+// so IDs match across views and reqOverrides apply consistently.
+function buildPlanReqs({ plan, managersByGroup, horizon, planStartYear, planHorizonQ }) {
+  const reqs = [];
+  let idCounter = 1;
+  const mkReq = (group, level, qIdx, hMgr, rng) => {
+    const horizonEntry = horizon[Math.min(qIdx, horizon.length - 1)] || { year: planStartYear, q: "Q1" };
+    const qNum = parseInt(horizonEntry.q.replace("Q", ""), 10);
+    const startMonth = (qNum - 1) * 3 + 1;
+    const targetStart = `${horizonEntry.year}-${String(startMonth).padStart(2, "0")}-01`;
+    const open = new Date(`${targetStart}T00:00:00`);
+    open.setDate(open.getDate() - 60);
+    const openDate = open.toISOString().slice(0, 10);
+    const isEC = EARLY_DISPLAY_LEVELS.has(level);
+    const loc = hMgr ? hMgr.location : LOCATIONS[Math.floor(rng() * LOCATIONS.length)];
+    const country = countryFor(loc);
+    const sIdx = Math.floor(rng() * 12);
+    const status = sIdx < 7 ? "Open" : sIdx < 9 ? "Sourcing" : sIdx === 9 ? "Interviewing" : sIdx === 10 ? "Offer" : "Filled";
+    return {
+      id: `REQ-${String(idCounter++).padStart(4, "0")}`,
+      group, level, isEC,
+      title: pickTitleForReq(group, level, rng),
+      location: loc, country,
+      openDate, targetStart, quarter: `${horizonEntry.year} ${horizonEntry.q}`,
+      hiringManager: hMgr ? `${hMgr.first} ${hMgr.last}` : "TBD",
+      hiringManagerId: hMgr ? hMgr.id : null,
+      employmentType: "FTE",
+      source: "plan", status,
+    };
+  };
+  // Iterate groups in sorted order so IDs are stable
+  Object.keys(plan).sort().forEach(group => {
+    const byLv = plan[group];
+    const rng = seededRand(`${group}|plan|${planStartYear}|${planHorizonQ}`);
+    const mgrs = managersByGroup[group] || [];
+    Object.keys(byLv).sort().forEach(lv => {
+      const delta = byLv[lv];
+      if (delta <= 0) return;
+      const total = delta;
+      for (let i = 0; i < total; i++) {
+        const qIdx = Math.floor(i * planHorizonQ / total);
+        const hMgr = mgrs.length ? mgrs[Math.floor(rng() * mgrs.length)] : null;
+        reqs.push(mkReq(group, lv, qIdx, hMgr, rng));
+      }
+    });
+  });
+  return reqs;
+}
+
+// Largest-remainder allocation: split `total` into integer parts proportional to `weights`.
+function largestRemainderAlloc(total, weights) {
+  const sumW = weights.reduce((s, w) => s + w, 0);
+  if (!sumW || !total) return weights.map(() => 0);
+  const raw = weights.map(w => total * w / sumW);
+  const floors = raw.map(v => Math.floor(v));
+  let leftover = total - floors.reduce((s, v) => s + v, 0);
+  const order = raw
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac);
+  for (let k = 0; k < leftover; k++) floors[order[k % order.length].i] += 1;
+  return floors;
+}
+
+// EC hire calculator. Given the projected baseline, returns yearly EC + intern numbers.
+function computeEarlyCalc({ baseTotal, baseEarly, expPerYear, planYears, mode, targetPct, mixPct, internRatio }) {
+  const expHorizon = expPerYear * planYears;
+  if (mode === "orgMix") {
+    const p = Math.min(0.99, Math.max(0, targetPct / 100));
+    const ecHorizonRaw = (p * (baseTotal + expHorizon) - baseEarly) / Math.max(0.01, 1 - p);
+    const ecHorizon = Math.max(0, Math.ceil(ecHorizonRaw));
+    const ecPerYear = Math.ceil(ecHorizon / planYears);
+    const orgTargetEC = Math.round((baseTotal + ecHorizon + expHorizon) * p);
+    const orgGap = Math.max(0, orgTargetEC - baseEarly);
+    const totalPerYear = ecPerYear + expPerYear;
+    const interns = Math.ceil(ecPerYear * internRatio);
+    const ecShare = totalPerYear ? Math.round(100 * ecPerYear / totalPerYear) : 0;
+    const finalTotal = baseTotal + ecHorizon + expHorizon;
+    const finalEarly = baseEarly + ecHorizon;
+    const finalPct = finalTotal ? Math.round(100 * finalEarly / finalTotal) : 0;
+    return { ecPerYear, expPerYear, totalPerYear, interns, ecShare, orgGap, orgTargetEC, finalPct };
+  } else {
+    const pct = Math.min(99, Math.max(0, mixPct));
+    const ecPerYear = Math.ceil(expPerYear * pct / Math.max(1, 100 - pct));
+    const totalPerYear = ecPerYear + expPerYear;
+    const interns = Math.ceil(ecPerYear * internRatio);
+    const ecShare = totalPerYear ? Math.round(100 * ecPerYear / totalPerYear) : 0;
+    const ecHorizon = ecPerYear * planYears;
+    const finalTotal = baseTotal + ecHorizon + expHorizon;
+    const finalEarly = baseEarly + ecHorizon;
+    const finalPct = finalTotal ? Math.round(100 * finalEarly / finalTotal) : 0;
+    return { ecPerYear, expPerYear, totalPerYear, interns, ecShare, orgGap: 0, orgTargetEC: 0, finalPct };
+  }
+}
+
+// Per-group EC allocation (largest-remainder over weights).
+function computeEarlyAllocByGroup({ earlyByGroup, earlyCalc, mode }) {
+  let weights, basis;
+  if (mode === "orgMix") {
+    const gaps = earlyByGroup.map(r => Math.max(0, r.gap));
+    const totalGap = gaps.reduce((s, x) => s + x, 0);
+    if (totalGap > 0) { weights = gaps; basis = "gap"; }
+    else { weights = earlyByGroup.map(r => r.curTotal); basis = "size (no gap)"; }
+  } else {
+    weights = earlyByGroup.map(r => r.curTotal);
+    basis = "size";
+  }
+  const ecAlloc = largestRemainderAlloc(earlyCalc.ecPerYear, weights);
+  const internAlloc = largestRemainderAlloc(earlyCalc.interns, weights);
+  const sumW = weights.reduce((s, w) => s + w, 0) || 1;
+  return earlyByGroup.map((r, i) => ({
+    group: r.group,
+    share: Math.round(100 * weights[i] / sumW),
+    ecPerYear: ecAlloc[i],
+    interns: internAlloc[i],
+    basis,
+  }));
+}
+
+// ─── 3-YEAR ATTRITION + GROWTH MODEL ───
+// Drives backfill, growth, promotions, M&A, and EC hiring in coupled fashion.
+//
+// Rules:
+//   - Each year we lose attritionPct% of the active HC at year start (compounds).
+//   - promoPctPerYear% of eligible HC (L1-L4 ICs ≈ 85% of org) is promoted up one level.
+//     L2→L3 specifically converts EC into experienced (drains the EC pool).
+//     Vacated slots (any level) become backfill demand on top of attrition.
+//   - acquisitionsPerYear[i] = { count, ecPct } adds HC at year i without recruiting.
+//     Counts toward growth target — recruiting only fills the gap.
+//   - Net growth is split across 3 years by user-supplied weights (must sum to ~100).
+//   - Gross hiring per year = attrition backfill + promotion backfill + (growth − acquired).
+//   - EC% applies to gross hires per year:
+//       * "hireMix" mode → EC = mixPct of every year's gross
+//       * "orgMix" mode → solve so end-of-Y3 org EC% hits target, compensating for EC drain
+//         from attrition + L2 promotions and EC lift from acquired EC.
+//   - Backfills default to the same level as the vacated slot (attrition + promotion both).
+function computeAttritionGrowthModel({
+  baseTotal, baseEarly, levelHistogram,
+  attritionPct, growthTarget3Yr, growthShiftPerYear,
+  promoPctPerYear, acquisitionsPerYear,
+  mode, targetPct, mixPct, internRatio, planStartYear,
+}) {
+  const years = [planStartYear, planStartYear + 1, planStartYear + 2];
+  const aPct = Math.min(50, Math.max(0, attritionPct)) / 100;
+  const pPct = Math.min(50, Math.max(0, promoPctPerYear || 0)) / 100;
+  const wSum = (growthShiftPerYear || []).reduce((s, x) => s + x, 0) || 1;
+  const weights = (growthShiftPerYear || [33, 33, 34]).map(x => x / wSum);
+  const netGrowthYearly = largestRemainderAlloc(growthTarget3Yr, weights.map(w => w * 100));
+  const ELIGIBLE_PROMO_SHARE = 0.85; // exclude top-of-track + mgmt from promotion eligibility
+  const acq = (acquisitionsPerYear && acquisitionsPerYear.length === 3)
+    ? acquisitionsPerYear
+    : [{count:0,ecPct:0},{count:0,ecPct:0},{count:0,ecPct:0}];
+  // Share of EC pool that's L2 (rest is L1). L2 is the slice that promotes OUT of EC.
+  const l2InitShare = baseEarly > 0 ? Math.min(1, (levelHistogram?.L2 || 0) / baseEarly) : 0.5;
+
+  // Forward-simulate HC year by year (attrition + backfill cancel; growth is the net delta;
+  // acquisitions count toward growth, so HC delta per year = growth)
+  let hc = baseTotal;
+  const yearly = [];
+  for (let i = 0; i < 3; i++) {
+    const startHC = hc;
+    const attrition = Math.round(startHC * aPct);
+    const eligible = Math.round(startHC * ELIGIBLE_PROMO_SHARE);
+    const promotions = Math.round(eligible * pPct);
+    const acquired = Math.max(0, Math.round(acq[i].count || 0));
+    const acquiredEC = Math.max(0, Math.min(acquired,
+      Math.round(acquired * Math.max(0, Math.min(100, acq[i].ecPct || 0)) / 100)));
+    const growth = netGrowthYearly[i] || 0;
+    const recruitedGrowth = Math.max(0, growth - acquired); // M&A absorbs part of the growth target
+    const gross = attrition + promotions + recruitedGrowth; // promotion-vacated slots refilled too
+    yearly.push({
+      year: years[i], startHC, attrition, growth, gross,
+      promotions, acquired, acquiredEC, recruitedGrowth,
+    });
+    hc = startHC + growth; // acquired is part of growth, attrition+backfill cancel
+  }
+
+  // Pre-compute totals over the 3 years for EC math
+  const totalGross = yearly.reduce((s, y) => s + y.gross, 0);
+  const totalAttr = yearly.reduce((s, y) => s + y.attrition, 0);
+  const totalPromos = yearly.reduce((s, y) => s + y.promotions, 0);
+  const totalAcq = yearly.reduce((s, y) => s + y.acquired, 0);
+  const totalAcqEC = yearly.reduce((s, y) => s + y.acquiredEC, 0);
+
+  // EC hires per year — depends on mode
+  let ecYearly;
+  if (mode === "hireMix") {
+    const pct = Math.min(99, Math.max(0, mixPct)) / 100;
+    ecYearly = yearly.map(y => Math.round(y.gross * pct));
+  } else {
+    // orgMix: solve end-of-Y3 EC% = targetPct, accounting for EC drain (attrition + L2 promos)
+    // and EC lift (acquired EC).
+    const p = Math.min(0.99, Math.max(0, targetPct / 100));
+    const endHC = baseTotal + yearly.reduce((s, y) => s + y.growth, 0);
+    const targetECEnd = Math.round(endHC * p);
+    const ecShare0 = baseTotal > 0 ? baseEarly / baseTotal : 0;
+    // First-order: attrition takes EC at starting share rate; promotions take L2 portion of EC.
+    const expectedECAttrLoss = Math.round(totalAttr * ecShare0);
+    const expectedECPromoLoss = Math.round(totalPromos * l2InitShare * (baseEarly > 0 ? 1 : 0));
+    const ecHorizon = Math.max(0, targetECEnd - baseEarly + expectedECAttrLoss + expectedECPromoLoss - totalAcqEC);
+    const grossWeights = yearly.map(y => y.gross || 0);
+    ecYearly = largestRemainderAlloc(Math.min(ecHorizon, totalGross), grossWeights.length ? grossWeights : [1,1,1]);
+    ecYearly = ecYearly.map((v, i) => Math.min(v, yearly[i].gross));
+  }
+
+  // Build per-year output rows with running EC simulation
+  let runningHC = baseTotal;
+  let runningEC = baseEarly;
+  yearly.forEach((y, i) => {
+    y.ec = ecYearly[i] || 0;
+    y.exp = y.gross - y.ec;
+    y.interns = Math.ceil(y.ec * internRatio);
+    // EC outflows: proportional attrition + L2-share of promotions (L2→L3 leaves EC pool).
+    const ecShareNow = runningHC > 0 ? runningEC / runningHC : 0;
+    const ecLossAttr = Math.round(y.attrition * ecShareNow);
+    const l2ShareNow = runningEC > 0 ? l2InitShare : 0;
+    const ecLossPromo = Math.round(y.promotions * (runningEC / Math.max(1, runningHC)) * l2ShareNow / Math.max(1e-9, ecShareNow));
+    // ↑ approximates L2→L3 outflow; equivalent to round(runningL2 * pPct) when shares hold.
+    y.ecPromoted = Math.min(ecLossPromo, runningEC);
+    runningEC += y.ec + y.acquiredEC - ecLossAttr - y.ecPromoted;
+    runningHC += y.growth;
+    if (runningEC < 0) runningEC = 0;
+    y.endHC = runningHC;
+    y.endECApprox = runningEC;
+    y.endECPctApprox = runningHC ? Math.round(100 * runningEC / runningHC) : 0;
+  });
+
+  // Backfill level distribution: total vacated slots (attrition + promotions) × current level shares
+  const totalBackfill = totalAttr + totalPromos;
+  const lvKeys = Object.keys(levelHistogram || {});
+  const lvWeights = lvKeys.map(k => levelHistogram[k] || 0);
+  const backfillAlloc = lvKeys.length ? largestRemainderAlloc(totalBackfill, lvWeights) : [];
+  const backfillByLevel = {};
+  lvKeys.forEach((k, i) => { if (backfillAlloc[i] > 0) backfillByLevel[k] = backfillAlloc[i]; });
+
+  return {
+    yearly,
+    threeYear: {
+      totalAttrition: totalAttr,
+      totalPromotions: totalPromos,
+      totalAcquired: totalAcq,
+      totalAcquiredEC: totalAcqEC,
+      totalGrowth: yearly.reduce((s, y) => s + y.growth, 0),
+      totalGross,
+      totalEC: yearly.reduce((s, y) => s + y.ec, 0),
+      totalExp: yearly.reduce((s, y) => s + y.exp, 0),
+      totalInterns: yearly.reduce((s, y) => s + y.interns, 0),
+      totalECPromoted: yearly.reduce((s, y) => s + (y.ecPromoted || 0), 0),
+      endingHC: yearly[yearly.length - 1].endHC,
+      endingECPct: yearly[yearly.length - 1].endECPctApprox,
+    },
+    backfillByLevel,
+  };
+}
+
+// Backfill reqs: created at the same level as departed staff, distributed across 3 years.
+function buildAttritionBackfillReqs({ model, levelHistogram, managersByLevel, planStartYear, idStart }) {
+  const reqs = [];
+  let idCounter = idStart;
+  const lvKeys = Object.keys(levelHistogram || {}).filter(k => levelHistogram[k] > 0);
+  if (!lvKeys.length || !model.yearly.length) return reqs;
+  // Distribute total attrition across years using yearly attrition as weight
+  const yearWeights = model.yearly.map(y => y.attrition);
+  const totalAttr = model.threeYear.totalAttrition;
+  if (!totalAttr) return reqs;
+  // For each level, allocate that level's total backfill across years
+  lvKeys.forEach(lv => {
+    const lvShare = (model.backfillByLevel[lv] || 0);
+    if (!lvShare) return;
+    const perYear = largestRemainderAlloc(lvShare, yearWeights);
+    perYear.forEach((count, yi) => {
+      if (!count) return;
+      const year = planStartYear + yi;
+      const rng = seededRand(`backfill|${lv}|${year}`);
+      const mgrs = managersByLevel[lv] || managersByLevel.__any || [];
+      for (let i = 0; i < count; i++) {
+        const qNum = (i % 4) + 1;
+        const startMonth = (qNum - 1) * 3 + 1;
+        const targetStart = `${year}-${String(startMonth).padStart(2, "0")}-01`;
+        const open = new Date(`${targetStart}T00:00:00`); open.setDate(open.getDate() - 60);
+        const hMgr = mgrs.length ? mgrs[Math.floor(rng() * mgrs.length)] : null;
+        const loc = hMgr ? hMgr.location : LOCATIONS[Math.floor(rng() * LOCATIONS.length)];
+        const sIdx = Math.floor(rng() * 12);
+        const status = sIdx < 7 ? "Open" : sIdx < 9 ? "Sourcing" : sIdx === 9 ? "Interviewing" : sIdx === 10 ? "Offer" : "Filled";
+        const group = hMgr ? (hMgr.dept || hMgr.bg || hMgr.fn) : "Engineering";
+        reqs.push({
+          id: `REQ-${String(idCounter++).padStart(4, "0")}`,
+          group, level: lv, isEC: EARLY_DISPLAY_LEVELS.has(lv),
+          title: pickTitleForReq(group, lv, rng) + " (Backfill)",
+          location: loc, country: countryFor(loc),
+          openDate: open.toISOString().slice(0, 10), targetStart,
+          quarter: `${year} Q${qNum}`,
+          hiringManager: hMgr ? `${hMgr.first} ${hMgr.last}` : "TBD",
+          hiringManagerId: hMgr ? hMgr.id : null,
+          employmentType: "FTE",
+          source: "backfill", status,
+        });
+      }
+    });
+  });
+  return reqs;
+}
+
+// Growth reqs: net new positions, allocated by group share, distributed across 3 years
+// using growthShiftPerYear weights.
+function buildGrowthReqs({ model, allocByGroup, managersByGroup, planStartYear, idStart }) {
+  const reqs = [];
+  let idCounter = idStart;
+  const yearWeights = model.yearly.map(y => y.growth);
+  const totalGrowth = model.threeYear.totalGrowth;
+  if (!totalGrowth || !allocByGroup.length) return reqs;
+  // allocByGroup uses share weights for EC; reuse the same shares for growth distribution.
+  const groupWeights = allocByGroup.map(g => g.share || 1);
+  const growthByGroup = largestRemainderAlloc(totalGrowth, groupWeights);
+  allocByGroup.forEach((g, gi) => {
+    const groupTotal = growthByGroup[gi];
+    if (!groupTotal) return;
+    const perYear = largestRemainderAlloc(groupTotal, yearWeights);
+    perYear.forEach((count, yi) => {
+      if (!count) return;
+      const year = planStartYear + yi;
+      const rng = seededRand(`growth|${g.group}|${year}`);
+      const mgrs = managersByGroup[g.group] || [];
+      for (let i = 0; i < count; i++) {
+        // Mid-level IC default for growth (L3); EC reqs are emitted separately
+        const lv = "L3";
+        const qNum = (i % 4) + 1;
+        const startMonth = (qNum - 1) * 3 + 1;
+        const targetStart = `${year}-${String(startMonth).padStart(2, "0")}-01`;
+        const open = new Date(`${targetStart}T00:00:00`); open.setDate(open.getDate() - 60);
+        const hMgr = mgrs.length ? mgrs[Math.floor(rng() * mgrs.length)] : null;
+        const loc = hMgr ? hMgr.location : LOCATIONS[Math.floor(rng() * LOCATIONS.length)];
+        const sIdx = Math.floor(rng() * 12);
+        const status = sIdx < 7 ? "Open" : sIdx < 9 ? "Sourcing" : sIdx === 9 ? "Interviewing" : sIdx === 10 ? "Offer" : "Filled";
+        reqs.push({
+          id: `REQ-${String(idCounter++).padStart(4, "0")}`,
+          group: g.group, level: lv, isEC: false,
+          title: pickTitleForReq(g.group, lv, rng) + " (Growth)",
+          location: loc, country: countryFor(loc),
+          openDate: open.toISOString().slice(0, 10), targetStart,
+          quarter: `${year} Q${qNum}`,
+          hiringManager: hMgr ? `${hMgr.first} ${hMgr.last}` : "TBD",
+          hiringManagerId: hMgr ? hMgr.id : null,
+          employmentType: "FTE",
+          source: "growth", status,
+        });
+      }
+    });
+  });
+  return reqs;
+}
+
+// EC-calc reqs spread across the 3-year horizon.
+// EC totals come from the attrition+growth model (totalEC, distributed by yearly.ec).
+function buildECCalcReqs({ allocByGroup, managersByGroup, planStartYear, model, idStart }) {
+  const reqs = [];
+  let idCounter = idStart;
+  if (!model || !model.threeYear.totalEC) return reqs;
+  const yearWeights = model.yearly.map(y => y.ec);
+  allocByGroup.forEach(g => {
+    if (!g.ecPerYear) return;
+    // ecPerYear here is the per-group share of the *3-year total*.
+    const groupTotal3yr = g.ecPerYear; // (re-interpreted by computeEarlyAllocByGroup below)
+    const perYear = largestRemainderAlloc(groupTotal3yr, yearWeights);
+    perYear.forEach((count, yi) => {
+      if (!count) return;
+      const year = planStartYear + yi;
+      const rng = seededRand(`${g.group}|eccalc|${year}`);
+      const mgrs = managersByGroup[g.group] || [];
+      for (let i = 0; i < count; i++) {
+        const qNum = (i % 4) + 1;
+        const lv = i % 2 === 0 ? "L1" : "L2";
+        const hMgr = mgrs.length ? mgrs[Math.floor(rng() * mgrs.length)] : null;
+        const startMonth = (qNum - 1) * 3 + 1;
+        const targetStart = `${year}-${String(startMonth).padStart(2, "0")}-01`;
+        const open = new Date(`${targetStart}T00:00:00`);
+        open.setDate(open.getDate() - 60);
+        const loc = hMgr ? hMgr.location : LOCATIONS[Math.floor(rng() * LOCATIONS.length)];
+        const sIdx = Math.floor(rng() * 12);
+        const status = sIdx < 7 ? "Open" : sIdx < 9 ? "Sourcing" : sIdx === 9 ? "Interviewing" : sIdx === 10 ? "Offer" : "Filled";
+        reqs.push({
+          id: `REQ-${String(idCounter++).padStart(4, "0")}`,
+          group: g.group, level: lv, isEC: true,
+          title: pickTitleForReq(g.group, lv, rng),
+          location: loc, country: countryFor(loc),
+          openDate: open.toISOString().slice(0, 10), targetStart,
+          quarter: `${year} Q${qNum}`,
+          hiringManager: hMgr ? `${hMgr.first} ${hMgr.last}` : "TBD",
+          hiringManagerId: hMgr ? hMgr.id : null,
+          employmentType: "FTE",
+          source: "ec-calc", status,
+        });
+      }
+    });
+  });
+  return reqs;
+}
+
+// Apply per-req user overrides + assign a default project.
+function applyReqOverridesAndProjects(reqs, overrides, projects) {
+  return reqs.map(r => {
+    const ov = overrides[r.id] || {};
+    const level = ov.level || r.level;
+    const location = ov.location || r.location;
+    const defaultProj = projects.find(p => p.owningGroup === r.group) || projects[0];
+    const projectId = ov.projectId || (defaultProj ? defaultProj.id : null);
+    return {
+      ...r, level, location,
+      country: countryFor(location),
+      isEC: EARLY_DISPLAY_LEVELS.has(level),
+      projectId,
+    };
+  });
+}
+
+// Sample projects from the org's largest depts (used when projects array is empty).
+function generateSampleProjectsFromEmps(activeEmployees) {
+  const deptCounts = {};
+  activeEmployees.forEach(e => { if (e.dept) deptCounts[e.dept] = (deptCounts[e.dept] || 0) + 1; });
+  const topDepts = Object.entries(deptCounts).sort((a,b) => b[1]-a[1]).slice(0, 6).map(x => x[0]);
+  const productNames = {
+    "IC Design": "Helios SoC",
+    "Verification": "Helios DV Suite",
+    "Physical Design": "Helios PD Tape-out",
+    "Process Engineering": "Atlas 3nm Node",
+    "Manufacturing": "Atlas Fab Ramp",
+    "Test Engineering": "Falcon Test Platform",
+    "Product Engineering": "Falcon Silicon Validation",
+    "Software": "Polaris SDK",
+    "Applications": "Polaris Reference Designs",
+    "Quality & Reliability": "Reliability Initiative",
+    "Systems Engineering": "Architecture Refresh",
+  };
+  const siteByDept = {};
+  activeEmployees.forEach(e => {
+    if (!e.dept || !e.location) return;
+    siteByDept[e.dept] = siteByDept[e.dept] || {};
+    siteByDept[e.dept][e.location] = (siteByDept[e.dept][e.location] || 0) + 1;
+  });
+  return topDepts.map((dept, i) => {
+    const sites = Object.entries(siteByDept[dept] || {}).sort((a,b)=>b[1]-a[1]).slice(0,2).map(x => x[0]);
+    const targetMix = i < 2
+      ? { L1: 3, L2: 5, L3: 6, L4: 4, L5: 2, M1: 2, M2: 1 }
+      : i < 4
+      ? { L1: 2, L2: 3, L3: 4, L4: 3, L5: 1, M1: 1 }
+      : { L1: 1, L2: 2, L3: 3, L4: 2, M1: 1 };
+    return {
+      id: `PRJ-${String(i+1).padStart(3,"0")}`,
+      name: productNames[dept] || `${dept} Initiative`,
+      owningGroup: dept,
+      groupKind: "dept",
+      preferredSites: sites.length ? sites : ["San Jose HQ"],
+      targetMix,
+      critical: i < 2,
+      notes: i === 0 ? "Q3 tape-out gate — staffing must hold." : "",
+    };
+  });
+}
+
 // ─── LEVEL FILTER ───
 const LEVEL_FILTER_GROUPS = {
   "All":          () => true,
@@ -2073,6 +2586,8 @@ const OrgNode = memo(function OrgNode({ node, depth = 0 }) {
     getNodeColor, getTenureColor, isFiltered, setDetailPanel, detailPanel,
     insightHighlightIds, flightRisks, showFlightRisk,
     tree, fullTree, setExitSimNode,
+    showPlannedInOrgChart, reqsByManager,
+    positionMode, addPositionUnder, removePositionUnder,
   } = useContext(AppCtx);
 
   const isExpanded = expandedNodes.has(node.id);
@@ -2084,7 +2599,12 @@ const OrgNode = memo(function OrgNode({ node, depth = 0 }) {
   const filtered = isFiltered(node);
   const color = getNodeColor(node);
   const tenureColor = getTenureColor(node.startDate);
+  const showGhosts = (showPlannedInOrgChart || positionMode);
+  const ghostReqs = (showGhosts && reqsByManager) ? (reqsByManager[node.id] || []) : [];
+  const customGhostCount = ghostReqs.filter(r => r.source === "manual").length;
+  const hasGhosts = ghostReqs.length > 0;
   const hasChildren = node.children.length > 0;
+  const hasExpandable = hasChildren || hasGhosts;
 
   // Flight risk
   const riskEntry = flightRisks?.[node.id];
@@ -2133,7 +2653,7 @@ const OrgNode = memo(function OrgNode({ node, depth = 0 }) {
             : isInsightHighlighted
             ? "0 4px 20px rgba(139,92,246,0.35)"
             : "0 1px 4px rgba(0,0,0,0.08)",
-          borderLeft: isDeparted ? "4px dashed #94a3b8" : `4px solid ${color}`,
+          borderLeft: isDeparted ? "4px dashed #94a3b8" : node.employmentType === "Contract" ? `4px dashed ${color}` : `4px solid ${color}`,
           position: "relative",
           transform: isDragTarget ? "scale(1.04)" : "scale(1)",
           transition: "box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease, opacity 0.15s ease",
@@ -2168,7 +2688,7 @@ const OrgNode = memo(function OrgNode({ node, depth = 0 }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1">
               <div className="text-xs font-semibold truncate flex-1" style={{ color: isDeparted ? "#94a3b8" : "#111827" }}>{node.first} {node.last}</div>
-              <span className="shrink-0 text-gray-400 font-mono" style={{ fontSize: 8 }}>{node.level}</span>
+              <span className="shrink-0 text-gray-400 font-mono" style={{ fontSize: 8 }}>{displayLevel(node.level)}</span>
             </div>
             <div className="text-xs text-gray-500 truncate" style={{ fontSize: 10 }}>{node.title}</div>
           </div>
@@ -2178,7 +2698,15 @@ const OrgNode = memo(function OrgNode({ node, depth = 0 }) {
             ? <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 font-semibold">Departed {node.endDate ? node.endDate.slice(0,7) : ""}</span>
             : <span className="px-1.5 py-0.5 rounded text-white" style={{ background: color, opacity: 0.8 }}>{node.dept}</span>
           }
+          {!isDeparted && node.employmentType === "Contract" && (
+            <span className="px-1 py-0.5 rounded font-bold border" style={{ background: "#fef3c7", color: "#92400e", borderColor: "#fde68a", fontSize: 8 }} title="Contractor">CTR</span>
+          )}
           {!isDeparted && <span className="text-gray-400 flex items-center gap-0.5"><MapPin size={8}/>{node.location.split(" ")[0]}</span>}
+          {hasGhosts && (
+            <span className="px-1 py-0.5 rounded font-bold border" style={{ background: "#ecfdf5", color: "#047857", borderColor: "#6ee7b7", fontSize: 8 }} title={`${ghostReqs.length} open requisition${ghostReqs.length>1?"s":""}`}>
+              +{ghostReqs.length} open
+            </span>
+          )}
           {hasChildren
             ? <span className="text-gray-400 ml-auto flex items-center gap-0.5"><Users size={8}/>{node._totalReports}</span>
             : mgrNode
@@ -2189,7 +2717,7 @@ const OrgNode = memo(function OrgNode({ node, depth = 0 }) {
         <div className="mt-1.5 h-1 rounded-full bg-gray-100 overflow-hidden">
           <div className="h-full rounded-full" style={{ background: tenureColor, width: "100%" }} />
         </div>
-        {hasChildren && (
+        {hasExpandable && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -2213,16 +2741,77 @@ const OrgNode = memo(function OrgNode({ node, depth = 0 }) {
         <div className="absolute top-1 right-1 opacity-0 hover:opacity-100 transition-opacity cursor-grab" onMouseDown={(e) => e.stopPropagation()}>
           <GripVertical size={12} className="text-gray-400"/>
         </div>
+        {positionMode && !isDeparted && (
+          <div className="absolute -bottom-3 right-2 flex gap-1 z-10" onMouseDown={(e) => e.stopPropagation()}>
+            <button
+              onClick={(e) => { e.stopPropagation(); addPositionUnder(node.id); }}
+              title={`Add an open position reporting to ${node.first} ${node.last}`}
+              className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center hover:bg-emerald-700 transition-colors"
+              style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.18)" }}>
+              <Plus size={12}/>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); if (customGhostCount > 0) removePositionUnder(node.id); }}
+              disabled={customGhostCount === 0}
+              title={customGhostCount === 0 ? "No manually-added positions to remove here" : `Remove the most recent open position under ${node.first} ${node.last}`}
+              className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${customGhostCount === 0 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-rose-500 text-white hover:bg-rose-600"}`}
+              style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.18)" }}>
+              <Minus size={12}/>
+            </button>
+          </div>
+        )}
       </div>
-      {hasChildren && isExpanded && (
-        <OrgConnectors node={node} color={color} depth={depth}/>
+      {hasExpandable && isExpanded && (
+        <OrgConnectors node={node} color={color} depth={depth} ghostReqs={ghostReqs}/>
       )}
     </div>
   );
 });
 
+// ─── GHOST NODE — open req placeholder, dotted ring so it stands out ───
+function GhostReqNode({ req }) {
+  return (
+    <div className="flex flex-col items-center" style={{ paddingTop: 0 }}>
+      <div
+        title={`Open req · ${req.id}\n${req.title}\n${req.location} · ${req.quarter}\nStatus: ${req.status}`}
+        style={{
+          position: "relative",
+          background: "#f0fdf4",
+          borderRadius: 10,
+          padding: "8px 12px",
+          minWidth: 180,
+          maxWidth: 220,
+          border: "2px dashed #10b981",
+          outline: "2px dotted #34d399",
+          outlineOffset: 3,
+          boxShadow: "0 1px 4px rgba(16,185,129,0.18)",
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center text-emerald-700 text-[10px] font-black shrink-0"
+            style={{ background: "#d1fae5", border: "2px dashed #10b981" }}>
+            {req.level}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1">
+              <div className="text-[10px] font-bold text-emerald-800 uppercase tracking-wide truncate flex-1">Open Req</div>
+              <span className="shrink-0 text-emerald-600 font-mono" style={{ fontSize: 8 }}>{req.id}</span>
+            </div>
+            <div className="text-xs text-gray-700 truncate" style={{ fontSize: 11 }}>{req.title}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 mt-1.5" style={{ fontSize: 9 }}>
+          <span className="px-1.5 py-0.5 rounded text-white font-semibold" style={{ background: "#10b981" }}>{req.status}</span>
+          <span className="text-gray-500 flex items-center gap-0.5"><MapPin size={8}/>{req.location.split(" ")[0]}</span>
+          <span className="text-gray-400 ml-auto">{req.quarter}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── SVG CONNECTOR OVERLAY — measures actual child positions for pixel-perfect lines ───
-function OrgConnectors({ node, color, depth }) {
+function OrgConnectors({ node, color, depth, ghostReqs = [] }) {
   const containerRef = useRef(null);
   const [lines, setLines] = useState(null);
 
@@ -2358,7 +2947,7 @@ function OrgConnectors({ node, color, depth }) {
           })()}
         </svg>
       )}
-      {/* Actual children */}
+      {/* Actual children + ghost reqs (open positions) */}
       <div style={{ position: "relative", zIndex: 1 }}>
         {isGrid ? (
           <div className="grid gap-2 pt-1 border rounded-xl p-2"
@@ -2368,12 +2957,22 @@ function OrgConnectors({ node, color, depth }) {
                 <OrgNode node={child} depth={depth + 1}/>
               </div>
             ))}
+            {ghostReqs.map(req => (
+              <div key={req.id} data-org-child>
+                <GhostReqNode req={req}/>
+              </div>
+            ))}
           </div>
         ) : (
           <div className="flex gap-4 items-start" style={{ paddingTop: 16 }}>
             {node.children.map(child => (
               <div key={child.id} className="flex flex-col items-center" data-org-child>
                 <OrgNode node={child} depth={depth + 1}/>
+              </div>
+            ))}
+            {ghostReqs.map(req => (
+              <div key={req.id} className="flex flex-col items-center" data-org-child>
+                <GhostReqNode req={req}/>
               </div>
             ))}
           </div>
@@ -2743,7 +3342,12 @@ function DashboardView() {
   const locData   = useMemo(() => Object.entries(activeEmployees.reduce((acc, e) => { acc[e.location] = (acc[e.location] || 0) + 1; return acc; }, {})).sort((a,b) => b[1]-a[1]).map(([name,value]) => ({ name, value })), [activeEmployees]);
   const bgData    = useMemo(() => Object.entries(activeEmployees.reduce((acc, e) => { acc[e.bg]       = (acc[e.bg]       || 0) + 1; return acc; }, {})).map(([name,value]) => ({ name, value, fill: BG_COLORS[name] || "#64748b" })), [activeEmployees]);
   const fnData    = useMemo(() => Object.entries(activeEmployees.reduce((acc, e) => { acc[e.fn]       = (acc[e.fn]       || 0) + 1; return acc; }, {})).map(([name,value]) => ({ name, value })), [activeEmployees]);
-  const levelData = useMemo(() => Object.entries(activeEmployees.reduce((acc, e) => { acc[e.level]    = (acc[e.level]    || 0) + 1; return acc; }, {})).map(([name,value]) => ({ name, value })), [activeEmployees]);
+  const levelData = useMemo(() => {
+    const counts = {};
+    ALL_DISPLAY_LEVELS.forEach(lv => { counts[lv] = 0; });
+    activeEmployees.forEach(e => { const dl = displayLevel(e.level); if (counts[dl] !== undefined) counts[dl] += 1; });
+    return ALL_DISPLAY_LEVELS.map(lv => ({ name: lv, value: counts[lv] }));
+  }, [activeEmployees]);
 
   const { engRatio, dvRatio, gaRatio, avgTenure, last90Hires, last90Departures } = useMemo(() => {
     const dataNow = new Date(2025, 5, 1); // fixed "today" matching data generator (Jun 1 2025)
@@ -3793,6 +4397,1367 @@ function ScenarioView() {
   );
 }
 
+// ─── HEADCOUNT PLANNING VIEW ───
+// Tabs: Mix · Pyramid · Timeline · Early-Career Program. Plan state is lifted
+// to AppCtx so the org chart toggle ("show planned headcount") sees the same
+// data. Internal levels still use IC1..C-Suite; the planner works in display
+// levels (L1-L7 / M1-M4 / E1-E3) so the user only sees the new label set.
+function HeadcountPlanningView() {
+  const {
+    activeEmployees,
+    plan, setPlan, planGroupBy: groupBy, setPlanGroupBy: setGroupBy,
+    planStartYear, setPlanStartYear, planHorizonQ, setPlanHorizonQ,
+    // Lifted state (shared with org chart ghost nodes)
+    earlyTargetPct, setEarlyTargetPct,
+    earlyMode, setEarlyMode,
+    hireMixPct, setHireMixPct,
+    internRatio, setInternRatio,
+    annualExpHiresOverride, setAnnualExpHiresOverride,
+    reqIncludeECCalc, setReqIncludeECCalc,
+    projects, setProjects,
+    reqOverrides, setReqOverrides, overrideReq, resetOverrides,
+    customReqs, setCustomReqs,
+    // 3-year attrition + growth model
+    attritionPct, setAttritionPct,
+    growthTarget3Yr, setGrowthTarget3Yr,
+    growthShiftPerYear, setGrowthShiftPerYear,
+    promoPctPerYear, setPromoPctPerYear,
+    acquisitionsPerYear, setAcquisitionsPerYear,
+    growthModel, levelHistogram,
+    // Lifted derivations
+    planGroupKey: groupKey, planGroupLabel: groupLabel, planGroups: groups,
+    planCurrent: current, planProjected: projected,
+    planRollups, planSumPlan: sumPlan, planHorizon: horizon, planYears,
+    plannedHires, defaultAnnualExpHires, annualExpHires,
+    earlyByGroup, earlyCalc, earlyAllocByGroup,
+    planManagersByGroup: managersByGroup,
+    chartReqs,
+  } = useContext(AppCtx);
+
+  const { cur: curRoll, prj: projRoll, orgTotalCur, orgTotalProj, orgEarlyCur, orgEarlyProj } = planRollups;
+
+  const [tab, setTab] = useState("mix"); // "mix" | "pyramid" | "timeline" | "plan" | "early" | "reqs"
+
+  const setDelta = (g, lv, val) => {
+    const n = parseInt(val, 10);
+    setPlan(p => ({ ...p, [g]: { ...(p[g] || {}), [lv]: Number.isFinite(n) ? n : 0 } }));
+  };
+  const bumpDelta = (g, lv, by) => {
+    setPlan(p => ({ ...p, [g]: { ...(p[g] || {}), [lv]: (p[g]?.[lv] || 0) + by } }));
+  };
+  const clearPlan = () => setPlan({});
+
+  const [editGroup, setEditGroup] = useState(null);
+
+  // Chart data: top groups by current size, with current vs projected early%
+  const chartData = useMemo(() => {
+    return groups
+      .slice()
+      .sort((a, b) => (curRoll[b]?.total || 0) - (curRoll[a]?.total || 0))
+      .slice(0, 12)
+      .map(g => ({
+        name: g,
+        currentEarlyPct: curRoll[g]?.total ? Math.round(100 * curRoll[g].early / curRoll[g].total) : 0,
+        projectedEarlyPct: projRoll[g]?.total ? Math.round(100 * projRoll[g].early / projRoll[g].total) : 0,
+      }));
+  }, [groups, curRoll, projRoll]);
+
+  const earlyPct = (n, t) => t ? `${Math.round(100 * n / t)}%` : "—";
+
+  // ── Pyramid data: org-wide level counts (current + projected) ──
+  const pyramidData = useMemo(() => {
+    const cur = {}; ALL_DISPLAY_LEVELS.forEach(lv => { cur[lv] = 0; });
+    Object.values(current).forEach(byLv => ALL_DISPLAY_LEVELS.forEach(lv => { cur[lv] += byLv[lv] || 0; }));
+    const prj = {}; ALL_DISPLAY_LEVELS.forEach(lv => { prj[lv] = 0; });
+    Object.values(projected).forEach(byLv => ALL_DISPLAY_LEVELS.forEach(lv => { prj[lv] += byLv[lv] || 0; }));
+    // Pyramid order: top of org first (E3 down to L1)
+    return [...ALL_DISPLAY_LEVELS].reverse().map(lv => ({
+      level: lv, current: cur[lv], projected: prj[lv], delta: prj[lv] - cur[lv],
+      tier: levelTier(lv), early: EARLY_DISPLAY_LEVELS.has(lv),
+    }));
+  }, [current, projected]);
+
+  // ── Timeline: distribute each plan delta evenly across the planning quarters ──
+  const timelineRows = useMemo(() => {
+    // Each plan cell becomes one row spread across `planHorizonQ` quarters.
+    const rows = [];
+    Object.entries(plan).forEach(([g, byLv]) => {
+      Object.entries(byLv).forEach(([lv, delta]) => {
+        if (!delta) return;
+        const sign = delta > 0 ? 1 : -1;
+        const total = Math.abs(delta);
+        // Even distribution with remainder front-loaded to early quarters
+        const base = Math.floor(total / planHorizonQ);
+        const rem  = total - base * planHorizonQ;
+        const cells = horizon.map((h, i) => sign * (base + (i < rem ? 1 : 0)));
+        rows.push({ group: g, level: lv, delta, cells });
+      });
+    });
+    return rows.sort((a, b) => a.group.localeCompare(b.group) || ALL_DISPLAY_LEVELS.indexOf(a.level) - ALL_DISPLAY_LEVELS.indexOf(b.level));
+  }, [plan, horizon, planHorizonQ]);
+
+  const timelineByQuarter = useMemo(() => {
+    return horizon.map((h, i) => {
+      let hires = 0, departures = 0, early = 0;
+      timelineRows.forEach(r => {
+        const v = r.cells[i] || 0;
+        if (v > 0) { hires += v; if (EARLY_DISPLAY_LEVELS.has(r.level)) early += v; }
+        else if (v < 0) departures += -v;
+      });
+      return { ...h, hires, departures, net: hires - departures, early };
+    });
+  }, [timelineRows, horizon]);
+
+  // Cumulative HC over the horizon
+  const cumulativeTrend = useMemo(() => {
+    let runningTotal = orgTotalCur;
+    let runningEarly = orgEarlyCur;
+    const start = [{ key: "Now", year: "Now", q: "", total: runningTotal, early: runningEarly, earlyPct: orgTotalCur ? Math.round(100*orgEarlyCur/orgTotalCur) : 0 }];
+    return start.concat(timelineByQuarter.map(t => {
+      runningTotal += t.net;
+      runningEarly += t.early;
+      return { key: t.key, year: t.year, q: t.q, total: runningTotal, early: runningEarly, earlyPct: runningTotal ? Math.round(100*runningEarly/runningTotal) : 0 };
+    }));
+  }, [timelineByQuarter, orgTotalCur, orgEarlyCur]);
+
+  // ── Early-Career Program inputs + derivations come from AppCtx ──
+  // (state lifted to OrgChartApp so the org chart and planner stay in sync)
+  // earlyTargetPct/Mode, hireMixPct, internRatio, annualExpHiresOverride,
+  // earlyByGroup, earlyCalc, earlyAllocByGroup, managersByGroup, planYears,
+  // plannedHires, defaultAnnualExpHires, annualExpHires — all from ctx.
+
+  // ── Open requisitions: chartReqs come from AppCtx (same list shown on org chart) ──
+  const [reqStatusFilter, setReqStatusFilter] = useState("All");
+  const [reqLevelFilter, setReqLevelFilter] = useState("All");
+  const REQ_STATUSES = ["Open", "Sourcing", "Interviewing", "Offer", "Filled"];
+
+  function downloadFile(filename, content, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportReqsCSV() {
+    const cols = ["id","status","projectId","group","level","tier","isEC","title","location","country","employmentType","openDate","targetStart","quarter","hiringManager","hiringManagerId","salaryBand","source"];
+    const esc = v => {
+      if (v == null) return "";
+      const s = String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = [cols.join(",")];
+    filteredReqsFinal.forEach(r => {
+      rows.push(cols.map(c => {
+        if (c === "tier") return esc(levelTier(r.level));
+        if (c === "group") return esc(r.group);
+        return esc(r[c]);
+      }).join(","));
+    });
+    const stamp = new Date().toISOString().slice(0,10);
+    downloadFile(`open-reqs-${stamp}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
+  }
+
+  function exportPlanJSON() {
+    const payload = {
+      meta: { exportedAt: new Date().toISOString(), planStartYear, planHorizonQ, groupBy, mode: "headcount-plan-v2" },
+      plan,
+      earlyCareer: {
+        mode: earlyMode,
+        targetOrgPct: earlyTargetPct,
+        targetHirePct: hireMixPct,
+        annualExpHires,
+        internRatio,
+        result: earlyCalc,
+        allocation: earlyAllocByGroup,
+      },
+      growthModel: {
+        attritionPct,
+        growthTarget3Yr,
+        growthShiftPerYear,
+        promoPctPerYear,
+        acquisitionsPerYear,
+        result: growthModel,
+      },
+      projects,
+      reqOverrides,
+      customReqs,
+      requisitions: chartReqs,
+    };
+    const stamp = new Date().toISOString().slice(0,10);
+    downloadFile(`headcount-plan-${stamp}.json`, JSON.stringify(payload, null, 2), "application/json");
+  }
+
+  // Filter the (already-overridden) chartReqs by status/level for display.
+  const filteredReqsFinal = useMemo(() => chartReqs.filter(r =>
+    (reqStatusFilter === "All" || r.status === reqStatusFilter) &&
+    (reqLevelFilter === "All" || r.level === reqLevelFilter)
+  ), [chartReqs, reqStatusFilter, reqLevelFilter]);
+
+  // Per-project staffing fit
+  const projectFit = useMemo(() => {
+    return projects.map(p => {
+      const myReqs = chartReqs.filter(r => r.projectId === p.id);
+      const targetTotal = Object.values(p.targetMix).reduce((s,v) => s+v, 0);
+      // Per-level coverage from reqs
+      const reqByLevel = {};
+      myReqs.forEach(r => { reqByLevel[r.level] = (reqByLevel[r.level] || 0) + 1; });
+      const perLevel = ALL_DISPLAY_LEVELS.map(lv => ({
+        level: lv,
+        target: p.targetMix[lv] || 0,
+        reqs: reqByLevel[lv] || 0,
+      })).filter(x => x.target > 0 || x.reqs > 0);
+      // Fit = (matched coverage) / target. Over-fill doesn't help; under-fill hurts.
+      const matched = perLevel.reduce((s,x) => s + Math.min(x.target, x.reqs), 0);
+      const overfill = perLevel.reduce((s,x) => s + Math.max(0, x.reqs - x.target), 0);
+      const fitPct = targetTotal ? Math.round(100 * matched / targetTotal) : 0;
+      // Site fit: % of reqs in preferred sites
+      const inPref = myReqs.filter(r => p.preferredSites.includes(r.location)).length;
+      const sitePct = myReqs.length ? Math.round(100 * inPref / myReqs.length) : 0;
+      // EC mix on this project
+      const ecCount = myReqs.filter(r => r.isEC).length;
+      const ecPct = myReqs.length ? Math.round(100 * ecCount / myReqs.length) : 0;
+      // Site distribution
+      const siteDist = {};
+      myReqs.forEach(r => { siteDist[r.location] = (siteDist[r.location] || 0) + 1; });
+      return {
+        ...p,
+        reqs: myReqs,
+        targetTotal,
+        reqTotal: myReqs.length,
+        perLevel,
+        matched, overfill, fitPct,
+        sitePct, inPref,
+        ecCount, ecPct,
+        siteDist,
+      };
+    });
+  }, [projects, chartReqs]);
+
+  // Bulk site rebalance: redistribute reqs at level X from over-staffed site → preferred site
+  const suggestRebalance = (projectId) => {
+    const p = projectFit.find(x => x.id === projectId);
+    if (!p || !p.preferredSites.length) return [];
+    return p.reqs
+      .filter(r => !p.preferredSites.includes(r.location))
+      .map(r => ({ id: r.id, from: r.location, to: p.preferredSites[0] }));
+  };
+
+  function importPlanJSON(file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (data?.plan && typeof data.plan === "object") setPlan(data.plan);
+        if (Number.isInteger(data?.meta?.planStartYear)) setPlanStartYear(data.meta.planStartYear);
+        if (Number.isInteger(data?.meta?.planHorizonQ)) setPlanHorizonQ(data.meta.planHorizonQ);
+        if (data?.earlyCareer) {
+          const ec = data.earlyCareer;
+          if (ec.mode === "orgMix" || ec.mode === "hireMix") setEarlyMode(ec.mode);
+          if (Number.isFinite(ec.targetOrgPct))  setEarlyTargetPct(ec.targetOrgPct);
+          if (Number.isFinite(ec.targetHirePct)) setHireMixPct(ec.targetHirePct);
+          if (Number.isFinite(ec.annualExpHires)) setAnnualExpHiresOverride(ec.annualExpHires);
+          if (Number.isFinite(ec.internRatio))   setInternRatio(ec.internRatio);
+        }
+        if (Array.isArray(data?.projects)) setProjects(data.projects);
+        if (data?.reqOverrides && typeof data.reqOverrides === "object") setReqOverrides(data.reqOverrides);
+        if (Array.isArray(data?.customReqs)) setCustomReqs(data.customReqs);
+        if (data?.growthModel) {
+          const gm = data.growthModel;
+          if (Number.isFinite(gm.attritionPct))    setAttritionPct(gm.attritionPct);
+          if (Number.isFinite(gm.growthTarget3Yr)) setGrowthTarget3Yr(gm.growthTarget3Yr);
+          if (Array.isArray(gm.growthShiftPerYear) && gm.growthShiftPerYear.length === 3)
+            setGrowthShiftPerYear(gm.growthShiftPerYear.map(n => Math.max(0, Number(n) || 0)));
+          if (Number.isFinite(gm.promoPctPerYear)) setPromoPctPerYear(gm.promoPctPerYear);
+          if (Array.isArray(gm.acquisitionsPerYear) && gm.acquisitionsPerYear.length === 3)
+            setAcquisitionsPerYear(gm.acquisitionsPerYear.map(a => ({
+              count: Math.max(0, Number(a?.count) || 0),
+              ecPct: Math.max(0, Math.min(100, Number(a?.ecPct) || 0)),
+            })));
+        }
+      } catch (err) { alert("Could not parse JSON: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+
+  // Generic CSV builder
+  function arrToCSV(rows, cols) {
+    const esc = v => {
+      if (v == null) return "";
+      const s = Array.isArray(v) ? v.join("|") : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+    };
+    const out = [cols.join(",")];
+    rows.forEach(r => out.push(cols.map(c => esc(r[c])).join(",")));
+    return out.join("\n");
+  }
+
+  function exportEmployeesCSV() {
+    const cols = ["id","first","last","title","level","dept","fn","bg","location","country","employmentType","managerId","isManager","tenureYears"];
+    const stamp = new Date().toISOString().slice(0,10);
+    downloadFile(`employees-${stamp}.csv`, arrToCSV(activeEmployees, cols), "text/csv;charset=utf-8");
+  }
+
+  function exportProjectsCSV() {
+    const cols = ["id","name","owningGroup","preferredSites","critical","targetMix","notes"];
+    const flat = projects.map(p => ({
+      ...p,
+      preferredSites: p.preferredSites.join("|"),
+      targetMix: Object.entries(p.targetMix).map(([k,v]) => `${k}:${v}`).join("|"),
+    }));
+    const stamp = new Date().toISOString().slice(0,10);
+    downloadFile(`projects-${stamp}.csv`, arrToCSV(flat, cols), "text/csv;charset=utf-8");
+  }
+
+  return (
+    <div className="p-6 h-full overflow-y-auto" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Headcount Planning</h2>
+          <div className="text-xs text-gray-500 mt-0.5">
+            Early career = <span className="font-semibold text-emerald-700">L1–L2</span> · Experienced = everyone else (L3–L7, M1–M4, E1–E3)
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">Group by:</span>
+          {[["dept","Dept"],["bg","BU"],["fn","Function"]].map(([k,l]) => (
+            <button key={k} onClick={() => setGroupBy(k)}
+              className={`text-xs px-2.5 py-1 rounded-lg transition-colors ${groupBy === k ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              {l}
+            </button>
+          ))}
+          <button onClick={clearPlan} disabled={!Object.keys(plan).length}
+            className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed">
+            Clear plan
+          </button>
+        </div>
+      </div>
+
+      {/* Tab strip */}
+      <div className="flex gap-1 mb-4 border-b border-gray-100 pb-2">
+        {[
+          { id: "mix",      label: "Mix",                  icon: BarChart3 },
+          { id: "pyramid",  label: "Pyramid by Level",     icon: Layers },
+          { id: "timeline", label: "Timeline",             icon: Clock },
+          { id: "plan",     label: "Headcount Plan",       icon: Target },
+          { id: "early",    label: "Early-Career Program", icon: TrendingUp },
+          { id: "reqs",     label: "Open Reqs",            icon: Flag },
+        ].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors ${tab === t.id ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}>
+            <t.icon size={12}/>{t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "mix" && <>
+      {/* Org-wide KPI strip */}
+      <div className="grid grid-cols-4 gap-3 mb-5">
+        {[
+          { label: "Current HC",          val: orgTotalCur,  sub: `${earlyPct(orgEarlyCur, orgTotalCur)} early career`, color: "#2563eb" },
+          { label: "Planned hires",       val: `+${sumPlan.hires}`,      sub: "additions across groups",      color: "#16a34a" },
+          { label: "Planned departures",  val: `−${sumPlan.departures}`, sub: "reductions across groups",     color: "#dc2626" },
+          { label: "Projected HC",        val: orgTotalProj, sub: `${earlyPct(orgEarlyProj, orgTotalProj)} early career`, color: "#7c3aed" },
+        ].map((k, i) => (
+          <div key={i} className="bg-white rounded-xl p-4 border border-gray-100" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+            <div className="text-xs text-gray-400 mb-1">{k.label}</div>
+            <div className="text-2xl font-black" style={{ color: k.color }}>{k.val}</div>
+            <div className="text-xs text-gray-500 mt-0.5">{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-group mix table */}
+      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-5">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-gray-700">Current vs Projected Mix by {groupLabel}</h3>
+          <span className="text-xs text-gray-400">Click a row to edit its plan</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-gray-500">
+              <tr>
+                <th className="text-left px-4 py-2 font-medium">{groupLabel}</th>
+                <th className="text-right px-3 py-2 font-medium">Current</th>
+                <th className="text-right px-3 py-2 font-medium">Early</th>
+                <th className="text-right px-3 py-2 font-medium">Exp.</th>
+                <th className="text-right px-3 py-2 font-medium">Early %</th>
+                <th className="px-3 py-2 font-medium border-l border-gray-200">Δ</th>
+                <th className="text-right px-3 py-2 font-medium">Projected</th>
+                <th className="text-right px-3 py-2 font-medium">Early</th>
+                <th className="text-right px-3 py-2 font-medium">Exp.</th>
+                <th className="text-right px-3 py-2 font-medium">Early %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map(g => {
+                const c = curRoll[g], p = projRoll[g];
+                const delta = p.total - c.total;
+                const isEditing = editGroup === g;
+                return (
+                  <React.Fragment key={g}>
+                    <tr className={`border-t border-gray-100 cursor-pointer transition-colors ${isEditing ? "bg-blue-50" : "hover:bg-gray-50"}`}
+                        onClick={() => setEditGroup(isEditing ? null : g)}>
+                      <td className="px-4 py-2 font-medium text-gray-800">
+                        <span className="inline-flex items-center gap-1.5">
+                          {isEditing ? <ChevronDown size={11} className="text-blue-600"/> : <ChevronRight size={11} className="text-gray-400"/>}
+                          {g}
+                        </span>
+                      </td>
+                      <td className="text-right px-3 py-2 text-gray-700">{c.total}</td>
+                      <td className="text-right px-3 py-2 text-emerald-700">{c.early}</td>
+                      <td className="text-right px-3 py-2 text-gray-600">{c.exp}</td>
+                      <td className="text-right px-3 py-2 font-semibold text-gray-700">{earlyPct(c.early, c.total)}</td>
+                      <td className={`text-center px-3 py-2 font-bold border-l border-gray-200 ${delta > 0 ? "text-green-600" : delta < 0 ? "text-red-600" : "text-gray-300"}`}>
+                        {delta > 0 ? `+${delta}` : delta || "—"}
+                      </td>
+                      <td className="text-right px-3 py-2 text-gray-700">{p.total}</td>
+                      <td className="text-right px-3 py-2 text-emerald-700">{p.early}</td>
+                      <td className="text-right px-3 py-2 text-gray-600">{p.exp}</td>
+                      <td className={`text-right px-3 py-2 font-semibold ${p.total && Math.round(100*p.early/p.total) !== Math.round(100*c.early/(c.total||1)) ? "text-violet-700" : "text-gray-700"}`}>
+                        {earlyPct(p.early, p.total)}
+                      </td>
+                    </tr>
+                    {isEditing && (
+                      <tr className="bg-blue-50/40">
+                        <td colSpan={10} className="px-4 py-3">
+                          <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2 font-semibold">Plan changes for {g}</div>
+                          <div className="grid grid-cols-7 gap-2">
+                            {ALL_DISPLAY_LEVELS.map(lv => {
+                              const cur = current[g]?.[lv] || 0;
+                              const d   = plan[g]?.[lv] || 0;
+                              const pj  = Math.max(0, cur + d);
+                              const isEarly = EARLY_DISPLAY_LEVELS.has(lv);
+                              return (
+                                <div key={lv} className={`rounded-lg border p-2 ${isEarly ? "border-emerald-200 bg-emerald-50/40" : "border-gray-200 bg-white"}`}>
+                                  <div className="flex items-center justify-between">
+                                    <span className={`text-xs font-bold ${isEarly ? "text-emerald-700" : "text-gray-700"}`}>{lv}</span>
+                                    <span className="text-[10px] text-gray-400">{cur} → {pj}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 mt-1.5">
+                                    <button onClick={(e) => { e.stopPropagation(); bumpDelta(g, lv, -1); }}
+                                      className="w-5 h-5 rounded bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-700 text-xs font-bold flex items-center justify-center">−</button>
+                                    <input type="number" value={d}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={(e) => setDelta(g, lv, e.target.value)}
+                                      className="flex-1 min-w-0 text-xs text-center bg-white border border-gray-200 rounded px-1 py-0.5 tabular-nums"/>
+                                    <button onClick={(e) => { e.stopPropagation(); bumpDelta(g, lv, 1); }}
+                                      className="w-5 h-5 rounded bg-gray-100 hover:bg-green-100 text-gray-600 hover:text-green-700 text-xs font-bold flex items-center justify-center">+</button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+              <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold">
+                <td className="px-4 py-2 text-gray-800">All groups</td>
+                <td className="text-right px-3 py-2">{orgTotalCur}</td>
+                <td className="text-right px-3 py-2 text-emerald-700">{orgEarlyCur}</td>
+                <td className="text-right px-3 py-2">{orgTotalCur - orgEarlyCur}</td>
+                <td className="text-right px-3 py-2">{earlyPct(orgEarlyCur, orgTotalCur)}</td>
+                <td className={`text-center px-3 py-2 border-l border-gray-200 ${orgTotalProj - orgTotalCur > 0 ? "text-green-600" : orgTotalProj - orgTotalCur < 0 ? "text-red-600" : "text-gray-400"}`}>
+                  {orgTotalProj - orgTotalCur > 0 ? `+${orgTotalProj - orgTotalCur}` : (orgTotalProj - orgTotalCur) || "—"}
+                </td>
+                <td className="text-right px-3 py-2">{orgTotalProj}</td>
+                <td className="text-right px-3 py-2 text-emerald-700">{orgEarlyProj}</td>
+                <td className="text-right px-3 py-2">{orgTotalProj - orgEarlyProj}</td>
+                <td className="text-right px-3 py-2">{earlyPct(orgEarlyProj, orgTotalProj)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Early-career % comparison chart */}
+      <div className="bg-white rounded-xl border border-gray-100 p-4">
+        <h3 className="text-sm font-bold text-gray-700 mb-3">Early-Career % — Current vs Projected (top {chartData.length} groups)</h3>
+        <ResponsiveContainer width="100%" height={Math.max(220, chartData.length * 28)}>
+          <BarChart data={chartData} layout="vertical" margin={{ left: 110, right: 20 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
+            <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10 }} unit="%"/>
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={100}/>
+            <Tooltip contentStyle={{ fontSize: 11 }} formatter={(v) => `${v}%`}/>
+            <Legend wrapperStyle={{ fontSize: 11 }}/>
+            <Bar dataKey="currentEarlyPct"   name="Current"   fill="#94a3b8" radius={[0, 4, 4, 0]}/>
+            <Bar dataKey="projectedEarlyPct" name="Projected" fill="#10b981" radius={[0, 4, 4, 0]}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      </>}
+
+      {tab === "pyramid" && (
+        <div className="grid grid-cols-3 gap-4">
+          <div className="col-span-2 bg-white rounded-xl border border-gray-100 p-4">
+            <h3 className="text-sm font-bold text-gray-700 mb-3">Org Pyramid — All 14 Levels (Current vs Projected)</h3>
+            <div className="space-y-1">
+              {pyramidData.map(row => {
+                const maxVal = Math.max(...pyramidData.map(r => Math.max(r.current, r.projected)), 1);
+                const curW   = (row.current / maxVal) * 100;
+                const projW  = (row.projected / maxVal) * 100;
+                const tierColor = row.tier === "Executive" ? "#dc2626" : row.tier === "Manager" ? "#7c3aed" : row.early ? "#10b981" : "#2563eb";
+                return (
+                  <div key={row.level} className="flex items-center gap-2 text-xs">
+                    <div className="w-10 font-mono font-bold text-right" style={{ color: tierColor }}>{row.level}</div>
+                    <div className="flex-1 grid grid-cols-2 gap-1 items-center">
+                      <div className="flex justify-end items-center gap-2">
+                        <span className="text-gray-500 tabular-nums w-10 text-right">{row.current}</span>
+                        <div className="h-3 rounded-l" style={{ width: `${curW}%`, background: `${tierColor}55` }}/>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="h-3 rounded-r" style={{ width: `${projW}%`, background: tierColor }}/>
+                        <span className="font-bold tabular-nums w-10" style={{ color: tierColor }}>{row.projected}</span>
+                        <span className={`text-xs tabular-nums w-10 ${row.delta > 0 ? "text-green-600" : row.delta < 0 ? "text-red-600" : "text-gray-300"}`}>
+                          {row.delta > 0 ? `+${row.delta}` : row.delta || ""}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-100 text-[11px] text-gray-500">
+              <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{background:"#10b98155"}}/>Current</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{background:"#10b981"}}/>Projected (after plan)</span>
+              <span className="ml-auto">Bars share a common scale across levels.</span>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {[
+              { tier: "Executive", color: "#dc2626", levels: ["E1","E2","E3"] },
+              { tier: "Manager",   color: "#7c3aed", levels: ["M1","M2","M3","M4"] },
+              { tier: "Senior IC", color: "#2563eb", levels: ["L3","L4","L5","L6","L7"] },
+              { tier: "Early Career", color: "#10b981", levels: ["L1","L2"] },
+            ].map(t => {
+              const cur = pyramidData.filter(r => t.levels.includes(r.level)).reduce((s, r) => s + r.current, 0);
+              const prj = pyramidData.filter(r => t.levels.includes(r.level)).reduce((s, r) => s + r.projected, 0);
+              const diff = prj - cur;
+              return (
+                <div key={t.tier} className="bg-white rounded-xl border border-gray-100 p-3">
+                  <div className="text-xs text-gray-400 mb-1">{t.tier}</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-black" style={{ color: t.color }}>{prj}</span>
+                    <span className="text-xs text-gray-500">was {cur}</span>
+                    <span className={`text-xs font-bold ml-auto ${diff > 0 ? "text-green-600" : diff < 0 ? "text-red-600" : "text-gray-400"}`}>
+                      {diff > 0 ? `+${diff}` : diff || "—"}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-1">{t.levels.join(" · ")}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === "timeline" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="flex items-center gap-3 mb-3 flex-wrap">
+              <h3 className="text-sm font-bold text-gray-700">Plan Rollout — Quarterly</h3>
+              <span className="text-xs text-gray-400">Plan additions are spread evenly across the horizon below.</span>
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-xs text-gray-500">Start year</span>
+                <input type="number" value={planStartYear} onChange={e => setPlanStartYear(parseInt(e.target.value, 10) || 2026)}
+                  className="w-20 text-xs text-center border border-gray-200 rounded px-1 py-0.5"/>
+                <span className="text-xs text-gray-500">Horizon (Q)</span>
+                <input type="number" min="1" max="20" value={planHorizonQ} onChange={e => setPlanHorizonQ(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 1)))}
+                  className="w-16 text-xs text-center border border-gray-200 rounded px-1 py-0.5"/>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">{groupLabel}</th>
+                    <th className="text-left px-3 py-2 font-medium">Level</th>
+                    <th className="text-right px-3 py-2 font-medium">Total</th>
+                    {horizon.map(h => (
+                      <th key={h.key} className="text-center px-2 py-2 font-medium">
+                        <div className="text-[10px] text-gray-400">{h.year}</div>
+                        <div>{h.q}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {timelineRows.length === 0 ? (
+                    <tr><td colSpan={3 + horizon.length} className="px-3 py-6 text-center text-gray-400">No plan items yet — add hires/departures from the Mix tab.</td></tr>
+                  ) : timelineRows.map((r, i) => (
+                    <tr key={i} className="border-t border-gray-100">
+                      <td className="px-3 py-2 text-gray-700">{r.group}</td>
+                      <td className="px-3 py-2 font-mono font-bold" style={{ color: EARLY_DISPLAY_LEVELS.has(r.level) ? "#10b981" : "#374151" }}>{r.level}</td>
+                      <td className={`text-right px-3 py-2 font-bold ${r.delta > 0 ? "text-green-600" : "text-red-600"}`}>{r.delta > 0 ? `+${r.delta}` : r.delta}</td>
+                      {r.cells.map((c, j) => (
+                        <td key={j} className={`text-center px-2 py-2 tabular-nums ${c > 0 ? "text-green-600" : c < 0 ? "text-red-600" : "text-gray-300"}`}>
+                          {c > 0 ? `+${c}` : c || "·"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold">
+                    <td colSpan={2} className="px-3 py-2 text-gray-700">Quarterly hires (early in green)</td>
+                    <td className="text-right px-3 py-2"></td>
+                    {timelineByQuarter.map((t, i) => (
+                      <td key={i} className="text-center px-2 py-2">
+                        <div className={t.hires > 0 ? "text-green-700" : "text-gray-400"}>+{t.hires}</div>
+                        {t.early > 0 && <div className="text-[10px] text-emerald-600">({t.early} early)</div>}
+                        {t.departures > 0 && <div className="text-[10px] text-red-500">−{t.departures}</div>}
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <h3 className="text-sm font-bold text-gray-700 mb-3">Cumulative Headcount Trajectory</h3>
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={cumulativeTrend}>
+                <defs>
+                  <linearGradient id="hcGradTotal" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor="#2563eb" stopOpacity={0.45}/>
+                    <stop offset="100%" stopColor="#2563eb" stopOpacity={0.05}/>
+                  </linearGradient>
+                  <linearGradient id="hcGradEarly" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor="#10b981" stopOpacity={0.55}/>
+                    <stop offset="100%" stopColor="#10b981" stopOpacity={0.05}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
+                <XAxis dataKey="key" tick={{ fontSize: 10 }}/>
+                <YAxis tick={{ fontSize: 10 }}/>
+                <Tooltip contentStyle={{ fontSize: 11 }}/>
+                <Legend wrapperStyle={{ fontSize: 11 }}/>
+                <Area type="monotone" dataKey="total" name="Total HC"        stroke="#2563eb" fill="url(#hcGradTotal)"/>
+                <Area type="monotone" dataKey="early" name="Early Career HC" stroke="#10b981" fill="url(#hcGradEarly)"/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {tab === "plan" && (
+        <div className="space-y-4">
+          {/* ─── 3-YEAR ATTRITION + GROWTH MODEL ─── */}
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="flex items-center gap-3 mb-3 flex-wrap">
+              <h3 className="text-sm font-bold text-gray-700">3-Year Headcount Plan</h3>
+              <span className="text-xs text-gray-400">Attrition is auto-backfilled at the same level. Net growth is added on top. EC mix on the next tab is computed against this plan.</span>
+            </div>
+
+            {/* Inputs row */}
+            <div className="grid grid-cols-4 gap-4 mb-4">
+              {/* Attrition */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-gray-600">Annual attrition %</span>
+                  <span className="text-sm font-bold text-rose-700 tabular-nums">{attritionPct}%</span>
+                </div>
+                <input type="range" min="0" max="30" step="0.5" value={attritionPct}
+                  onChange={e => setAttritionPct(parseFloat(e.target.value))} className="w-full"/>
+                <div className="text-[10px] text-gray-400 mt-1">
+                  ≈ {growthModel?.yearly[0]?.attrition ?? 0} departures in Y1 ({orgTotalCur} active today). Backfilled at same level.
+                </div>
+              </div>
+              {/* Promotions */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-gray-600">Annual promotion %</span>
+                  <span className="text-sm font-bold text-amber-700 tabular-nums">{promoPctPerYear}%</span>
+                </div>
+                <input type="range" min="0" max="30" step="0.5" value={promoPctPerYear}
+                  onChange={e => setPromoPctPerYear(parseFloat(e.target.value))} className="w-full"/>
+                <div className="text-[10px] text-gray-400 mt-1">
+                  ≈ {growthModel?.yearly[0]?.promotions ?? 0} promotions in Y1 (incl. {growthModel?.yearly[0]?.ecPromoted ?? 0} L2→L3 leaving EC pool).
+                </div>
+              </div>
+              {/* Growth target */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-gray-600">3-year net growth target</span>
+                  <input type="number" min="0" value={growthTarget3Yr}
+                    onKeyDown={e => { if (e.key === "-") e.preventDefault(); }}
+                    onChange={e => setGrowthTarget3Yr(Math.max(0, parseInt(e.target.value || "0", 10)))}
+                    className="w-20 text-right text-sm font-bold text-gray-800 tabular-nums border border-gray-200 rounded px-2 py-0.5"/>
+                </div>
+                <input type="range" min="0" max={Math.max(500, growthTarget3Yr)} step="5" value={growthTarget3Yr}
+                  onChange={e => setGrowthTarget3Yr(parseInt(e.target.value, 10))} className="w-full"/>
+                <div className="text-[10px] text-gray-400 mt-1">
+                  Net new HC over 3 yr (acquisitions count toward this). Today: {orgTotalCur} → Y3 end: {growthModel?.threeYear?.endingHC ?? orgTotalCur}.
+                </div>
+              </div>
+              {/* Per-year shift */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-gray-600">Shift growth per year (%)</span>
+                  <button onClick={() => setGrowthShiftPerYear([33, 33, 34])}
+                    className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100">↺ even</button>
+                </div>
+                <div className="space-y-1.5">
+                  {[0,1,2].map(i => {
+                    const total = growthShiftPerYear.reduce((s,x)=>s+x, 0) || 1;
+                    const pct = Math.round(100 * growthShiftPerYear[i] / total);
+                    return (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-500 w-8">Y{i+1}</span>
+                        <input type="range" min="0" max="100" value={growthShiftPerYear[i]}
+                          onChange={e => {
+                            const v = parseInt(e.target.value, 10);
+                            setGrowthShiftPerYear(arr => { const next = [...arr]; next[i] = v; return next; });
+                          }}
+                          className="flex-1"/>
+                        <span className="text-[10px] tabular-nums w-10 text-right text-gray-600">{pct}%</span>
+                        <span className="text-[10px] tabular-nums text-gray-500 w-8">{growthModel?.yearly[i]?.growth ?? 0}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Acquisitions row — per-year M&A injection */}
+            <div className="border-t border-gray-100 pt-3 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-700">M&A acquisitions</span>
+                  <span className="text-[10px] text-gray-400">absorbs growth target — recruiting fills the gap</span>
+                </div>
+                <button onClick={() => setAcquisitionsPerYear([{count:0,ecPct:20},{count:0,ecPct:20},{count:0,ecPct:20}])}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100">↺ clear</button>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {[0,1,2].map(i => {
+                  const a = acquisitionsPerYear[i] || {count:0, ecPct:0};
+                  const setField = (field, v) => setAcquisitionsPerYear(arr => {
+                    const next = arr.map(x => ({...x}));
+                    next[i][field] = v;
+                    return next;
+                  });
+                  return (
+                    <div key={i} className="rounded-lg border border-cyan-100 bg-cyan-50/40 p-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-semibold text-cyan-700 uppercase">Y{i+1} · {planStartYear + i}</span>
+                        <span className="text-[10px] text-gray-400 tabular-nums">{a.count > 0 ? `${Math.round(a.count * a.ecPct/100)} EC` : "—"}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-[10px] text-gray-600 w-10">HC</label>
+                        <input type="number" min="0" value={a.count}
+                          onKeyDown={e => { if (e.key === "-") e.preventDefault(); }}
+                          onChange={e => setField("count", Math.max(0, parseInt(e.target.value || "0", 10)))}
+                          className="flex-1 text-right text-sm font-bold text-cyan-700 tabular-nums border border-cyan-200 rounded px-2 py-0.5 bg-white"/>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <label className="text-[10px] text-gray-600 w-10">EC %</label>
+                        <input type="range" min="0" max="100" step="5" value={a.ecPct}
+                          onChange={e => setField("ecPct", parseInt(e.target.value, 10))} className="flex-1"/>
+                        <span className="text-[10px] tabular-nums text-gray-600 w-8 text-right">{a.ecPct}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Per-year breakdown cards */}
+            <div className="grid grid-cols-3 gap-3">
+              {(growthModel?.yearly || []).map((y, i) => (
+                <div key={y.year} className="rounded-xl border border-gray-200 p-3 bg-gradient-to-b from-white to-gray-50">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-bold text-gray-800">Year {i+1} · {y.year}</div>
+                    <div className="text-[10px] text-gray-500 tabular-nums">{y.startHC} → {y.endHC}</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                    <div className="rounded bg-rose-50 border border-rose-100 px-2 py-1">
+                      <div className="text-rose-600 text-[9px] font-semibold uppercase">Attrition</div>
+                      <div className="text-rose-700 font-bold tabular-nums">−{y.attrition}</div>
+                    </div>
+                    <div className="rounded bg-amber-50 border border-amber-100 px-2 py-1">
+                      <div className="text-amber-600 text-[9px] font-semibold uppercase">Promotions</div>
+                      <div className="text-amber-700 font-bold tabular-nums">↑{y.promotions || 0}</div>
+                      {y.ecPromoted > 0 && (
+                        <div className="text-[9px] text-amber-600 tabular-nums">L2→L3: {y.ecPromoted}</div>
+                      )}
+                    </div>
+                    <div className="rounded bg-violet-50 border border-violet-100 px-2 py-1">
+                      <div className="text-violet-600 text-[9px] font-semibold uppercase">Net growth</div>
+                      <div className="text-violet-700 font-bold tabular-nums">+{y.growth}</div>
+                    </div>
+                    <div className="rounded bg-cyan-50 border border-cyan-100 px-2 py-1">
+                      <div className="text-cyan-600 text-[9px] font-semibold uppercase">Acquired</div>
+                      <div className="text-cyan-700 font-bold tabular-nums">+{y.acquired || 0}</div>
+                      {y.acquiredEC > 0 && (
+                        <div className="text-[9px] text-cyan-600 tabular-nums">EC: {y.acquiredEC}</div>
+                      )}
+                    </div>
+                    <div className="rounded bg-blue-50 border border-blue-100 px-2 py-1">
+                      <div className="text-blue-600 text-[9px] font-semibold uppercase">Exp hires</div>
+                      <div className="text-blue-700 font-bold tabular-nums">{y.exp}</div>
+                    </div>
+                    <div className="rounded bg-emerald-50 border border-emerald-100 px-2 py-1">
+                      <div className="text-emerald-600 text-[9px] font-semibold uppercase">EC hires</div>
+                      <div className="text-emerald-700 font-bold tabular-nums">{y.ec}</div>
+                    </div>
+                    <div className="rounded bg-orange-50 border border-orange-100 px-2 py-1">
+                      <div className="text-orange-600 text-[9px] font-semibold uppercase">Interns</div>
+                      <div className="text-orange-700 font-bold tabular-nums">{y.interns}</div>
+                    </div>
+                    <div className="rounded bg-gray-50 border border-gray-200 px-2 py-1">
+                      <div className="text-gray-600 text-[9px] font-semibold uppercase">Gross hires</div>
+                      <div className="text-gray-800 font-bold tabular-nums">{y.gross}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* 3-year totals strip */}
+            <div className="grid grid-cols-7 gap-2 mt-3">
+              <div className="rounded-lg p-2 bg-rose-50 border border-rose-100 text-center">
+                <div className="text-[10px] text-rose-700 font-semibold uppercase">3yr Attrition</div>
+                <div className="text-lg font-black text-rose-700 tabular-nums">{growthModel?.threeYear?.totalAttrition ?? 0}</div>
+              </div>
+              <div className="rounded-lg p-2 bg-amber-50 border border-amber-100 text-center">
+                <div className="text-[10px] text-amber-700 font-semibold uppercase">3yr Promotions</div>
+                <div className="text-lg font-black text-amber-700 tabular-nums">↑{growthModel?.threeYear?.totalPromotions ?? 0}</div>
+              </div>
+              <div className="rounded-lg p-2 bg-violet-50 border border-violet-100 text-center">
+                <div className="text-[10px] text-violet-700 font-semibold uppercase">3yr Growth</div>
+                <div className="text-lg font-black text-violet-700 tabular-nums">+{growthModel?.threeYear?.totalGrowth ?? 0}</div>
+              </div>
+              <div className="rounded-lg p-2 bg-cyan-50 border border-cyan-100 text-center">
+                <div className="text-[10px] text-cyan-700 font-semibold uppercase">3yr Acquired</div>
+                <div className="text-lg font-black text-cyan-700 tabular-nums">+{growthModel?.threeYear?.totalAcquired ?? 0}</div>
+              </div>
+              <div className="rounded-lg p-2 bg-gray-50 border border-gray-200 text-center">
+                <div className="text-[10px] text-gray-600 font-semibold uppercase">3yr Gross hires</div>
+                <div className="text-lg font-black text-gray-800 tabular-nums">{growthModel?.threeYear?.totalGross ?? 0}</div>
+              </div>
+              <div className="rounded-lg p-2 bg-emerald-50 border border-emerald-100 text-center">
+                <div className="text-[10px] text-emerald-700 font-semibold uppercase">3yr EC hires</div>
+                <div className="text-lg font-black text-emerald-700 tabular-nums">{growthModel?.threeYear?.totalEC ?? 0}</div>
+              </div>
+              <div className="rounded-lg p-2 bg-blue-50 border border-blue-100 text-center">
+                <div className="text-[10px] text-blue-700 font-semibold uppercase">Y3 end EC %</div>
+                <div className="text-lg font-black text-blue-700 tabular-nums">{growthModel?.threeYear?.endingECPct ?? 0}%</div>
+              </div>
+            </div>
+
+            {/* Backfill level distribution */}
+            {growthModel && Object.keys(growthModel.backfillByLevel).length > 0 && (
+              <div className="mt-3 text-[11px] text-gray-600">
+                <span className="font-semibold text-gray-700">Backfill by level (3yr): </span>
+                {Object.entries(growthModel.backfillByLevel)
+                  .sort((a,b) => ALL_DISPLAY_LEVELS.indexOf(a[0]) - ALL_DISPLAY_LEVELS.indexOf(b[0]))
+                  .map(([lv, n]) => (
+                    <span key={lv} className="inline-block mx-1 px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200">
+                      <span className="font-mono font-semibold text-gray-700">{lv}</span>
+                      <span className="text-gray-500 ml-1 tabular-nums">×{n}</span>
+                    </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "early" && (
+        <div className="space-y-4">
+          {/* Read-only summary of the overall plan that drives EC */}
+          <div className="bg-white rounded-xl border border-gray-100 p-3 flex items-center gap-3 flex-wrap">
+            <span className="text-xs font-semibold text-gray-700">Driven by Headcount Plan:</span>
+            <span className="text-[11px] text-gray-500">attrition <span className="font-bold text-rose-700 tabular-nums">{attritionPct}%</span></span>
+            <span className="text-[11px] text-gray-500">·</span>
+            <span className="text-[11px] text-gray-500">promo <span className="font-bold text-amber-700 tabular-nums">{promoPctPerYear}%</span> <span className="text-[10px] text-gray-400">(L2→L3 drains EC)</span></span>
+            <span className="text-[11px] text-gray-500">·</span>
+            <span className="text-[11px] text-gray-500">3yr growth <span className="font-bold text-violet-700 tabular-nums">+{growthTarget3Yr}</span></span>
+            {(growthModel?.threeYear?.totalAcquired ?? 0) > 0 && (
+              <>
+                <span className="text-[11px] text-gray-500">·</span>
+                <span className="text-[11px] text-gray-500">acquired <span className="font-bold text-cyan-700 tabular-nums">+{growthModel.threeYear.totalAcquired}</span></span>
+              </>
+            )}
+            <span className="text-[11px] text-gray-500">·</span>
+            <span className="text-[11px] text-gray-500">3yr gross hires <span className="font-bold text-gray-800 tabular-nums">{growthModel?.threeYear?.totalGross ?? 0}</span></span>
+            <span className="text-[11px] text-gray-500">·</span>
+            <span className="text-[11px] text-gray-500">3yr EC hires <span className="font-bold text-emerald-700 tabular-nums">{growthModel?.threeYear?.totalEC ?? 0}</span></span>
+            <button onClick={() => setTab("plan")}
+              className="ml-auto text-[10px] px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100">
+              Edit plan →
+            </button>
+          </div>
+
+          {/* Program KPIs */}
+          <div className="grid grid-cols-4 gap-3">
+            {[
+              { label: "Current early-career HC",  val: orgEarlyCur,  sub: `${earlyPct(orgEarlyCur, orgTotalCur)} of org`, color: "#10b981" },
+              { label: "Projected early-career HC", val: orgEarlyProj, sub: `${earlyPct(orgEarlyProj, orgTotalProj)} of org after plan`, color: "#059669" },
+              { label: "Planned EC hires",          val: `+${timelineRows.filter(r => EARLY_DISPLAY_LEVELS.has(r.level) && r.delta > 0).reduce((s, r) => s + r.delta, 0)}`, sub: "L1 + L2 net additions", color: "#16a34a" },
+              { label: "Quarters in plan",          val: planHorizonQ, sub: `Starting ${planStartYear} Q1`, color: "#0891b2" },
+            ].map((k, i) => (
+              <div key={i} className="bg-white rounded-xl p-4 border border-gray-100">
+                <div className="text-xs text-gray-400 mb-1">{k.label}</div>
+                <div className="text-2xl font-black" style={{ color: k.color }}>{k.val}</div>
+                <div className="text-xs text-gray-500 mt-0.5">{k.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Hiring calculator */}
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="flex items-center gap-3 mb-3 flex-wrap">
+              <h3 className="text-sm font-bold text-gray-700">Early-Career Hiring Calculator</h3>
+              <div className="flex items-center gap-1 ml-2 bg-gray-100 rounded-lg p-0.5">
+                <button onClick={() => setEarlyMode("orgMix")}
+                  className={`text-xs px-2.5 py-1 rounded-md transition-colors ${earlyMode === "orgMix" ? "bg-white text-emerald-700 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                  Target Org Mix %
+                </button>
+                <button onClick={() => setEarlyMode("hireMix")}
+                  className={`text-xs px-2.5 py-1 rounded-md transition-colors ${earlyMode === "hireMix" ? "bg-white text-emerald-700 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                  Target Hiring Mix %
+                </button>
+              </div>
+              <span className="text-xs text-gray-400 ml-auto">Horizon: {planYears} yr ({planHorizonQ} quarters)</span>
+            </div>
+
+            {/* Sliders / inputs */}
+            <div className="grid grid-cols-2 gap-4 mb-3">
+              {earlyMode === "orgMix" ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-semibold text-gray-600">Target % of org as Early Career</span>
+                    <span className="text-sm font-bold text-emerald-700 tabular-nums">{earlyTargetPct}%</span>
+                  </div>
+                  <input type="range" min="0" max="50" value={earlyTargetPct}
+                    onChange={e => setEarlyTargetPct(parseInt(e.target.value, 10))} className="w-full"/>
+                  <div className="text-[10px] text-gray-400 mt-1">
+                    Currently {orgTotalCur ? Math.round(100 * orgEarlyCur / orgTotalCur) : 0}% ({orgEarlyCur} of {orgTotalCur})
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-semibold text-gray-600">% of new hires that are Early Career</span>
+                    <span className="text-sm font-bold text-emerald-700 tabular-nums">{hireMixPct}%</span>
+                  </div>
+                  <input type="range" min="0" max="80" value={hireMixPct}
+                    onChange={e => setHireMixPct(parseInt(e.target.value, 10))} className="w-full"/>
+                  <div className="text-[10px] text-gray-400 mt-1">
+                    Industry: 15–30% is typical for sustainable pipeline
+                  </div>
+                </div>
+              )}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-gray-600">Annual experienced hires</span>
+                  <div className="flex items-center gap-2">
+                    <input type="number" min="0" value={annualExpHires}
+                      onKeyDown={e => { if (e.key === "-") e.preventDefault(); }}
+                      onChange={e => setAnnualExpHiresOverride(Math.max(0, parseInt(e.target.value || "0", 10)))}
+                      className="w-20 text-right text-sm font-bold text-gray-800 tabular-nums border border-gray-200 rounded px-2 py-0.5"/>
+                    <button onClick={() => setAnnualExpHiresOverride(null)}
+                      title="Reset to plan-derived value"
+                      className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100">↺ reset</button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-[11px] text-gray-500">Interns per 1 EC hire</span>
+                  <div className="flex items-center gap-2">
+                    <input type="range" min="0" max="3" step="0.1" value={internRatio}
+                      onChange={e => setInternRatio(parseFloat(e.target.value))} className="w-24"/>
+                    <span className="text-xs font-bold text-amber-700 tabular-nums w-10 text-right">{internRatio.toFixed(1)}×</span>
+                  </div>
+                </div>
+                <div className="text-[10px] text-gray-400 mt-1">
+                  Plan-derived default: {defaultAnnualExpHires}/yr (from non-EC plan deltas)
+                </div>
+              </div>
+            </div>
+
+            {/* Result KPI strip */}
+            <div className="grid grid-cols-4 gap-2">
+              <div className="rounded-lg p-3 bg-emerald-50 border border-emerald-100">
+                <div className="text-[10px] text-emerald-700 font-semibold uppercase tracking-wide">Early-career hires / yr</div>
+                <div className="text-2xl font-black text-emerald-700 tabular-nums">{earlyCalc.ecPerYear}</div>
+                <div className="text-[10px] text-emerald-600 mt-0.5">L1 + L2 new grads</div>
+              </div>
+              <div className="rounded-lg p-3 bg-blue-50 border border-blue-100">
+                <div className="text-[10px] text-blue-700 font-semibold uppercase tracking-wide">Experienced hires / yr</div>
+                <div className="text-2xl font-black text-blue-700 tabular-nums">{earlyCalc.expPerYear}</div>
+                <div className="text-[10px] text-blue-600 mt-0.5">L3+ / M / E</div>
+              </div>
+              <div className="rounded-lg p-3 bg-gray-50 border border-gray-200">
+                <div className="text-[10px] text-gray-600 font-semibold uppercase tracking-wide">Hire mix</div>
+                <div className="text-2xl font-black text-gray-800 tabular-nums">{earlyCalc.ecShare}%</div>
+                <div className="text-[10px] text-gray-500 mt-0.5">{earlyCalc.ecPerYear} of {earlyCalc.totalPerYear} hires are EC</div>
+              </div>
+              <div className="rounded-lg p-3 bg-amber-50 border border-amber-100">
+                <div className="text-[10px] text-amber-700 font-semibold uppercase tracking-wide">Intern target / yr</div>
+                <div className="text-2xl font-black text-amber-700 tabular-nums">{earlyCalc.interns}</div>
+                <div className="text-[10px] text-amber-600 mt-0.5">{internRatio.toFixed(1)}× EC hires</div>
+              </div>
+            </div>
+
+            {earlyMode === "orgMix" && (
+              <div className="text-[11px] text-gray-500 mt-2">
+                Starting from the post-plan baseline (<span className="font-semibold">{orgEarlyProj}</span> EC of <span className="font-semibold">{orgTotalProj}</span>),
+                reaching <span className="font-semibold text-emerald-700">{earlyTargetPct}%</span> needs{" "}
+                <span className="font-semibold text-emerald-700">{earlyCalc.orgGap}</span> more EC over {planYears} yr
+                — about <span className="font-semibold">{earlyCalc.ecPerYear}/yr</span> alongside{" "}
+                <span className="font-semibold">{earlyCalc.expPerYear}</span> experienced.
+                Final mix: <span className="font-semibold text-emerald-700">{earlyCalc.finalPct}%</span>.
+              </div>
+            )}
+            {earlyMode === "hireMix" && (
+              <div className="text-[11px] text-gray-500 mt-2">
+                With <span className="font-semibold text-emerald-700">{hireMixPct}%</span> of hires as early-career and{" "}
+                <span className="font-semibold">{annualExpHires}</span> exp/yr, you need{" "}
+                <span className="font-semibold text-emerald-700">{earlyCalc.ecPerYear}</span> EC hires/yr +{" "}
+                <span className="font-semibold text-amber-700">{earlyCalc.interns}</span> interns. Final org mix:{" "}
+                <span className="font-semibold text-emerald-700">{earlyCalc.finalPct}%</span>.
+              </div>
+            )}
+            {earlyCalc.ecPerYear > earlyCalc.expPerYear && earlyCalc.expPerYear > 0 && (
+              <div className="text-[11px] text-amber-700 mt-2 flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
+                <AlertTriangle size={12}/>
+                EC hires ({earlyCalc.ecPerYear}/yr) exceed experienced hires ({earlyCalc.expPerYear}/yr). Verify onboarding capacity and mentor bandwidth.
+              </div>
+            )}
+          </div>
+
+          {/* Per-group hire allocation (3-year totals) */}
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="flex items-center gap-3 mb-2">
+              <h3 className="text-sm font-bold text-gray-700">EC hire allocation by {groupLabel}</h3>
+              <span className="text-xs text-gray-400">
+                3-year totals · distributed by {earlyAllocByGroup[0]?.basis || "size"} (largest-remainder)
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">{groupLabel}</th>
+                    <th className="text-right px-3 py-2 font-medium">Share</th>
+                    <th className="text-right px-3 py-2 font-medium">EC hires (3yr)</th>
+                    <th className="text-right px-3 py-2 font-medium">Interns (3yr)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {earlyAllocByGroup.map(r => (
+                    <tr key={r.group} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium text-gray-800">{r.group}</td>
+                      <td className="text-right px-3 py-2 text-gray-600">{r.share}%</td>
+                      <td className="text-right px-3 py-2 text-emerald-700 font-bold tabular-nums">{r.ecPerYear}</td>
+                      <td className="text-right px-3 py-2 text-amber-700 font-semibold tabular-nums">{r.interns}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                    <td className="px-3 py-2 text-gray-800">Total</td>
+                    <td className="text-right px-3 py-2 text-gray-600">100%</td>
+                    <td className="text-right px-3 py-2 text-emerald-700 tabular-nums">{earlyAllocByGroup.reduce((s,r)=>s+r.ecPerYear,0)}</td>
+                    <td className="text-right px-3 py-2 text-amber-700 tabular-nums">{earlyAllocByGroup.reduce((s,r)=>s+r.interns,0)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Target % table — collapsed by default to keep the page short */}
+          <details className="bg-white rounded-xl border border-gray-100 p-4 group">
+            <summary className="cursor-pointer flex items-center gap-3 list-none [&::-webkit-details-marker]:hidden">
+              <ChevronRight size={14} className="text-gray-400 transition-transform group-open:rotate-90"/>
+              <h3 className="text-sm font-bold text-gray-700">Current vs Projected Mix by {groupLabel}</h3>
+              <span className="text-xs text-gray-400">% L1+L2 today and after the plan executes (target = {earlyTargetPct}%).</span>
+            </summary>
+            <div className="overflow-x-auto mt-3">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">{groupLabel}</th>
+                    <th className="text-right px-3 py-2 font-medium">Current EC</th>
+                    <th className="text-right px-3 py-2 font-medium">Current %</th>
+                    <th className="text-right px-3 py-2 font-medium">Projected EC</th>
+                    <th className="text-right px-3 py-2 font-medium">Projected %</th>
+                    <th className="text-right px-3 py-2 font-medium">Target ({earlyTargetPct}%)</th>
+                    <th className="text-right px-3 py-2 font-medium">Gap</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {earlyByGroup.map(r => (
+                    <tr key={r.group} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium text-gray-800">{r.group}</td>
+                      <td className="text-right px-3 py-2 text-emerald-700">{r.curEarly}<span className="text-gray-400 text-[10px]"> / {r.curTotal}</span></td>
+                      <td className="text-right px-3 py-2 text-gray-600">{r.curPct}%</td>
+                      <td className="text-right px-3 py-2 text-emerald-700 font-semibold">{r.projEarly}<span className="text-gray-400 text-[10px]"> / {r.projTotal}</span></td>
+                      <td className="text-right px-3 py-2 text-gray-700 font-semibold">{r.projPct}%</td>
+                      <td className="text-right px-3 py-2 text-gray-600">{r.target}</td>
+                      <td className={`text-right px-3 py-2 font-bold ${r.gap > 0 ? "text-amber-700" : r.gap < 0 ? "text-blue-600" : "text-emerald-700"}`}>
+                        {r.gap > 0 ? `+${r.gap} short` : r.gap < 0 ? `${-r.gap} over` : "on target"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+
+          {/* Conversion / pipeline narrative */}
+          <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+            <div className="flex items-start gap-3">
+              <TrendingUp size={18} className="text-emerald-600 mt-0.5"/>
+              <div className="text-xs text-emerald-900 leading-relaxed">
+                <div className="font-bold text-sm text-emerald-800 mb-1">Early-Career Program Notes</div>
+                Industry benchmark: a healthy semi/tech org carries <span className="font-bold">15–25%</span> of total headcount in
+                early-career roles (L1–L2) to maintain pipeline. Below 10% indicates an <span className="font-bold">aging IC base</span>;
+                above 30% signals <span className="font-bold">onboarding strain</span>. New-grad funnel typically converts L1 → L2 in
+                ~18 months and L2 → L3 in ~24 months — so a one-year hire pause shows up as an L3 shortfall ~3 years later.
+                Track gap to target above and use the Mix tab to add L1/L2 hires where the gap is positive.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "reqs" && (
+        <div className="space-y-4">
+          {/* Header / actions */}
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div>
+                <h3 className="text-sm font-bold text-gray-700">Open Requisitions & Product Flow</h3>
+                <div className="text-xs text-gray-500">Reassign reqs across levels, sites, and projects to optimize coverage. Fit scores update live.</div>
+              </div>
+              <div className="flex items-center gap-2 ml-auto flex-wrap">
+                <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                  <input type="checkbox" checked={reqIncludeECCalc} onChange={e => setReqIncludeECCalc(e.target.checked)}/>
+                  Include EC calculator
+                </label>
+                <select value={reqStatusFilter} onChange={e => setReqStatusFilter(e.target.value)}
+                  className="text-xs border border-gray-200 rounded px-2 py-1 bg-white">
+                  <option value="All">All statuses</option>
+                  {REQ_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <select value={reqLevelFilter} onChange={e => setReqLevelFilter(e.target.value)}
+                  className="text-xs border border-gray-200 rounded px-2 py-1 bg-white">
+                  <option value="All">All levels</option>
+                  {ALL_DISPLAY_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+                <button onClick={resetOverrides} disabled={!Object.keys(reqOverrides).length}
+                  title="Drop all manual reassignments"
+                  className="text-xs px-2.5 py-1 rounded border border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 disabled:opacity-40">
+                  ↺ Reset edits
+                </button>
+                <div className="relative group">
+                  <button className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700">
+                    <Download size={12}/> Export ▾
+                  </button>
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 hidden group-hover:block min-w-[180px]">
+                    <button onClick={exportReqsCSV} className="block w-full text-left text-xs px-3 py-2 hover:bg-gray-50">Open Reqs (CSV)</button>
+                    <button onClick={exportEmployeesCSV} className="block w-full text-left text-xs px-3 py-2 hover:bg-gray-50">Current Employees (CSV)</button>
+                    <button onClick={exportProjectsCSV} className="block w-full text-left text-xs px-3 py-2 hover:bg-gray-50">Projects (CSV)</button>
+                    <div className="h-px bg-gray-100 my-1"/>
+                    <button onClick={exportPlanJSON} className="block w-full text-left text-xs px-3 py-2 hover:bg-gray-50 font-semibold text-blue-700">Full Plan (JSON)</button>
+                  </div>
+                </div>
+                <label className="flex items-center gap-1 text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer">
+                  <Plus size={12}/> Import JSON
+                  <input type="file" accept=".json,application/json" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) importPlanJSON(f); e.target.value = ""; }}/>
+                </label>
+              </div>
+            </div>
+
+            {/* Summary chips */}
+            <div className="flex items-center gap-2 mt-3 flex-wrap text-[11px]">
+              <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700">Total: <span className="font-bold">{filteredReqsFinal.length}</span></span>
+              <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700">EC: <span className="font-bold">{filteredReqsFinal.filter(r => r.isEC).length}</span></span>
+              <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700">Exp: <span className="font-bold">{filteredReqsFinal.filter(r => !r.isEC).length}</span></span>
+              <span className="px-2 py-0.5 rounded bg-purple-50 text-purple-700">Projects: <span className="font-bold">{projects.length}</span></span>
+              {Object.keys(reqOverrides).length > 0 && (
+                <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  {Object.keys(reqOverrides).length} manual edit{Object.keys(reqOverrides).length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Product Flow cards */}
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <h3 className="text-sm font-bold text-gray-700">Product Flow Coverage</h3>
+              <span className="text-xs text-gray-400">How well the open reqs cover each project's target staffing pyramid and preferred sites.</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {projectFit.map(p => {
+                const fitText = p.fitPct >= 80 ? "text-emerald-600" : p.fitPct >= 50 ? "text-amber-600" : "text-red-600";
+                const siteCls = p.sitePct >= 70 ? "bg-emerald-50 text-emerald-700"
+                              : p.sitePct >= 40 ? "bg-amber-50 text-amber-700"
+                                                 : "bg-red-50 text-red-700";
+                const reb = suggestRebalance(p.id);
+                return (
+                  <div key={p.id} className={`border rounded-lg p-3 ${p.critical ? "border-amber-300 bg-amber-50/30" : "border-gray-200"}`}>
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-gray-800">{p.name}</h4>
+                          {p.critical && <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-200 text-amber-800 font-bold">CRITICAL</span>}
+                        </div>
+                        <div className="text-[10px] text-gray-500">{p.owningGroup} · sites: {p.preferredSites.join(", ")}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className={`text-2xl font-black ${fitText} tabular-nums leading-none`}>{p.fitPct}%</div>
+                        <div className="text-[9px] text-gray-500 uppercase">Pyramid fit</div>
+                      </div>
+                    </div>
+
+                    {/* Per-level coverage bars */}
+                    <div className="space-y-1 mb-2">
+                      {p.perLevel.map(lv => {
+                        const cap = Math.max(lv.target, lv.reqs, 1);
+                        return (
+                          <div key={lv.level} className="flex items-center gap-2 text-[10px]">
+                            <span className="w-7 font-mono text-gray-500">{lv.level}</span>
+                            <div className="flex-1 relative h-3 bg-gray-100 rounded-sm overflow-hidden">
+                              <div className="absolute inset-y-0 left-0 bg-gray-300" style={{ width: `${100*lv.target/cap}%` }} title={`Target: ${lv.target}`}/>
+                              <div className={`absolute inset-y-0 left-0 ${lv.reqs >= lv.target ? "bg-emerald-500" : "bg-amber-500"}`}
+                                style={{ width: `${100*lv.reqs/cap}%`, opacity: 0.85 }} title={`Reqs: ${lv.reqs}`}/>
+                            </div>
+                            <span className="w-12 text-right tabular-nums text-gray-600">{lv.reqs}/{lv.target}</span>
+                          </div>
+                        );
+                      })}
+                      {p.perLevel.length === 0 && <div className="text-[10px] text-gray-400 italic">No level targets set.</div>}
+                    </div>
+
+                    {/* Bottom strip: site fit, EC %, total reqs, rebalance hint */}
+                    <div className="flex items-center gap-2 flex-wrap text-[10px] pt-2 border-t border-gray-100">
+                      <span className={`px-1.5 py-0.5 rounded font-semibold ${siteCls}`}>
+                        Site fit: {p.sitePct}%
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-gray-50 text-gray-600">
+                        Reqs: <span className="font-bold">{p.reqTotal}</span> / target {p.targetTotal}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
+                        EC mix: {p.ecPct}%
+                      </span>
+                      {p.overfill > 0 && (
+                        <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">
+                          {p.overfill} over-fill
+                        </span>
+                      )}
+                      {reb.length > 0 && (
+                        <span className="ml-auto text-amber-700">
+                          ⚠ {reb.length} req{reb.length===1?"":"s"} off-site
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {projectFit.length === 0 && (
+                <div className="col-span-2 text-center text-gray-400 text-xs py-6">
+                  No projects yet. They'll auto-generate from your active employees.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Reqs table — inline editable */}
+          <div className="bg-white rounded-xl border border-gray-100">
+            <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-2">
+              <h3 className="text-sm font-bold text-gray-700">Requisitions</h3>
+              <span className="text-xs text-gray-400">Click a level/site/project cell to reassign — coverage above updates instantly.</span>
+            </div>
+            <div className="overflow-x-auto" style={{ maxHeight: 540 }}>
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500 sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">ID</th>
+                    <th className="text-left px-3 py-2 font-medium">Status</th>
+                    <th className="text-left px-3 py-2 font-medium">Title</th>
+                    <th className="text-left px-3 py-2 font-medium">Level</th>
+                    <th className="text-left px-3 py-2 font-medium">{groupLabel}</th>
+                    <th className="text-left px-3 py-2 font-medium">Location</th>
+                    <th className="text-left px-3 py-2 font-medium">Project</th>
+                    <th className="text-left px-3 py-2 font-medium">Hiring Mgr</th>
+                    <th className="text-left px-3 py-2 font-medium">Target Start</th>
+                    <th className="text-left px-3 py-2 font-medium">Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredReqsFinal.length === 0 && (
+                    <tr><td colSpan={10} className="px-3 py-6 text-center text-gray-400">
+                      No open reqs. Add hires in the Mix tab or enable the Early-Career calculator.
+                    </td></tr>
+                  )}
+                  {filteredReqsFinal.map(r => {
+                    const proj = projects.find(p => p.id === r.projectId);
+                    const sitePref = proj && proj.preferredSites.includes(r.location);
+                    const edited = reqOverrides[r.id];
+                    return (
+                      <tr key={r.id} className={`border-t border-gray-100 hover:bg-gray-50 ${edited ? "bg-amber-50/30" : ""}`}>
+                        <td className="px-3 py-1.5 font-mono text-[11px] text-gray-500">{r.id}{edited && <span className="ml-1 text-amber-600" title="Manually edited">✎</span>}</td>
+                        <td className="px-3 py-1.5">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                            r.status === "Open" ? "bg-blue-50 text-blue-700" :
+                            r.status === "Sourcing" ? "bg-indigo-50 text-indigo-700" :
+                            r.status === "Interviewing" ? "bg-purple-50 text-purple-700" :
+                            r.status === "Offer" ? "bg-amber-50 text-amber-700" :
+                            "bg-emerald-50 text-emerald-700"
+                          }`}>{r.status}</span>
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-800">{r.title}</td>
+                        <td className="px-3 py-1.5">
+                          <select value={r.level}
+                            onChange={e => overrideReq(r.id, { level: e.target.value })}
+                            className={`text-[10px] font-bold rounded border-0 px-1.5 py-0.5 cursor-pointer ${r.isEC ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600"}`}>
+                            {ALL_DISPLAY_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-600">{r.group}</td>
+                        <td className="px-3 py-1.5">
+                          <select value={r.location}
+                            onChange={e => overrideReq(r.id, { location: e.target.value })}
+                            className={`text-[11px] rounded border-0 px-1.5 py-0.5 cursor-pointer ${sitePref ? "bg-emerald-50 text-emerald-700" : "bg-gray-50 text-gray-700"}`}>
+                            {LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}
+                          </select>
+                          <span className="text-[10px] text-gray-400 ml-1">{r.country}</span>
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <select value={r.projectId || ""}
+                            onChange={e => overrideReq(r.id, { projectId: e.target.value })}
+                            className="text-[11px] rounded border border-gray-200 px-1.5 py-0.5 cursor-pointer max-w-[140px] bg-white">
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-600">{r.hiringManager}</td>
+                        <td className="px-3 py-1.5 text-gray-600 tabular-nums">{r.targetStart}</td>
+                        <td className="px-3 py-1.5">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.source === "plan" ? "bg-blue-50 text-blue-600" : "bg-emerald-50 text-emerald-700"}`}>
+                            {r.source === "plan" ? "plan" : "EC calc"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── DETAIL PANEL ───
 function DetailPanel() {
   const {
@@ -3828,7 +5793,9 @@ function DetailPanel() {
         <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
           {[
             ["Department", node.dept], ["Business Group", node.bg], ["Function", node.fn],
-            ["Location", node.location], ["Level", node.level], ["Status", node.status],
+            ["Location", node.location], ["Country", node.country || countryFor(node.location)],
+            ["Level", displayLevel(node.level)], ["Status", node.status],
+            ["Employment", node.employmentType || "FTE"],
             ["Start Date", node.startDate], ["Direct Reports", node._directReports],
             ["Total Reports", node._totalReports], ["Band", node.band],
           ].map(([k, v]) => (
@@ -4490,7 +6457,7 @@ function ExitSimModal() {
             <div className="flex items-center gap-2"><AlertOctagon size={18}/><span className="font-bold text-lg">Exit Impact Simulation</span></div>
             <button onClick={() => setExitSimNode(null)} className="p-1 hover:bg-red-700 rounded transition-colors"><X size={16}/></button>
           </div>
-          <div className="text-red-100 text-sm">If <span className="font-bold text-white">{node.first} {node.last}</span> ({node.level} · {node.dept}) left today</div>
+          <div className="text-red-100 text-sm">If <span className="font-bold text-white">{node.first} {node.last}</span> ({displayLevel(node.level)} · {node.dept}) left today</div>
         </div>
 
         <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
@@ -4504,7 +6471,7 @@ function ExitSimModal() {
             <div className="rounded-xl p-3 bg-orange-50 border border-orange-100">
               <div className="text-xs text-orange-500 font-semibold">Time to full productivity</div>
               <div className="text-2xl font-black text-orange-700">{timeToBP}</div>
-              <div className="text-xs text-orange-400">typical for {node.level}</div>
+              <div className="text-xs text-orange-400">typical for {displayLevel(node.level)}</div>
             </div>
           </div>
 
@@ -4589,6 +6556,8 @@ function OrgChartApp() {
   const [colorBy, setColorBy] = useState("department");
   const [filterDept, setFilterDept] = useState("All");
   const [filterLoc, setFilterLoc] = useState("All");
+  const [filterCountry, setFilterCountry] = useState("All");
+  const [filterEmpType, setFilterEmpType] = useState("All");
   const [filterBG, setFilterBG] = useState("All");
   const [showHotspots, setShowHotspots] = useState(false);
   const [dragNode, setDragNode] = useState(null);
@@ -4614,6 +6583,35 @@ function OrgChartApp() {
   const [filterLevel, setFilterLevel] = useState("All");
   const [orgViewMode, setOrgViewMode] = useState("tree"); // "tree" | "treemap" | "sunburst"
   const [showFlightRisk, setShowFlightRisk] = useState(false);
+  // ── Headcount plan (lifted to app scope so org chart and planner share state) ──
+  const [plan, setPlan] = useState({});                 // { [group]: { [displayLevel]: deltaInt } }
+  const [planGroupBy, setPlanGroupBy] = useState("dept"); // "dept" | "bg" | "fn"
+  const [planStartYear, setPlanStartYear] = useState(2026);
+  const [planHorizonQ, setPlanHorizonQ] = useState(8);    // quarters
+  const [showPlannedInOrgChart, setShowPlannedInOrgChart] = useState(false);
+  // ── Early-Career calculator inputs (lifted so org chart + planner share) ──
+  const [earlyTargetPct, setEarlyTargetPct] = useState(20);
+  const [earlyMode, setEarlyMode] = useState("orgMix"); // "orgMix" | "hireMix"
+  const [hireMixPct, setHireMixPct] = useState(25);
+  const [internRatio, setInternRatio] = useState(1.5);
+  const [annualExpHiresOverride, setAnnualExpHiresOverride] = useState(null);
+  const [reqIncludeECCalc, setReqIncludeECCalc] = useState(true);
+  // ── 3-year attrition + growth model inputs ──
+  const [attritionPct, setAttritionPct] = useState(10);
+  const [growthTarget3Yr, setGrowthTarget3Yr] = useState(120);
+  const [growthShiftPerYear, setGrowthShiftPerYear] = useState([33, 33, 34]);
+  const [promoPctPerYear, setPromoPctPerYear] = useState(15);
+  const [acquisitionsPerYear, setAcquisitionsPerYear] = useState([
+    { count: 0, ecPct: 20 }, { count: 0, ecPct: 20 }, { count: 0, ecPct: 20 },
+  ]);
+  const [projects, setProjects] = useState(() => []);
+  const [reqOverrides, setReqOverrides] = useState({}); // { reqId: { level?, location?, projectId? } }
+  const overrideReq = useCallback((id, patch) => setReqOverrides(o => ({ ...o, [id]: { ...(o[id] || {}), ...patch } })), []);
+  const resetOverrides = useCallback(() => setReqOverrides({}), []);
+  // Inline position editor on the org chart (Advanced+)
+  const [positionMode, setPositionMode] = useState(false);
+  const [customReqs, setCustomReqs] = useState([]);
+  const customReqIdSeq = useRef(1);
   const [mode, setMode] = useState(() => {
     try { return localStorage.getItem("orgSimMode") || "simple"; } catch { return "simple"; }
   });
@@ -4642,6 +6640,303 @@ function OrgChartApp() {
     return map;
   }, [hotspots]);
   const flightRisks = useMemo(() => computeAllFlightRisks(employees), [employees]);
+
+  // ─── HEADCOUNT DERIVATIONS (shared by HeadcountPlanningView + Org Chart ghost nodes) ───
+  const planGroupKey = { dept: "dept", bg: "bg", fn: "fn" }[planGroupBy];
+  const planGroupLabel = { dept: "Department", bg: "Business Group", fn: "Function" }[planGroupBy];
+
+  const planGroups = useMemo(() => {
+    const s = new Set(activeEmployees.map(e => e[planGroupKey]).filter(Boolean));
+    return [...s].sort();
+  }, [activeEmployees, planGroupKey]);
+
+  const planCurrent = useMemo(() => {
+    const m = {};
+    planGroups.forEach(g => { m[g] = {}; ALL_DISPLAY_LEVELS.forEach(lv => m[g][lv] = 0); });
+    activeEmployees.forEach(e => {
+      const g = e[planGroupKey]; if (!g || !m[g]) return;
+      const dl = displayLevel(e.level);
+      if (m[g][dl] !== undefined) m[g][dl] += 1;
+    });
+    return m;
+  }, [activeEmployees, planGroups, planGroupKey]);
+
+  const planProjected = useMemo(() => {
+    const m = {};
+    planGroups.forEach(g => {
+      m[g] = {};
+      ALL_DISPLAY_LEVELS.forEach(lv => {
+        const delta = plan[g]?.[lv] || 0;
+        m[g][lv] = Math.max(0, (planCurrent[g]?.[lv] || 0) + delta);
+      });
+    });
+    return m;
+  }, [planGroups, planCurrent, plan]);
+
+  const planRollups = useMemo(() => {
+    const rollup = (counts) => {
+      const r = {};
+      planGroups.forEach(g => {
+        let early = 0, exp = 0;
+        ALL_DISPLAY_LEVELS.forEach(lv => {
+          const n = counts[g]?.[lv] || 0;
+          if (EARLY_DISPLAY_LEVELS.has(lv)) early += n; else exp += n;
+        });
+        r[g] = { early, exp, total: early + exp };
+      });
+      return r;
+    };
+    const cur = rollup(planCurrent);
+    const prj = rollup(planProjected);
+    const orgTotalCur  = Object.values(cur).reduce((s, r) => s + r.total, 0);
+    const orgTotalProj = Object.values(prj).reduce((s, r) => s + r.total, 0);
+    const orgEarlyCur  = Object.values(cur).reduce((s, r) => s + r.early, 0);
+    const orgEarlyProj = Object.values(prj).reduce((s, r) => s + r.early, 0);
+    return { cur, prj, orgTotalCur, orgTotalProj, orgEarlyCur, orgEarlyProj };
+  }, [planCurrent, planProjected, planGroups]);
+
+  const planSumPlan = useMemo(() => {
+    let hires = 0, departures = 0;
+    Object.values(plan).forEach(byLv => Object.values(byLv).forEach(d => {
+      if (d > 0) hires += d; else if (d < 0) departures += -d;
+    }));
+    return { hires, departures, net: hires - departures };
+  }, [plan]);
+
+  const planHorizon = useMemo(() => {
+    const QUARTERS = ["Q1","Q2","Q3","Q4"];
+    const arr = [];
+    for (let i = 0; i < planHorizonQ; i++) {
+      const yr = planStartYear + Math.floor(i / 4);
+      arr.push({ key: `${yr}-${QUARTERS[i % 4]}`, year: yr, q: QUARTERS[i % 4], idx: i });
+    }
+    return arr;
+  }, [planStartYear, planHorizonQ]);
+
+  const planYears = Math.max(1, planHorizonQ / 4);
+
+  const plannedHires = useMemo(() => {
+    let ec = 0, exp = 0;
+    Object.values(plan).forEach(byLv => {
+      Object.entries(byLv).forEach(([lv, d]) => {
+        if (d > 0) { if (EARLY_DISPLAY_LEVELS.has(lv)) ec += d; else exp += d; }
+      });
+    });
+    return { ec, exp, total: ec + exp };
+  }, [plan]);
+
+  const earlyByGroup = useMemo(() => {
+    return planGroups.map(g => {
+      const c = planRollups.cur[g], p = planRollups.prj[g];
+      const target = Math.round(p.total * earlyTargetPct / 100);
+      const gap = target - p.early;
+      return {
+        group: g,
+        curEarly: c.early, curTotal: c.total, curPct: c.total ? Math.round(100*c.early/c.total) : 0,
+        projEarly: p.early, projTotal: p.total, projPct: p.total ? Math.round(100*p.early/p.total) : 0,
+        target, gap,
+      };
+    }).sort((a, b) => b.curTotal - a.curTotal);
+  }, [planGroups, planRollups, earlyTargetPct]);
+
+  // Org-wide level histogram from current active workforce — used to drive backfill mix.
+  const levelHistogram = useMemo(() => {
+    const h = {};
+    activeEmployees.forEach(e => { h[e.level] = (h[e.level] || 0) + 1; });
+    return h;
+  }, [activeEmployees]);
+
+  // 3-year attrition + growth model — drives backfill, growth, and EC reqs in coupled fashion.
+  // Must precede earlyCalc / earlyAllocByGroup, which read its outputs.
+  const growthModel = useMemo(() => computeAttritionGrowthModel({
+    baseTotal: planRollups.orgTotalProj || activeEmployees.length,
+    baseEarly: planRollups.orgEarlyProj || 0,
+    levelHistogram,
+    attritionPct,
+    growthTarget3Yr,
+    growthShiftPerYear,
+    promoPctPerYear,
+    acquisitionsPerYear,
+    mode: earlyMode,
+    targetPct: earlyTargetPct,
+    mixPct: hireMixPct,
+    internRatio,
+    planStartYear,
+  }), [planRollups, activeEmployees.length, levelHistogram, attritionPct, growthTarget3Yr,
+       growthShiftPerYear, promoPctPerYear, acquisitionsPerYear,
+       earlyMode, earlyTargetPct, hireMixPct, internRatio, planStartYear]);
+
+  // Default experienced-hire pace: prefer the 3yr growth model (attrition + growth + promotions
+  // − EC slice), falling back to plan-deltas if the model has nothing yet. The model is what
+  // actually drives the EC tab — the legacy plan-derived value would read 0 for users who
+  // haven't entered Mix-tab deltas, which made the EC tab look broken.
+  const defaultAnnualExpHires = useMemo(() => {
+    const modelExp = growthModel?.threeYear?.totalExp || 0;
+    if (modelExp > 0) return Math.max(0, Math.round(modelExp / 3));
+    return Math.max(0, Math.round(plannedHires.exp / planYears));
+  }, [growthModel, plannedHires.exp, planYears]);
+  const annualExpHires = annualExpHiresOverride == null ? defaultAnnualExpHires : annualExpHiresOverride;
+
+  const earlyCalc = useMemo(() => computeEarlyCalc({
+    baseTotal: planRollups.orgTotalProj,
+    baseEarly: planRollups.orgEarlyProj,
+    expPerYear: annualExpHires,
+    planYears,
+    mode: earlyMode,
+    targetPct: earlyTargetPct,
+    mixPct: hireMixPct,
+    internRatio,
+  }), [planRollups, annualExpHires, planYears, earlyMode, earlyTargetPct, hireMixPct, internRatio]);
+
+  // EC allocation by group — uses the 3-year total EC from the growth model.
+  // We pass a synthetic earlyCalc with ecPerYear = totalEC across the 3yr window so the
+  // largest-remainder split spreads the full horizon's EC demand across groups.
+  const earlyAllocByGroup = useMemo(() => {
+    if (!growthModel) {
+      return computeEarlyAllocByGroup({ earlyByGroup, earlyCalc, mode: earlyMode });
+    }
+    const ec3yr = { ecPerYear: growthModel.threeYear.totalEC, interns: growthModel.threeYear.totalInterns };
+    return computeEarlyAllocByGroup({ earlyByGroup, earlyCalc: ec3yr, mode: earlyMode });
+  }, [earlyByGroup, earlyCalc, earlyMode, growthModel]);
+
+  const planManagersByGroup = useMemo(() => {
+    const m = {};
+    activeEmployees.forEach(e => {
+      if (!e.isManager) return;
+      const g = e[planGroupKey]; if (!g) return;
+      (m[g] = m[g] || []).push(e);
+    });
+    return m;
+  }, [activeEmployees, planGroupKey]);
+
+  // Managers indexed by the level they would supervise (heuristic: a level reports up to a
+  // manager 1+ tier above). For backfill assignment we just bucket by displayLevel.
+  const planManagersByLevel = useMemo(() => {
+    const m = { __any: [] };
+    activeEmployees.forEach(e => {
+      if (!e.isManager) return;
+      m.__any.push(e);
+      const lv = e.level;
+      (m[lv] = m[lv] || []).push(e);
+    });
+    return m;
+  }, [activeEmployees]);
+
+  // Lazy-init projects from sample once activeEmployees is populated
+  useEffect(() => {
+    if (projects.length === 0 && activeEmployees.length > 0) {
+      setProjects(generateSampleProjectsFromEmps(activeEmployees));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeEmployees]);
+
+  // Plan reqs + backfill (attrition) + growth + EC-calc reqs + custom reqs
+  // → apply overrides + project assignment → final chartReqs
+  const chartReqs = useMemo(() => {
+    const planReqs = buildPlanReqs({
+      plan, managersByGroup: planManagersByGroup,
+      horizon: planHorizon, planStartYear, planHorizonQ,
+    });
+    let allReqs = planReqs;
+    let nextId = planReqs.length + 1;
+
+    // Attrition backfill reqs (same level as departed)
+    if (growthModel.threeYear.totalAttrition > 0) {
+      const backfillReqs = buildAttritionBackfillReqs({
+        model: growthModel, levelHistogram, managersByLevel: planManagersByLevel,
+        planStartYear, idStart: nextId,
+      });
+      allReqs = allReqs.concat(backfillReqs);
+      nextId += backfillReqs.length;
+    }
+
+    // Net-growth reqs (new positions across 3 years)
+    if (growthModel.threeYear.totalGrowth > 0 && earlyAllocByGroup.length) {
+      const growthReqs = buildGrowthReqs({
+        model: growthModel, allocByGroup: earlyAllocByGroup,
+        managersByGroup: planManagersByGroup,
+        planStartYear, idStart: nextId,
+      });
+      allReqs = allReqs.concat(growthReqs);
+      nextId += growthReqs.length;
+    }
+
+    // EC reqs spread across 3 years using model.yearly.ec weights
+    if (reqIncludeECCalc && growthModel.threeYear.totalEC > 0) {
+      const ecReqs = buildECCalcReqs({
+        allocByGroup: earlyAllocByGroup,
+        managersByGroup: planManagersByGroup,
+        planStartYear,
+        model: growthModel,
+        idStart: nextId,
+      });
+      allReqs = allReqs.concat(ecReqs);
+      nextId += ecReqs.length;
+    }
+
+    if (customReqs.length) allReqs = allReqs.concat(customReqs);
+    return applyReqOverridesAndProjects(allReqs, reqOverrides, projects);
+  }, [plan, planManagersByGroup, planManagersByLevel, planHorizon, planStartYear, planHorizonQ,
+      reqIncludeECCalc, growthModel, levelHistogram, earlyAllocByGroup,
+      reqOverrides, projects, customReqs]);
+
+  const reqsByManager = useMemo(() => {
+    const m = {};
+    chartReqs.forEach(r => {
+      if (r.hiringManagerId) (m[r.hiringManagerId] = m[r.hiringManagerId] || []).push(r);
+    });
+    return m;
+  }, [chartReqs]);
+
+  // Add an open req under a specific employee (used by Position Mode +/− buttons on the chart)
+  const addPositionUnder = useCallback((employeeId) => {
+    const emp = employees.find(e => e.id === employeeId);
+    if (!emp) return;
+    const group = emp[planGroupKey] || emp.dept;
+    const level = "L3"; // sensible default mid-level IC; user can edit in Headcount ▸ Reqs
+    const today = new Date();
+    const targetDate = new Date(today.getFullYear(), today.getMonth() + 3, 1);
+    const qNum = Math.floor(targetDate.getMonth() / 3) + 1;
+    const newId = `CUSTOM-${String(customReqIdSeq.current++).padStart(4, "0")}`;
+    const rng = seededRand(`${newId}|${group}|${level}`);
+    const newReq = {
+      id: newId,
+      group, level,
+      isEC: EARLY_DISPLAY_LEVELS.has(level),
+      title: pickTitleForReq(group, level, rng),
+      location: emp.location,
+      country: emp.country,
+      openDate: today.toISOString().slice(0, 10),
+      targetStart: targetDate.toISOString().slice(0, 10),
+      quarter: `${targetDate.getFullYear()} Q${qNum}`,
+      hiringManager: `${emp.first} ${emp.last}`,
+      hiringManagerId: emp.id,
+      employmentType: "FTE",
+      source: "manual",
+      status: "Open",
+    };
+    setCustomReqs(rs => [...rs, newReq]);
+    setShowPlannedInOrgChart(true); // make sure ghosts are visible
+    setExpandedNodes(s => { const n = new Set(s); n.add(employeeId); return n; });
+  }, [employees, planGroupKey]);
+
+  // Remove the most-recently-added custom req under a manager (no-op if none)
+  const removePositionUnder = useCallback((employeeId) => {
+    setCustomReqs(rs => {
+      for (let i = rs.length - 1; i >= 0; i--) {
+        if (rs[i].hiringManagerId === employeeId) {
+          // Also clear any per-req overrides for the deleted id
+          setReqOverrides(o => {
+            if (!o[rs[i].id]) return o;
+            const { [rs[i].id]: _, ...rest } = o;
+            return rest;
+          });
+          return [...rs.slice(0, i), ...rs.slice(i + 1)];
+        }
+      }
+      return rs;
+    });
+  }, []);
 
   // Auto-expand first 2 levels
   useEffect(() => {
@@ -4849,11 +7144,34 @@ function OrgChartApp() {
     if (!dragNode || dragNode === targetId) { setDragNode(null); setDragOver(null); teamDragRef.current = false; return; }
     // Reject drops involving nodes not in the active tree (e.g. departed employees when showDeparted is on)
     if (!tree.map[targetId] || !tree.map[dragNode]) { setDragNode(null); setDragOver(null); teamDragRef.current = false; return; }
-    const path = getAncestorPath(tree.map, targetId);
-    if (path.some(n => n.id === dragNode)) { setDragNode(null); setDragOver(null); teamDragRef.current = false; return; }
     const moveAsTeam = teamDragRef.current || shiftHeldRef.current;
     teamDragRef.current = false;
+    const path = getAncestorPath(tree.map, targetId);
+    const droppedOnDescendant = path.some(n => n.id === dragNode);
     setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(employees))]);
+    if (droppedOnDescendant) {
+      // Swap only allowed in team mode — individual swap would orphan the chain in between.
+      if (!moveAsTeam) { setDragNode(null); setDragOver(null); return; }
+      // Swap dragged (A) with target (B): B takes A's slot, A takes B's slot.
+      // Everyone reporting to A reroutes to B, and vice versa. Other reports stay put.
+      setEmployees(prev => {
+        const A = prev.find(e => e.id === dragNode);
+        const B = prev.find(e => e.id === targetId);
+        if (!A || !B) return prev;
+        const A_oldMgr = A.managerId ?? null;
+        const B_oldMgr = B.managerId ?? null;
+        const directChild = (B_oldMgr === A.id);
+        return prev.map(e => {
+          if (e.id === A.id) return { ...e, managerId: directChild ? B.id : B_oldMgr };
+          if (e.id === B.id) return { ...e, managerId: A_oldMgr };
+          if (e.managerId === A.id) return { ...e, managerId: B.id };
+          if (e.managerId === B.id) return { ...e, managerId: A.id };
+          return e;
+        });
+      });
+      setDragNode(null); setDragOver(null);
+      return;
+    }
     setEmployees(prev => {
       const dragged  = prev.find(e => e.id === dragNode);
       const oldMgrId = dragged?.managerId ?? null;
@@ -4914,13 +7232,20 @@ function OrgChartApp() {
   const isFiltered = useCallback((node) => {
     if (filterDept !== "All" && node.dept !== filterDept) return false;
     if (filterLoc !== "All" && node.location !== filterLoc) return false;
+    if (filterCountry !== "All" && (node.country || countryFor(node.location)) !== filterCountry) return false;
+    if (filterEmpType !== "All" && (node.employmentType || "FTE") !== filterEmpType) return false;
     if (filterBG !== "All" && node.bg !== filterBG) return false;
     if (filterLevel !== "All" && !(LEVEL_FILTER_GROUPS[filterLevel] || (() => true))(node.level)) return false;
     return true;
-  }, [filterDept, filterLoc, filterBG, filterLevel]);
+  }, [filterDept, filterLoc, filterCountry, filterEmpType, filterBG, filterLevel]);
 
   const departments = useMemo(() => [...new Set(activeEmployees.map(e => e.dept))].sort(), [activeEmployees]);
-  const locations = useMemo(() => [...new Set(activeEmployees.map(e => e.location))].sort(), [activeEmployees]);
+  const locations = useMemo(() => {
+    let pool = activeEmployees;
+    if (filterCountry !== "All") pool = pool.filter(e => (e.country || countryFor(e.location)) === filterCountry);
+    return [...new Set(pool.map(e => e.location))].sort();
+  }, [activeEmployees, filterCountry]);
+  const countries = useMemo(() => [...new Set(activeEmployees.map(e => e.country || countryFor(e.location)))].sort(), [activeEmployees]);
   const businessGroups = useMemo(() => [...new Set(activeEmployees.map(e => e.bg))].sort(), [activeEmployees]);
 
   const searchResults = useMemo(() => {
@@ -4946,6 +7271,7 @@ function OrgChartApp() {
     annotations, setAnnotations, showAnnotationForm, setShowAnnotationForm,
     annotationText, setAnnotationText, annotationType, setAnnotationType,
     colorBy, setColorBy, filterDept, setFilterDept, filterLoc, setFilterLoc,
+    filterCountry, setFilterCountry, filterEmpType, setFilterEmpType,
     filterBG, setFilterBG, showHotspots, setShowHotspots,
     dragNode, setDragNode, dragOver, setDragOver, dragMode, setDragMode,
     scenarioName, setScenarioName, scenarios, setScenarios,
@@ -4962,9 +7288,37 @@ function OrgChartApp() {
     filterLevel, setFilterLevel,
     orgViewMode, setOrgViewMode,
     showFlightRisk, setShowFlightRisk, flightRisks,
+    plan, setPlan, planGroupBy, setPlanGroupBy,
+    planStartYear, setPlanStartYear, planHorizonQ, setPlanHorizonQ,
+    showPlannedInOrgChart, setShowPlannedInOrgChart,
+    // Lifted EC + reqs state
+    earlyTargetPct, setEarlyTargetPct,
+    earlyMode, setEarlyMode,
+    hireMixPct, setHireMixPct,
+    internRatio, setInternRatio,
+    annualExpHiresOverride, setAnnualExpHiresOverride,
+    reqIncludeECCalc, setReqIncludeECCalc,
+    projects, setProjects,
+    reqOverrides, setReqOverrides, overrideReq, resetOverrides,
+    positionMode, setPositionMode,
+    customReqs, setCustomReqs,
+    addPositionUnder, removePositionUnder,
+    // 3-year attrition + growth model
+    attritionPct, setAttritionPct,
+    growthTarget3Yr, setGrowthTarget3Yr,
+    growthShiftPerYear, setGrowthShiftPerYear,
+    promoPctPerYear, setPromoPctPerYear,
+    acquisitionsPerYear, setAcquisitionsPerYear,
+    growthModel, levelHistogram,
+    // Headcount derivations
+    planGroupKey, planGroupLabel, planGroups, planCurrent, planProjected,
+    planRollups, planSumPlan, planHorizon, planYears,
+    plannedHires, defaultAnnualExpHires, annualExpHires,
+    earlyByGroup, earlyCalc, earlyAllocByGroup,
+    planManagersByGroup, chartReqs, reqsByManager,
     mode, setMode,
     teamDragRef, shiftHeldRef,
-    activeEmployees, tree, hotspots, hotspotNodeIds, hotspotReasons, departments, locations, businessGroups,
+    activeEmployees, tree, hotspots, hotspotNodeIds, hotspotReasons, departments, locations, countries, businessGroups,
     searchResults, displayRoot,
     toggleExpand, expandAll, collapseAll, navigateTo, goToInsight, navigateToDept, focusChain, focusSubtree, handleDrop, undo,
     saveAnnotation, removeAnnotation, getNodeColor, getTenureColor, isFiltered, getTimelineMonths,
@@ -5013,6 +7367,7 @@ function OrgChartApp() {
               { id: "timeline",     label: "Timeline",    icon: Clock,         minMode: "advanced" },
               { id: "dashboards",   label: "Dashboards",  icon: BarChart3,     minMode: "advanced" },
               { id: "scenarios",    label: "Scenarios",   icon: Target,        minMode: "advanced" },
+              { id: "headcount",    label: "Headcount",   icon: Users,         minMode: "advanced" },
               { id: "analytics",    label: "Analytics",   icon: Zap,           minMode: "advanced" },
               { id: "flight-risk",  label: "Flight Risk", icon: AlertTriangle, minMode: "advanced" },
               { id: "pipeline",     label: "Pipeline",    icon: GitMerge,      minMode: "expert"   },
@@ -5108,14 +7463,23 @@ function OrgChartApp() {
                   <option value="All">All Departments</option>
                   {departments.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
+                <select value={filterCountry} onChange={e => { setFilterCountry(e.target.value); setFilterLoc("All"); }} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
+                  <option value="All">All Countries</option>
+                  {countries.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+                <select value={filterLoc} onChange={e => setFilterLoc(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
+                  <option value="All">All Cities</option>
+                  {locations.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+                <select value={filterEmpType} onChange={e => setFilterEmpType(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
+                  <option value="All">FTE + Contract</option>
+                  <option value="FTE">FTE only</option>
+                  <option value="Contract">Contract only</option>
+                </select>
                 {atLeast(mode, "advanced") && <>
                   <select value={filterBG} onChange={e => setFilterBG(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
                     <option value="All">All BUs</option>
                     {businessGroups.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                  <select value={filterLoc} onChange={e => setFilterLoc(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
-                    <option value="All">All Locations</option>
-                    {locations.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                   <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
                     <option value="All">All Levels</option>
@@ -5134,6 +7498,27 @@ function OrgChartApp() {
                     </button>
                   ))}
                 </div>
+                <button onClick={() => setDragMode(m => m === "team" ? "individual" : "team")} className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${dragMode === "team" ? "bg-violet-600 text-white ring-2 ring-violet-300" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                  title="When ON: dragging a node moves its entire reporting chain. Dropping on a subordinate swaps positions.">
+                  <Move size={12}/>{dragMode === "team" ? "Team Move ON" : "Team Move"}
+                </button>
+                {atLeast(mode, "advanced") && (
+                  <button onClick={() => setShowPlannedInOrgChart(v => !v)} className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${showPlannedInOrgChart ? "bg-emerald-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                    title="Show open requisitions as dotted-ring ghost nodes under their hiring manager">
+                    <Plus size={12}/>Open Reqs {showPlannedInOrgChart ? "ON" : "OFF"}
+                  </button>
+                )}
+                {atLeast(mode, "advanced") && (
+                  <button onClick={() => {
+                      const next = !positionMode;
+                      setPositionMode(next);
+                      if (next) setShowPlannedInOrgChart(true);
+                    }}
+                    className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${positionMode ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                    title="Inline +/− under each card to add or remove open positions reporting to that person">
+                    <UserPlus size={12}/>Position Mode {positionMode ? "ON" : "OFF"}
+                  </button>
+                )}
                 {atLeast(mode, "advanced") && <>
                   <button onClick={() => setShowHotspots(!showHotspots)} className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${showHotspots ? "bg-red-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
                     <AlertTriangle size={12}/>Hotspots {showHotspots ? "ON" : "OFF"}
@@ -5144,10 +7529,6 @@ function OrgChartApp() {
                   <button onClick={() => setShowDeparted(d => !d)} className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${showDeparted ? "bg-slate-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
                     title="Render terminated employees as ghost cards at their last manager">
                     <EyeOff size={12}/>Departed {showDeparted ? "ON" : "OFF"}
-                  </button>
-                  <button onClick={() => setDragMode(m => m === "team" ? "individual" : "team")} className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${dragMode === "team" ? "bg-violet-600 text-white ring-2 ring-violet-300" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-                    title="When ON, dragging any node moves its entire reporting chain">
-                    <Move size={12}/>{dragMode === "team" ? "Team Move ON" : "Team Move"}
                   </button>
                 </>}
               </>
@@ -5214,6 +7595,58 @@ function OrgChartApp() {
           <div className="flex-1 overflow-hidden">
             {view === "org-chart" && (
               <div ref={treeContainerRef} className="h-full overflow-auto p-6 org-tree-scroll flex flex-col">
+                {/* Planned headcount overlay (toggled from toolbar Planned HC button) */}
+                {showPlannedInOrgChart && (() => {
+                  const items = [];
+                  Object.entries(plan).forEach(([g, byLv]) => {
+                    Object.entries(byLv).forEach(([lv, d]) => { if (d > 0) items.push({ g, lv, d }); });
+                  });
+                  const grouped = items.reduce((m, it) => { (m[it.g] = m[it.g] || []).push(it); return m; }, {});
+                  const totalPlanned = items.reduce((s, it) => s + it.d, 0);
+                  const ghostCount = chartReqs.length;
+                  const groupKey   = { dept: "dept", bg: "bg", fn: "fn" }[planGroupBy];
+                  const groupLabel = { dept: "Department", bg: "Business Group", fn: "Function" }[planGroupBy];
+                  return (
+                    <div className="mb-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3 shrink-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Plus size={14} className="text-emerald-700"/>
+                        <span className="text-xs font-bold text-emerald-800">Open Reqs Overlay</span>
+                        <span className="text-xs text-emerald-700">{ghostCount} dotted-ring node{ghostCount === 1 ? "" : "s"} on chart · plan adds +{totalPlanned} across {Object.keys(grouped).length} {groupLabel.toLowerCase()}{Object.keys(grouped).length === 1 ? "" : "s"}</span>
+                        <span className="text-[10px] text-emerald-600 ml-2">Edit in Headcount ▸ Reqs. State syncs both ways.</span>
+                        <button onClick={() => setShowPlannedInOrgChart(false)} className="ml-auto text-emerald-700 hover:text-emerald-900"><X size={12}/></button>
+                      </div>
+                      {totalPlanned === 0 ? (
+                        <div className="text-xs text-emerald-700 italic">No planned hires yet — go to Headcount Planning to add some.</div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {Object.entries(grouped).map(([g, lst]) => {
+                            const groupTotal = lst.reduce((s, it) => s + it.d, 0);
+                            // Try to highlight the matching dept/bg/fn in the chart
+                            const matchingMgrs = activeEmployees.filter(e => e[groupKey] === g
+                              && tree.map[e.id] && tree.map[e.id]._directReports > 0).slice(0, 1);
+                            const target = matchingMgrs[0];
+                            return (
+                              <button key={g}
+                                onClick={() => target && navigateTo(target.id)}
+                                title={target ? `Jump to ${target.first} ${target.last}` : "No matching node"}
+                                className="bg-white border border-emerald-200 rounded-lg px-2 py-1 text-xs hover:bg-emerald-100 transition-colors flex items-center gap-2">
+                                <span className="font-semibold text-emerald-800">+{groupTotal}</span>
+                                <span className="text-gray-700">{g}</span>
+                                <span className="flex gap-0.5">
+                                  {lst.map(it => (
+                                    <span key={it.lv} className={`px-1 rounded font-mono text-[10px] ${EARLY_DISPLAY_LEVELS.has(it.lv) ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-700"}`}>
+                                      {it.lv}×{it.d}
+                                    </span>
+                                  ))}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {/* Chart controls */}
                 <div className="flex items-center gap-2 mb-4 flex-wrap shrink-0">
                   {/* View mode pills — Treemap/Sunburst are advanced */}
@@ -5231,15 +7664,13 @@ function OrgChartApp() {
                   {orgViewMode === "tree" && <>
                     <button onClick={expandAll} className="text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">Expand All</button>
                     <button onClick={collapseAll} className="text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">Collapse All</button>
-                    {atLeast(mode, "advanced") && (
-                      <div className="text-xs text-gray-400 ml-2">
-                        {dragNode
-                          ? dragMode === "team"
-                            ? <span className="text-violet-600 font-medium">⛓ Chain drag — whole subtree moves with them · release Shift to switch</span>
-                            : <span className="text-blue-600 font-medium">👤 Solo drag — reports roll up to their manager · hold Shift to take the chain</span>
-                          : <span>Drag to reassign · <kbd className="bg-gray-100 border border-gray-300 rounded px-1 py-0.5 font-mono" style={{fontSize:10}}>Shift</kbd>+drag = move whole chain · Click to view details</span>}
-                      </div>
-                    )}
+                    <div className="text-xs text-gray-400 ml-2">
+                      {dragNode
+                        ? dragMode === "team"
+                          ? <span className="text-violet-600 font-medium">⛓ Chain drag — whole subtree moves with them · release Shift to switch</span>
+                          : <span className="text-blue-600 font-medium">👤 Solo drag — reports roll up to their manager · hold Shift to take the chain</span>
+                        : <span>Drag to reassign · <kbd className="bg-gray-100 border border-gray-300 rounded px-1 py-0.5 font-mono" style={{fontSize:10}}>Shift</kbd>+drag = move whole chain · Click to view details</span>}
+                    </div>
                     {/* Zoom controls */}
                     <div className="flex items-center gap-1 ml-auto">
                       <button onClick={() => setZoom(z => Math.max(0.05, +(z - 0.1).toFixed(2)))} className="text-xs bg-white border border-gray-200 w-7 h-7 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center font-bold text-gray-600">−</button>
@@ -5269,6 +7700,7 @@ function OrgChartApp() {
             {view === "timeline"    && <TimelineView/>}
             {view === "dashboards"  && <DashboardView/>}
             {view === "scenarios"   && <ScenarioView/>}
+            {view === "headcount"   && <HeadcountPlanningView/>}
             {view === "analytics"   && <AnalyticsView/>}
             {view === "flight-risk" && <FlightRiskView/>}
             {view === "pipeline"    && <ProductPipelineView/>}
