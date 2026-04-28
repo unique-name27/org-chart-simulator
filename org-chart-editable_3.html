@@ -4747,6 +4747,91 @@ function HeadcountPlanningView() {
     reader.readAsText(file);
   }
 
+  // RFC-4180 CSV parser — handles quoted fields with embedded commas, newlines, and "" escapes.
+  function parseCSV(text) {
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
+    const rows = [];
+    let row = [], cell = "", inQuotes = false, i = 0;
+    while (i < text.length) {
+      const ch = text[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { cell += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        cell += ch; i++; continue;
+      }
+      if (ch === '"') { inQuotes = true; i++; continue; }
+      if (ch === ',') { row.push(cell); cell = ""; i++; continue; }
+      if (ch === '\r') { i++; continue; }
+      if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ""; i++; continue; }
+      cell += ch; i++;
+    }
+    if (cell.length || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter(r => r.some(c => c.trim() !== ""));
+  }
+
+  // Import a hiring plan from a CSV exported (or saved-as-CSV) from Excel.
+  // Accepts two layouts:
+  //   Long:  group,level,delta            — one delta per row
+  //   Wide:  group,L1,L2,L3,...,E3        — one row per group, columns are display levels
+  // Replaces the current plan. Numbers are clamped to [-9999, 9999] per cell to avoid runaway recompute.
+  function importPlanCSV(file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const rows = parseCSV(String(ev.target.result || ""));
+        if (rows.length < 2) throw new Error("File has no data rows");
+        const header = rows[0].map(c => c.trim());
+        const headerLc = header.map(c => c.toLowerCase());
+        const groupIdx = headerLc.findIndex(c => c === "group" || c === "department" || c === "dept" || c === "business group" || c === "bg");
+        if (groupIdx < 0) throw new Error("Header must include a 'group' (or 'department' / 'bg') column");
+        const validLevels = new Set(ALL_DISPLAY_LEVELS);
+        const clamp = n => Math.max(-9999, Math.min(9999, Math.trunc(n)));
+
+        // Detect long vs wide form
+        const levelIdx = headerLc.findIndex(c => c === "level");
+        const deltaIdx = headerLc.findIndex(c => c === "delta" || c === "hires" || c === "count" || c === "headcount");
+        const isLong = levelIdx >= 0 && deltaIdx >= 0;
+
+        // Wide form: collect each header column whose name matches a known display level
+        const wideLevelCols = isLong ? [] : header
+          .map((h, i) => ({ lv: h.trim().toUpperCase(), i }))
+          .filter(({ lv, i }) => i !== groupIdx && validLevels.has(lv));
+        if (!isLong && wideLevelCols.length === 0)
+          throw new Error("Wide-form CSV needs columns named after levels (L1, L2, …, E3) or use long form: group,level,delta");
+
+        const newPlan = {};
+        let imported = 0, skipped = 0;
+        for (let r = 1; r < rows.length; r++) {
+          const row = rows[r];
+          const group = (row[groupIdx] || "").trim();
+          if (!group) { skipped++; continue; }
+          if (isLong) {
+            const lv = (row[levelIdx] || "").trim().toUpperCase();
+            const n = parseInt(row[deltaIdx], 10);
+            if (!validLevels.has(lv) || !Number.isFinite(n) || n === 0) { skipped++; continue; }
+            newPlan[group] = newPlan[group] || {};
+            newPlan[group][lv] = clamp((newPlan[group][lv] || 0) + n);
+            imported++;
+          } else {
+            wideLevelCols.forEach(({ lv, i }) => {
+              const n = parseInt(row[i], 10);
+              if (!Number.isFinite(n) || n === 0) return;
+              newPlan[group] = newPlan[group] || {};
+              newPlan[group][lv] = clamp((newPlan[group][lv] || 0) + n);
+              imported++;
+            });
+          }
+        }
+        if (imported === 0) throw new Error(`No usable rows found (skipped ${skipped})`);
+        setPlan(newPlan);
+        alert(`Imported ${imported} plan entr${imported === 1 ? "y" : "ies"} across ${Object.keys(newPlan).length} group${Object.keys(newPlan).length === 1 ? "" : "s"}.${skipped ? ` Skipped ${skipped} blank/invalid row${skipped === 1 ? "" : "s"}.` : ""}`);
+      } catch (err) { alert("Could not parse CSV: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+
   // Generic CSV builder — delegates per-cell escaping to module-level csvCell()
   function arrToCSV(rows, cols) {
     const out = [cols.join(",")];
@@ -5752,6 +5837,12 @@ function HeadcountPlanningView() {
                   <Plus size={12}/> Import JSON
                   <input type="file" accept=".json,application/json" className="hidden"
                     onChange={e => { const f = e.target.files?.[0]; if (f) importPlanJSON(f); e.target.value = ""; }}/>
+                </label>
+                <label className="flex items-center gap-1 text-xs px-2.5 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 cursor-pointer"
+                  title="Import a hiring plan from CSV (Save As CSV from Excel). Accepts long form (group,level,delta) or wide form (group,L1,L2,…,E3). Replaces the current plan.">
+                  <Plus size={12}/> Import CSV
+                  <input type="file" accept=".csv,text/csv" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) importPlanCSV(f); e.target.value = ""; }}/>
                 </label>
               </div>
             </div>
