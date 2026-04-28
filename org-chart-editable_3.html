@@ -7487,8 +7487,10 @@ function OrgChartApp() {
     if (droppedOnDescendant) {
       // Swap only allowed in team mode — individual swap would orphan the chain in between.
       if (!moveAsTeam) { setDragNode(null); setDragOver(null); return; }
-      // Swap dragged (A) with target (B): B takes A's slot, A takes B's slot.
-      // Everyone reporting to A reroutes to B, and vice versa. Other reports stay put.
+      // Superior↔subordinate swap: A (dragged superior) and B (target subordinate) trade slots,
+      // but neither inherits the other's old team — instead everyone formerly under A or B rolls
+      // up to A's old manager (the next-higher-up). Avoids a junior accidentally inheriting a
+      // senior's whole org (or vice versa) just because positions were swapped.
       setEmployees(prev => {
         const A = prev.find(e => e.id === dragNode);
         const B = prev.find(e => e.id === targetId);
@@ -7499,8 +7501,7 @@ function OrgChartApp() {
         return prev.map(e => {
           if (e.id === A.id) return { ...e, managerId: directChild ? B.id : B_oldMgr };
           if (e.id === B.id) return { ...e, managerId: A_oldMgr };
-          if (e.managerId === A.id) return { ...e, managerId: B.id };
-          if (e.managerId === B.id) return { ...e, managerId: A.id };
+          if (e.managerId === A.id || e.managerId === B.id) return { ...e, managerId: A_oldMgr };
           return e;
         });
       });
@@ -7850,7 +7851,7 @@ function OrgChartApp() {
                   ))}
                 </div>
                 <button onClick={() => setDragMode(m => m === "team" ? "individual" : "team")} className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${dragMode === "team" ? "bg-violet-600 text-white ring-2 ring-violet-300" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-                  title="When ON: dragging a node moves its entire reporting chain. Dropping on a subordinate swaps positions.">
+                  title="When ON: dragging a node moves its entire reporting chain. Dropping on a subordinate swaps positions — both teams roll up to the next higher manager so neither person inherits the other's org.">
                   <Move size={12}/>{dragMode === "team" ? "Team Move ON" : "Team Move"}
                 </button>
                 {atLeast(mode, "advanced") && (
