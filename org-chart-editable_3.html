@@ -4,17 +4,30 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Org Chart Simulator</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';"/>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body>
   <div id="root"></div>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
-  <script src="https://unpkg.com/recharts@2/umd/Recharts.js"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"
+          integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"
+          crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
+          integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"
+          crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"
+          integrity="sha384-/AfDwVDXNopzPvhxMPQ11y1OCpR6mVkWx47qzSwIiquvxkcMkZddEzDNtIOtfCpk"
+          crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"
+          integrity="sha384-d1XH4LhwLW8j0l6VXMP8yJabdGY9ZqtZk7k7PaPk5NoUCcZ/hDkL5aaKioKQbcZg"
+          crossorigin="anonymous"></script>
   <script>window.react = window.React;</script>
-  <script src="https://cdn.jsdelivr.net/npm/lucide-react@0.383.0/dist/umd/lucide-react.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide-react@0.383.0/dist/umd/lucide-react.js"
+          integrity="sha384-3PzCS0pU90dBlCc+Gc27Nnys9qfdwj8j/AvN/bQLoC5MS3gVD+8awDGvgamgGyar"
+          crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"
+          integrity="sha384-EIcs2MbARRLcLs7Gv2wqqhhfMlcLeW9yuJsWki1r5iveN1F5gpzHOwAKycJqSQOI"
+          crossorigin="anonymous"></script>
   <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext, memo } = React;
 const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, AreaChart, Area, CartesianGrid, Legend, ReferenceLine } = Recharts;
@@ -1837,9 +1850,9 @@ function FlightRiskView() {
             const cols = ["Name","Dept","Level","Manager","Risk Score","Risk Level","Reasons"];
             const rows = atRisk.map(e => {
               const mgr = employees.find(m => m.id === e.managerId);
-              return [`"${e.first} ${e.last}"`, `"${e.dept}"`, `"${e.level}"`,
-                `"${mgr ? mgr.first + " " + mgr.last : "—"}"`, e.score, `"${e.risk.toUpperCase()}"`,
-                `"${e.reasons.join("; ")}"`].join(",");
+              return [csvCell(`${e.first} ${e.last}`), csvCell(e.dept), csvCell(e.level),
+                csvCell(mgr ? mgr.first + " " + mgr.last : "—"), csvCell(e.score), csvCell(e.risk.toUpperCase()),
+                csvCell(e.reasons.join("; "))].join(",");
             });
             const blob = new Blob([[cols.join(","), ...rows].join("\n")], { type: "text/csv" });
             const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "flight-risk-report.csv"; a.click();
@@ -2156,6 +2169,15 @@ function buildPlanReqs({ plan, managersByGroup, horizon, planStartYear, planHori
     });
   });
   return reqs;
+}
+
+// CSV cell escaper: handles RFC-4180 quoting AND blocks Excel formula injection
+// by prefixing any value starting with =, +, -, @, tab, or CR with a single quote.
+function csvCell(v) {
+  if (v == null) return "";
+  let s = Array.isArray(v) ? v.join("|") : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 // Largest-remainder allocation: split `total` into integer parts proportional to `weights`.
@@ -4591,17 +4613,12 @@ function HeadcountPlanningView() {
 
   function exportReqsCSV() {
     const cols = ["id","status","projectId","group","level","tier","isEC","title","location","country","employmentType","openDate","targetStart","quarter","hiringManager","hiringManagerId","salaryBand","source"];
-    const esc = v => {
-      if (v == null) return "";
-      const s = String(v);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
     const rows = [cols.join(",")];
     filteredReqsFinal.forEach(r => {
       rows.push(cols.map(c => {
-        if (c === "tier") return esc(levelTier(r.level));
-        if (c === "group") return esc(r.group);
-        return esc(r[c]);
+        if (c === "tier") return csvCell(levelTier(r.level));
+        if (c === "group") return csvCell(r.group);
+        return csvCell(r[c]);
       }).join(","));
     });
     const stamp = new Date().toISOString().slice(0,10);
@@ -4730,15 +4747,10 @@ function HeadcountPlanningView() {
     reader.readAsText(file);
   }
 
-  // Generic CSV builder
+  // Generic CSV builder — delegates per-cell escaping to module-level csvCell()
   function arrToCSV(rows, cols) {
-    const esc = v => {
-      if (v == null) return "";
-      const s = Array.isArray(v) ? v.join("|") : String(v);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-    };
     const out = [cols.join(",")];
-    rows.forEach(r => out.push(cols.map(c => esc(r[c])).join(",")));
+    rows.forEach(r => out.push(cols.map(c => csvCell(r[c])).join(",")));
     return out.join("\n");
   }
 
@@ -6861,6 +6873,26 @@ function OrgChartApp() {
   const [filterLevel, setFilterLevel] = useState("All");
   const [orgViewMode, setOrgViewMode] = useState("tree"); // "tree" | "treemap" | "sunburst"
   const [showFlightRisk, setShowFlightRisk] = useState(false);
+  // Privacy notice: dismissed flag persisted to localStorage so users only see it once per device.
+  const [dataNoticeDismissed, setDataNoticeDismissed] = useState(() => {
+    try { return localStorage.getItem("orgSimDataNoticeAck") === "1"; } catch { return false; }
+  });
+  const dismissDataNotice = useCallback(() => {
+    setDataNoticeDismissed(true);
+    try { localStorage.setItem("orgSimDataNoticeAck", "1"); } catch {}
+  }, []);
+  const clearAllLocalData = useCallback(() => {
+    if (!confirm("Clear all locally stored preferences and reload? This wipes saved UI state from this browser. Imported employee data lives only in memory and is not persisted.")) return;
+    try {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("orgSim")) keys.push(k);
+      }
+      keys.forEach(k => localStorage.removeItem(k));
+    } catch {}
+    location.reload();
+  }, []);
   // ── Headcount plan (lifted to app scope so org chart and planner share state) ──
   // Sample seed: a few small department deltas so the Mix / Timeline / EC tabs and the open
   // reqs view all have something interesting to show on first load. Users overwrite by
@@ -7630,7 +7662,22 @@ function OrgChartApp() {
 
   return (
     <AppCtx.Provider value={ctxValue}>
-      <div className="h-screen flex overflow-hidden" style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8fafc" }}>
+      <div className="h-screen flex flex-col overflow-hidden" style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8fafc" }}>
+      {!dataNoticeDismissed && (
+        <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-xs text-amber-900">
+          <span className="font-semibold">Privacy notice:</span>
+          <span>All data stays in your browser — nothing is sent over the network. There is no auto-save; use Export to save your work.</span>
+          <button onClick={clearAllLocalData}
+            className="ml-auto text-[11px] px-2 py-1 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors font-medium">
+            Clear all local data
+          </button>
+          <button onClick={dismissDataNotice}
+            className="text-[11px] px-2 py-1 rounded bg-amber-700 text-white hover:bg-amber-800 transition-colors font-medium">
+            Got it
+          </button>
+        </div>
+      )}
+      <div className="flex flex-1 overflow-hidden">
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&display=swap');
           ::-webkit-scrollbar { width: 6px; }
@@ -7846,7 +7893,7 @@ function OrgChartApp() {
                 title="Export employees as CSV"
                 onClick={() => {
                   const cols = ["id","first","last","title","dept","bg","fn","level","location","managerId","status","startDate","endDate","costCenter","band"];
-                  const rows = [cols.join(","), ...employees.map(e => cols.map(c => `"${String(e[c]??"")}"`).join(","))];
+                  const rows = [cols.join(","), ...employees.map(e => cols.map(c => csvCell(e[c])).join(","))];
                   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
                   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "employees.csv"; a.click();
                 }}
@@ -8014,6 +8061,7 @@ function OrgChartApp() {
         {/* Detail panel */}
         {detailPanel && <DetailPanel/>}
         {exitSimNode && <ExitSimModal/>}
+      </div>
       </div>
     </AppCtx.Provider>
   );
