@@ -3729,7 +3729,8 @@ function DashboardView() {
 // ─── SCENARIO VIEW ───
 function ScenarioView() {
   const { employees, setEmployees, scenarios, setScenarios, scenarioName, setScenarioName,
-          undoStack, undo, scenarioNewName, setScenarioNewName } = useContext(AppCtx);
+          undoStack, undo, scenarioNewName, setScenarioNewName,
+          exportScenarios, importScenarios } = useContext(AppCtx);
 
   const [scenarioTab, setScenarioTab] = useState("scenarios"); // "scenarios" | "planning" | "diff"
   const [hcTargets, setHcTargets]     = useState({});  // dept → target headcount
@@ -3945,8 +3946,8 @@ function ScenarioView() {
       {scenarioTab === "scenarios" && (
         <>
           <p className="text-sm text-gray-500 mb-4">Create alternate org structures without affecting your base data.</p>
-          <div className="flex gap-2 mb-5">
-            <input value={scenarioNewName} onChange={e => setScenarioNewName(e.target.value)} placeholder="New scenario name..." className="text-sm border border-gray-200 rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+          <div className="flex gap-2 mb-3 flex-wrap">
+            <input value={scenarioNewName} onChange={e => setScenarioNewName(e.target.value)} placeholder="New scenario name..." className="text-sm border border-gray-200 rounded-lg px-3 py-2 flex-1 min-w-[200px] focus:outline-none focus:ring-2 focus:ring-blue-500"/>
             <button onClick={() => {
               if (scenarioNewName.trim()) {
                 setScenarios(prev => [...prev, { name: scenarioNewName.trim(), data: JSON.parse(JSON.stringify(employees)) }]);
@@ -3954,6 +3955,16 @@ function ScenarioView() {
                 setScenarioNewName("");
               }
             }} className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">Create</button>
+          </div>
+          <div className="flex gap-2 mb-5 flex-wrap">
+            <button onClick={exportScenarios} title="Export all scenarios as JSON" className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1.5">
+              <Download size={12}/>Export scenarios
+            </button>
+            <label title="Import scenarios from a previously exported JSON" className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-1.5 cursor-pointer">
+              <Plus size={12}/>Import scenarios
+              <input type="file" accept=".json,application/json" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) importScenarios(f); e.target.value = ""; }}/>
+            </label>
           </div>
           <div className="space-y-2 mb-5">
             {scenarios.map((s, i) => (
@@ -4828,6 +4839,170 @@ function HeadcountPlanningView() {
         setPlan(newPlan);
         alert(`Imported ${imported} plan entr${imported === 1 ? "y" : "ies"} across ${Object.keys(newPlan).length} group${Object.keys(newPlan).length === 1 ? "" : "s"}.${skipped ? ` Skipped ${skipped} blank/invalid row${skipped === 1 ? "" : "s"}.` : ""}`);
       } catch (err) { alert("Could not parse CSV: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+
+  // Import a full employee dataset from CSV. Mirrors the export shape so users can round-trip:
+  // export → tweak in Excel → re-import. Required columns: id, first, last, level, dept, managerId.
+  // Unknown manager refs are reset to root and reporting cycles are broken so the org always
+  // forms a valid forest. Replaces the current employees array (push to undo stack first).
+  function importEmployeesCSV(file) {
+    if (!confirm("Import will REPLACE the current employee dataset. Continue? (Ctrl+Z will undo.)")) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const rows = parseCSV(String(ev.target.result || ""));
+        if (rows.length < 2) throw new Error("File has no data rows");
+        const header = rows[0].map(c => c.trim());
+        const headerLc = header.map(c => c.toLowerCase());
+        const idx = (name) => headerLc.indexOf(name);
+        const required = ["id","first","last","level","dept","managerid"];
+        const missing = required.filter(n => idx(n) < 0);
+        if (missing.length) throw new Error("Missing required column(s): " + missing.join(", "));
+
+        const get = (row, i) => i >= 0 ? (row[i] ?? "").toString().trim() : "";
+        const validLevels = new Set(ALL_DISPLAY_LEVELS);
+        const idIdx = idx("id"), fnameIdx = idx("first"), lnameIdx = idx("last");
+        const titleIdx = idx("title"), deptIdx = idx("dept"), bgIdx = idx("bg"), fnIdx = idx("fn");
+        const levelIdx = idx("level"), locIdx = idx("location"), countryIdx = idx("country");
+        const empTypeIdx = idx("employmenttype"), mgrIdx = idx("managerid");
+        const isMgrIdx = idx("ismanager"), tenureIdx = idx("tenureyears");
+        const statusIdx = idx("status"), startIdx = idx("startdate"), endIdx = idx("enddate");
+        const ccIdx = idx("costcenter"), bandIdx = idx("band");
+
+        const out = [];
+        const seenIds = new Set();
+        let dupIds = 0, badLv = 0, blankRows = 0;
+        for (let r = 1; r < rows.length; r++) {
+          const row = rows[r];
+          const id = get(row, idIdx);
+          if (!id) { blankRows++; continue; }
+          if (seenIds.has(id)) { dupIds++; continue; }
+          const lv = get(row, levelIdx).toUpperCase();
+          if (!validLevels.has(lv)) { badLv++; continue; }
+          seenIds.add(id);
+          const dept = get(row, deptIdx);
+          const mgr = get(row, mgrIdx);
+          out.push({
+            id,
+            first: get(row, fnameIdx),
+            last:  get(row, lnameIdx),
+            title: get(row, titleIdx) || `${lv} ${dept}`,
+            level: lv,
+            dept,
+            bg:    get(row, bgIdx) || dept,
+            fn:    get(row, fnIdx) || dept,
+            location: get(row, locIdx) || "Unknown",
+            country:  get(row, countryIdx) || "—",
+            employmentType: get(row, empTypeIdx) || "FTE",
+            managerId: mgr || null,
+            isManager: /^(true|1|yes|y)$/i.test(get(row, isMgrIdx)),
+            tenureYears: parseFloat(get(row, tenureIdx)) || 0,
+            status: get(row, statusIdx) || "Active",
+            startDate: get(row, startIdx) || null,
+            endDate:   get(row, endIdx)   || null,
+            costCenter: get(row, ccIdx) || null,
+            band:       get(row, bandIdx) || null,
+          });
+        }
+        if (out.length === 0) throw new Error("No valid employee rows found");
+
+        // Drop manager refs to ids we don't have, and break self-loops
+        let orphaned = 0;
+        out.forEach(e => {
+          if (e.managerId && !seenIds.has(e.managerId)) { e.managerId = null; orphaned++; }
+          if (e.id === e.managerId) { e.managerId = null; orphaned++; }
+        });
+
+        // Break reporting cycles by detaching the deeper end so the graph forms a forest
+        const idMap = new Map(out.map(e => [e.id, e]));
+        let cyclesBroken = 0;
+        out.forEach(e => {
+          const seen = new Set();
+          let cur = e;
+          while (cur && cur.managerId) {
+            if (seen.has(cur.id)) { e.managerId = null; cyclesBroken++; break; }
+            seen.add(cur.id);
+            cur = idMap.get(cur.managerId);
+          }
+        });
+
+        setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(employees))]);
+        setEmployees(out);
+        setSelectedNode(null); setDetailPanel(null); setFocusRoot(null);
+        setExpandedNodes(new Set()); setInsightHighlightIds(new Set()); setChainFilterId(null);
+        const notes = [];
+        if (dupIds)       notes.push(`${dupIds} duplicate id${dupIds>1?"s":""} skipped`);
+        if (badLv)        notes.push(`${badLv} unknown level${badLv>1?"s":""} skipped`);
+        if (blankRows)    notes.push(`${blankRows} blank row${blankRows>1?"s":""} skipped`);
+        if (orphaned)     notes.push(`${orphaned} bad manager ref${orphaned>1?"s":""} reset to root`);
+        if (cyclesBroken) notes.push(`${cyclesBroken} reporting cycle${cyclesBroken>1?"s":""} broken`);
+        alert(`Imported ${out.length} employee${out.length>1?"s":""}.${notes.length ? "\n• " + notes.join("\n• ") : ""}`);
+      } catch (err) { alert("Could not parse employees CSV: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+
+  // Pipeline config — currently the user-editable piece is just the stage order, persisted in
+  // localStorage by ProductPipelineView. Export wraps it with a version tag so future fields
+  // (custom GA targets, custom stage definitions) can extend without breaking older imports.
+  function exportPipelineConfig() {
+    let stageOrder = null;
+    try {
+      const saved = JSON.parse(localStorage.getItem("orgSimStageOrder") || "null");
+      if (Array.isArray(saved)) stageOrder = saved;
+    } catch {}
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      stageOrder: stageOrder || DEFAULT_PIPELINE_STAGES.map(s => s.id),
+      gaTargets: STAGE_CAT_GA_TARGET,
+    };
+    downloadFile(`pipeline-config-${new Date().toISOString().slice(0,10)}.json`,
+      JSON.stringify(payload, null, 2), "application/json");
+  }
+  function importPipelineConfig(file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!Array.isArray(data?.stageOrder)) throw new Error("Missing stageOrder array");
+        const validIds = new Set(DEFAULT_PIPELINE_STAGES.map(s => s.id));
+        const filtered = data.stageOrder.filter(id => validIds.has(id));
+        if (filtered.length !== DEFAULT_PIPELINE_STAGES.length) {
+          throw new Error(`stageOrder must contain all ${DEFAULT_PIPELINE_STAGES.length} known stage ids`);
+        }
+        try { localStorage.setItem("orgSimStageOrder", JSON.stringify(filtered)); } catch {}
+        alert("Pipeline order imported. Reload or revisit the Pipeline tab to see the change.");
+      } catch (err) { alert("Could not parse pipeline config: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+
+  // Scenarios — export+import the full snapshot list so users can save off what-if scenarios
+  // and reload them later (or share with a teammate).
+  function exportScenarios() {
+    downloadFile(`scenarios-${new Date().toISOString().slice(0,10)}.json`,
+      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), scenarios }, null, 2),
+      "application/json");
+  }
+  function importScenarios(file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!Array.isArray(data?.scenarios)) throw new Error("Missing scenarios array");
+        const cleaned = data.scenarios
+          .filter(s => s && typeof s.name === "string")
+          .map(s => ({
+            name: s.name.slice(0, 80),
+            data: Array.isArray(s.data) ? s.data : null,
+          }));
+        if (cleaned.length === 0) throw new Error("No valid scenarios found");
+        setScenarios(cleaned);
+        alert(`Imported ${cleaned.length} scenario${cleaned.length>1?"s":""}.`);
+      } catch (err) { alert("Could not parse scenarios JSON: " + err.message); }
     };
     reader.readAsText(file);
   }
@@ -6402,7 +6577,7 @@ function computeProductLineAssignments(employees) {
 
 // ─── PRODUCT PIPELINE VIEW ───
 function ProductPipelineView() {
-  const { employees, flightRisks } = useContext(AppCtx);
+  const { employees, flightRisks, exportPipelineConfig, importPipelineConfig } = useContext(AppCtx);
   const [selectedCell, setSelectedCell] = useState(null); // { stageId, plId }
   const [flowPlaying, setFlowPlaying]   = useState(false);
   const [flowPos, setFlowPos]           = useState({ pl1: -1, pl2: -1 });
@@ -6542,6 +6717,14 @@ function ProductPipelineView() {
                 ↺ Reset order
               </button>
             )}
+            <button onClick={exportPipelineConfig} className="text-xs bg-gray-100 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1.5" title="Export pipeline stage order + config as JSON">
+              <Download size={12}/>Export
+            </button>
+            <label className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-2 rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-1.5 cursor-pointer" title="Import a previously exported pipeline config JSON">
+              <Plus size={12}/>Import
+              <input type="file" accept=".json,application/json" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) importPipelineConfig(f); e.target.value = ""; }}/>
+            </label>
             {flowPlaying
               ? <button onClick={() => { setFlowPlaying(false); setFlowPos({ pl1: -1, pl2: -1 }); }} className="text-xs bg-gray-200 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-300 transition-colors flex items-center gap-1.5"><Pause size={12}/>Stop</button>
               : <button onClick={() => { setFlowPos({ pl1: 0, pl2: -2 }); setFlowPlaying(true); }} className="text-xs bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1.5" style={{ boxShadow: "0 2px 8px rgba(37,99,235,0.3)" }}><Activity size={12}/>Simulate Flow</button>
@@ -7750,6 +7933,7 @@ function OrgChartApp() {
     searchResults, displayRoot,
     toggleExpand, expandAll, collapseAll, navigateTo, goToInsight, navigateToDept, focusChain, focusSubtree, handleDrop, undo,
     saveAnnotation, removeAnnotation, getNodeColor, getTenureColor, isFiltered, getTimelineMonths,
+    importEmployeesCSV, exportPipelineConfig, importPipelineConfig, exportScenarios, importScenarios,
   };
 
   return (
@@ -7982,15 +8166,22 @@ function OrgChartApp() {
             {/* Export buttons */}
             <div className="flex items-center gap-1 ml-auto border-l border-gray-100 pl-3">
               <button
-                title="Export employees as CSV"
+                title="Export employees as CSV — round-trips with Import below"
                 onClick={() => {
-                  const cols = ["id","first","last","title","dept","bg","fn","level","location","managerId","status","startDate","endDate","costCenter","band"];
+                  const cols = ["id","first","last","title","dept","bg","fn","level","location","country","employmentType","managerId","isManager","tenureYears","status","startDate","endDate","costCenter","band"];
                   const rows = [cols.join(","), ...employees.map(e => cols.map(c => csvCell(e[c])).join(","))];
                   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
                   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "employees.csv"; a.click();
                 }}
                 className="flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors"
               ><Download size={12}/>CSV</button>
+              <label
+                title="Import employees from a CSV (round-trips with the export above). Required columns: id, first, last, level, dept, managerId. Replaces the current org — Ctrl+Z to undo."
+                className="flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors cursor-pointer">
+                <Plus size={12}/>Import
+                <input type="file" accept=".csv,text/csv" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) importEmployeesCSV(f); e.target.value = ""; }}/>
+              </label>
               {atLeast(mode, "advanced") && <button
                 title="Export analytics report as JSON"
                 onClick={() => {
