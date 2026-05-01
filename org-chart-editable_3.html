@@ -2180,6 +2180,39 @@ function csvCell(v) {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+function downloadFile(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
+  const rows = [];
+  let row = [], cell = "", inQuotes = false, i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cell += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      }
+      cell += ch; i++; continue;
+    }
+    if (ch === '"') { inQuotes = true; i++; continue; }
+    if (ch === ',') { row.push(cell); cell = ""; i++; continue; }
+    if (ch === '\r') { i++; continue; }
+    if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ""; i++; continue; }
+    cell += ch; i++;
+  }
+  if (cell.length || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ""));
+}
+
 // Largest-remainder allocation: split `total` into integer parts proportional to `weights`.
 function largestRemainderAlloc(total, weights) {
   const sumW = weights.reduce((s, w) => s + w, 0);
@@ -4612,16 +4645,6 @@ function HeadcountPlanningView() {
   const [reqLevelFilter, setReqLevelFilter] = useState("All");
   const REQ_STATUSES = ["Open", "Sourcing", "Interviewing", "Offer", "Filled"];
 
-  function downloadFile(filename, content, mime) {
-    const blob = new Blob([content], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
   function exportReqsCSV() {
     const cols = ["id","status","projectId","group","level","tier","isEC","title","location","country","employmentType","openDate","targetStart","quarter","hiringManager","hiringManagerId","salaryBand","source"];
     const rows = [cols.join(",")];
@@ -4759,29 +4782,6 @@ function HeadcountPlanningView() {
   }
 
   // RFC-4180 CSV parser — handles quoted fields with embedded commas, newlines, and "" escapes.
-  function parseCSV(text) {
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
-    const rows = [];
-    let row = [], cell = "", inQuotes = false, i = 0;
-    while (i < text.length) {
-      const ch = text[i];
-      if (inQuotes) {
-        if (ch === '"') {
-          if (text[i + 1] === '"') { cell += '"'; i += 2; continue; }
-          inQuotes = false; i++; continue;
-        }
-        cell += ch; i++; continue;
-      }
-      if (ch === '"') { inQuotes = true; i++; continue; }
-      if (ch === ',') { row.push(cell); cell = ""; i++; continue; }
-      if (ch === '\r') { i++; continue; }
-      if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ""; i++; continue; }
-      cell += ch; i++;
-    }
-    if (cell.length || row.length) { row.push(cell); rows.push(row); }
-    return rows.filter(r => r.some(c => c.trim() !== ""));
-  }
-
   // Import a hiring plan from a CSV exported (or saved-as-CSV) from Excel.
   // Accepts two layouts:
   //   Long:  group,level,delta            — one delta per row
@@ -4839,170 +4839,6 @@ function HeadcountPlanningView() {
         setPlan(newPlan);
         alert(`Imported ${imported} plan entr${imported === 1 ? "y" : "ies"} across ${Object.keys(newPlan).length} group${Object.keys(newPlan).length === 1 ? "" : "s"}.${skipped ? ` Skipped ${skipped} blank/invalid row${skipped === 1 ? "" : "s"}.` : ""}`);
       } catch (err) { alert("Could not parse CSV: " + err.message); }
-    };
-    reader.readAsText(file);
-  }
-
-  // Import a full employee dataset from CSV. Mirrors the export shape so users can round-trip:
-  // export → tweak in Excel → re-import. Required columns: id, first, last, level, dept, managerId.
-  // Unknown manager refs are reset to root and reporting cycles are broken so the org always
-  // forms a valid forest. Replaces the current employees array (push to undo stack first).
-  function importEmployeesCSV(file) {
-    if (!confirm("Import will REPLACE the current employee dataset. Continue? (Ctrl+Z will undo.)")) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const rows = parseCSV(String(ev.target.result || ""));
-        if (rows.length < 2) throw new Error("File has no data rows");
-        const header = rows[0].map(c => c.trim());
-        const headerLc = header.map(c => c.toLowerCase());
-        const idx = (name) => headerLc.indexOf(name);
-        const required = ["id","first","last","level","dept","managerid"];
-        const missing = required.filter(n => idx(n) < 0);
-        if (missing.length) throw new Error("Missing required column(s): " + missing.join(", "));
-
-        const get = (row, i) => i >= 0 ? (row[i] ?? "").toString().trim() : "";
-        const validLevels = new Set(ALL_DISPLAY_LEVELS);
-        const idIdx = idx("id"), fnameIdx = idx("first"), lnameIdx = idx("last");
-        const titleIdx = idx("title"), deptIdx = idx("dept"), bgIdx = idx("bg"), fnIdx = idx("fn");
-        const levelIdx = idx("level"), locIdx = idx("location"), countryIdx = idx("country");
-        const empTypeIdx = idx("employmenttype"), mgrIdx = idx("managerid");
-        const isMgrIdx = idx("ismanager"), tenureIdx = idx("tenureyears");
-        const statusIdx = idx("status"), startIdx = idx("startdate"), endIdx = idx("enddate");
-        const ccIdx = idx("costcenter"), bandIdx = idx("band");
-
-        const out = [];
-        const seenIds = new Set();
-        let dupIds = 0, badLv = 0, blankRows = 0;
-        for (let r = 1; r < rows.length; r++) {
-          const row = rows[r];
-          const id = get(row, idIdx);
-          if (!id) { blankRows++; continue; }
-          if (seenIds.has(id)) { dupIds++; continue; }
-          const lv = get(row, levelIdx).toUpperCase();
-          if (!validLevels.has(lv)) { badLv++; continue; }
-          seenIds.add(id);
-          const dept = get(row, deptIdx);
-          const mgr = get(row, mgrIdx);
-          out.push({
-            id,
-            first: get(row, fnameIdx),
-            last:  get(row, lnameIdx),
-            title: get(row, titleIdx) || `${lv} ${dept}`,
-            level: lv,
-            dept,
-            bg:    get(row, bgIdx) || dept,
-            fn:    get(row, fnIdx) || dept,
-            location: get(row, locIdx) || "Unknown",
-            country:  get(row, countryIdx) || "—",
-            employmentType: get(row, empTypeIdx) || "FTE",
-            managerId: mgr || null,
-            isManager: /^(true|1|yes|y)$/i.test(get(row, isMgrIdx)),
-            tenureYears: parseFloat(get(row, tenureIdx)) || 0,
-            status: get(row, statusIdx) || "Active",
-            startDate: get(row, startIdx) || null,
-            endDate:   get(row, endIdx)   || null,
-            costCenter: get(row, ccIdx) || null,
-            band:       get(row, bandIdx) || null,
-          });
-        }
-        if (out.length === 0) throw new Error("No valid employee rows found");
-
-        // Drop manager refs to ids we don't have, and break self-loops
-        let orphaned = 0;
-        out.forEach(e => {
-          if (e.managerId && !seenIds.has(e.managerId)) { e.managerId = null; orphaned++; }
-          if (e.id === e.managerId) { e.managerId = null; orphaned++; }
-        });
-
-        // Break reporting cycles by detaching the deeper end so the graph forms a forest
-        const idMap = new Map(out.map(e => [e.id, e]));
-        let cyclesBroken = 0;
-        out.forEach(e => {
-          const seen = new Set();
-          let cur = e;
-          while (cur && cur.managerId) {
-            if (seen.has(cur.id)) { e.managerId = null; cyclesBroken++; break; }
-            seen.add(cur.id);
-            cur = idMap.get(cur.managerId);
-          }
-        });
-
-        setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(employees))]);
-        setEmployees(out);
-        setSelectedNode(null); setDetailPanel(null); setFocusRoot(null);
-        setExpandedNodes(new Set()); setInsightHighlightIds(new Set()); setChainFilterId(null);
-        const notes = [];
-        if (dupIds)       notes.push(`${dupIds} duplicate id${dupIds>1?"s":""} skipped`);
-        if (badLv)        notes.push(`${badLv} unknown level${badLv>1?"s":""} skipped`);
-        if (blankRows)    notes.push(`${blankRows} blank row${blankRows>1?"s":""} skipped`);
-        if (orphaned)     notes.push(`${orphaned} bad manager ref${orphaned>1?"s":""} reset to root`);
-        if (cyclesBroken) notes.push(`${cyclesBroken} reporting cycle${cyclesBroken>1?"s":""} broken`);
-        alert(`Imported ${out.length} employee${out.length>1?"s":""}.${notes.length ? "\n• " + notes.join("\n• ") : ""}`);
-      } catch (err) { alert("Could not parse employees CSV: " + err.message); }
-    };
-    reader.readAsText(file);
-  }
-
-  // Pipeline config — currently the user-editable piece is just the stage order, persisted in
-  // localStorage by ProductPipelineView. Export wraps it with a version tag so future fields
-  // (custom GA targets, custom stage definitions) can extend without breaking older imports.
-  function exportPipelineConfig() {
-    let stageOrder = null;
-    try {
-      const saved = JSON.parse(localStorage.getItem("orgSimStageOrder") || "null");
-      if (Array.isArray(saved)) stageOrder = saved;
-    } catch {}
-    const payload = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      stageOrder: stageOrder || DEFAULT_PIPELINE_STAGES.map(s => s.id),
-      gaTargets: STAGE_CAT_GA_TARGET,
-    };
-    downloadFile(`pipeline-config-${new Date().toISOString().slice(0,10)}.json`,
-      JSON.stringify(payload, null, 2), "application/json");
-  }
-  function importPipelineConfig(file) {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (!Array.isArray(data?.stageOrder)) throw new Error("Missing stageOrder array");
-        const validIds = new Set(DEFAULT_PIPELINE_STAGES.map(s => s.id));
-        const filtered = data.stageOrder.filter(id => validIds.has(id));
-        if (filtered.length !== DEFAULT_PIPELINE_STAGES.length) {
-          throw new Error(`stageOrder must contain all ${DEFAULT_PIPELINE_STAGES.length} known stage ids`);
-        }
-        try { localStorage.setItem("orgSimStageOrder", JSON.stringify(filtered)); } catch {}
-        alert("Pipeline order imported. Reload or revisit the Pipeline tab to see the change.");
-      } catch (err) { alert("Could not parse pipeline config: " + err.message); }
-    };
-    reader.readAsText(file);
-  }
-
-  // Scenarios — export+import the full snapshot list so users can save off what-if scenarios
-  // and reload them later (or share with a teammate).
-  function exportScenarios() {
-    downloadFile(`scenarios-${new Date().toISOString().slice(0,10)}.json`,
-      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), scenarios }, null, 2),
-      "application/json");
-  }
-  function importScenarios(file) {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (!Array.isArray(data?.scenarios)) throw new Error("Missing scenarios array");
-        const cleaned = data.scenarios
-          .filter(s => s && typeof s.name === "string")
-          .map(s => ({
-            name: s.name.slice(0, 80),
-            data: Array.isArray(s.data) ? s.data : null,
-          }));
-        if (cleaned.length === 0) throw new Error("No valid scenarios found");
-        setScenarios(cleaned);
-        alert(`Imported ${cleaned.length} scenario${cleaned.length>1?"s":""}.`);
-      } catch (err) { alert("Could not parse scenarios JSON: " + err.message); }
     };
     reader.readAsText(file);
   }
@@ -7873,6 +7709,170 @@ function OrgChartApp() {
     if (focusRoot && tree.map[focusRoot]) return tree.map[focusRoot];
     return tree.root;
   }, [focusRoot, tree]);
+
+  // Import a full employee dataset from CSV. Mirrors the export shape so users can round-trip:
+  // export → tweak in Excel → re-import. Required columns: id, first, last, level, dept, managerId.
+  // Unknown manager refs are reset to root and reporting cycles are broken so the org always
+  // forms a valid forest. Replaces the current employees array (push to undo stack first).
+  function importEmployeesCSV(file) {
+    if (!confirm("Import will REPLACE the current employee dataset. Continue? (Ctrl+Z will undo.)")) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const rows = parseCSV(String(ev.target.result || ""));
+        if (rows.length < 2) throw new Error("File has no data rows");
+        const header = rows[0].map(c => c.trim());
+        const headerLc = header.map(c => c.toLowerCase());
+        const idx = (name) => headerLc.indexOf(name);
+        const required = ["id","first","last","level","dept","managerid"];
+        const missing = required.filter(n => idx(n) < 0);
+        if (missing.length) throw new Error("Missing required column(s): " + missing.join(", "));
+
+        const get = (row, i) => i >= 0 ? (row[i] ?? "").toString().trim() : "";
+        const validLevels = new Set(ALL_DISPLAY_LEVELS);
+        const idIdx = idx("id"), fnameIdx = idx("first"), lnameIdx = idx("last");
+        const titleIdx = idx("title"), deptIdx = idx("dept"), bgIdx = idx("bg"), fnIdx = idx("fn");
+        const levelIdx = idx("level"), locIdx = idx("location"), countryIdx = idx("country");
+        const empTypeIdx = idx("employmenttype"), mgrIdx = idx("managerid");
+        const isMgrIdx = idx("ismanager"), tenureIdx = idx("tenureyears");
+        const statusIdx = idx("status"), startIdx = idx("startdate"), endIdx = idx("enddate");
+        const ccIdx = idx("costcenter"), bandIdx = idx("band");
+
+        const out = [];
+        const seenIds = new Set();
+        let dupIds = 0, badLv = 0, blankRows = 0;
+        for (let r = 1; r < rows.length; r++) {
+          const row = rows[r];
+          const id = get(row, idIdx);
+          if (!id) { blankRows++; continue; }
+          if (seenIds.has(id)) { dupIds++; continue; }
+          const lv = get(row, levelIdx).toUpperCase();
+          if (!validLevels.has(lv)) { badLv++; continue; }
+          seenIds.add(id);
+          const dept = get(row, deptIdx);
+          const mgr = get(row, mgrIdx);
+          out.push({
+            id,
+            first: get(row, fnameIdx),
+            last:  get(row, lnameIdx),
+            title: get(row, titleIdx) || `${lv} ${dept}`,
+            level: lv,
+            dept,
+            bg:    get(row, bgIdx) || dept,
+            fn:    get(row, fnIdx) || dept,
+            location: get(row, locIdx) || "Unknown",
+            country:  get(row, countryIdx) || "—",
+            employmentType: get(row, empTypeIdx) || "FTE",
+            managerId: mgr || null,
+            isManager: /^(true|1|yes|y)$/i.test(get(row, isMgrIdx)),
+            tenureYears: parseFloat(get(row, tenureIdx)) || 0,
+            status: get(row, statusIdx) || "Active",
+            startDate: get(row, startIdx) || null,
+            endDate:   get(row, endIdx)   || null,
+            costCenter: get(row, ccIdx) || null,
+            band:       get(row, bandIdx) || null,
+          });
+        }
+        if (out.length === 0) throw new Error("No valid employee rows found");
+
+        // Drop manager refs to ids we don't have, and break self-loops
+        let orphaned = 0;
+        out.forEach(e => {
+          if (e.managerId && !seenIds.has(e.managerId)) { e.managerId = null; orphaned++; }
+          if (e.id === e.managerId) { e.managerId = null; orphaned++; }
+        });
+
+        // Break reporting cycles by detaching the deeper end so the graph forms a forest
+        const idMap = new Map(out.map(e => [e.id, e]));
+        let cyclesBroken = 0;
+        out.forEach(e => {
+          const seen = new Set();
+          let cur = e;
+          while (cur && cur.managerId) {
+            if (seen.has(cur.id)) { e.managerId = null; cyclesBroken++; break; }
+            seen.add(cur.id);
+            cur = idMap.get(cur.managerId);
+          }
+        });
+
+        setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(employees))]);
+        setEmployees(out);
+        setSelectedNode(null); setDetailPanel(null); setFocusRoot(null);
+        setExpandedNodes(new Set()); setInsightHighlightIds(new Set()); setChainFilterId(null);
+        const notes = [];
+        if (dupIds)       notes.push(`${dupIds} duplicate id${dupIds>1?"s":""} skipped`);
+        if (badLv)        notes.push(`${badLv} unknown level${badLv>1?"s":""} skipped`);
+        if (blankRows)    notes.push(`${blankRows} blank row${blankRows>1?"s":""} skipped`);
+        if (orphaned)     notes.push(`${orphaned} bad manager ref${orphaned>1?"s":""} reset to root`);
+        if (cyclesBroken) notes.push(`${cyclesBroken} reporting cycle${cyclesBroken>1?"s":""} broken`);
+        alert(`Imported ${out.length} employee${out.length>1?"s":""}.${notes.length ? "\n• " + notes.join("\n• ") : ""}`);
+      } catch (err) { alert("Could not parse employees CSV: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+
+  // Pipeline config — currently the user-editable piece is just the stage order, persisted in
+  // localStorage by ProductPipelineView. Export wraps it with a version tag so future fields
+  // (custom GA targets, custom stage definitions) can extend without breaking older imports.
+  function exportPipelineConfig() {
+    let stageOrder = null;
+    try {
+      const saved = JSON.parse(localStorage.getItem("orgSimStageOrder") || "null");
+      if (Array.isArray(saved)) stageOrder = saved;
+    } catch {}
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      stageOrder: stageOrder || DEFAULT_PIPELINE_STAGES.map(s => s.id),
+      gaTargets: STAGE_CAT_GA_TARGET,
+    };
+    downloadFile(`pipeline-config-${new Date().toISOString().slice(0,10)}.json`,
+      JSON.stringify(payload, null, 2), "application/json");
+  }
+  function importPipelineConfig(file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!Array.isArray(data?.stageOrder)) throw new Error("Missing stageOrder array");
+        const validIds = new Set(DEFAULT_PIPELINE_STAGES.map(s => s.id));
+        const filtered = data.stageOrder.filter(id => validIds.has(id));
+        if (filtered.length !== DEFAULT_PIPELINE_STAGES.length) {
+          throw new Error(`stageOrder must contain all ${DEFAULT_PIPELINE_STAGES.length} known stage ids`);
+        }
+        try { localStorage.setItem("orgSimStageOrder", JSON.stringify(filtered)); } catch {}
+        alert("Pipeline order imported. Reload or revisit the Pipeline tab to see the change.");
+      } catch (err) { alert("Could not parse pipeline config: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+
+  // Scenarios — export+import the full snapshot list so users can save off what-if scenarios
+  // and reload them later (or share with a teammate).
+  function exportScenarios() {
+    downloadFile(`scenarios-${new Date().toISOString().slice(0,10)}.json`,
+      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), scenarios }, null, 2),
+      "application/json");
+  }
+  function importScenarios(file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!Array.isArray(data?.scenarios)) throw new Error("Missing scenarios array");
+        const cleaned = data.scenarios
+          .filter(s => s && typeof s.name === "string")
+          .map(s => ({
+            name: s.name.slice(0, 80),
+            data: Array.isArray(s.data) ? s.data : null,
+          }));
+        if (cleaned.length === 0) throw new Error("No valid scenarios found");
+        setScenarios(cleaned);
+        alert(`Imported ${cleaned.length} scenario${cleaned.length>1?"s":""}.`);
+      } catch (err) { alert("Could not parse scenarios JSON: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
 
   // Build context value — new object each render is fine; components re-render but don't remount
   const ctxValue = {
