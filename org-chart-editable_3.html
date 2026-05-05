@@ -4,8 +4,10 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Org Chart Simulator</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';"/>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob: https://api.anthropic.com; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';"/>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Patrick+Hand&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
 </head>
 <body>
   <div id="root"></div>
@@ -28,10 +30,11 @@
   <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"
           integrity="sha384-EIcs2MbARRLcLs7Gv2wqqhhfMlcLeW9yuJsWki1r5iveN1F5gpzHOwAKycJqSQOI"
           crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext, memo } = React;
 const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, AreaChart, Area, CartesianGrid, Legend, ReferenceLine } = Recharts;
-const { Search, ChevronDown, ChevronRight, Users, Building2, MapPin, TrendingUp, AlertTriangle, MessageSquare, GripVertical, Play, Pause, SkipBack, SkipForward, Download, Plus, Eye, EyeOff, Filter, BarChart3, Clock, Zap, Target, Layers, Globe, ChevronLeft, X, Check, Flag, Edit3, Trash2, Move, ArrowRight, Info, AlertCircle, Activity, GitMerge, AlertOctagon, UserPlus, Minus } = LucideReact;
+const { Search, ChevronDown, ChevronRight, Users, Building2, MapPin, TrendingUp, AlertTriangle, MessageSquare, GripVertical, Play, Pause, SkipBack, SkipForward, Download, Plus, Eye, EyeOff, Filter, BarChart3, Clock, Zap, Target, Layers, Globe, ChevronLeft, X, Check, Flag, Edit3, Trash2, Move, ArrowRight, Info, AlertCircle, Activity, GitMerge, AlertOctagon, UserPlus, Minus, Printer, Sparkles, FileText } = LucideReact;
 
 
 
@@ -1963,6 +1966,7 @@ const MODE_LEVEL = { simple: 0, advanced: 1, expert: 2 };
 function atLeast(current, required) { return MODE_LEVEL[current] >= MODE_LEVEL[required]; }
 // Minimum mode required to display each view — used to redirect on mode downgrade
 const VIEW_MIN_MODE = { "org-chart": "simple", "timeline": "advanced", "dashboards": "advanced", "scenarios": "advanced", "headcount": "advanced", "analytics": "advanced", "flight-risk": "advanced", "pipeline": "expert" };
+const VIEW_LABEL = { "org-chart": "Org Chart", "timeline": "Timeline", "dashboards": "Dashboards", "scenarios": "Scenarios", "headcount": "Headcount Plan", "analytics": "Analytics", "flight-risk": "Flight Risk", "pipeline": "Product Pipeline" };
 
 const MODE_META = {
   simple:   { label: "Simple",   color: "#2563eb", desc: "Org chart & people search" },
@@ -2073,6 +2077,609 @@ function generateInitialAnnotations(employees, tree, flightRisks) {
 }
 
 const AppCtx = createContext(null);
+
+// Inline help dot — only renders when tutorialMode is on. Hover shows the explanation
+// in the existing dark Tip tooltip. Use width="auto" for short blurbs that should not
+// wrap, or pass a number/CSS length when the text is long enough to need wrapping.
+function Help({ text, side = "top", width = 260 }) {
+  const ctx = useContext(AppCtx);
+  if (!ctx?.tutorialMode || !text) return null;
+  const w = typeof width === "number" ? `${width}px` : width;
+  return (
+    <Tip text={text} side={side} width={w}>
+      <span
+        role="img"
+        aria-label="Help"
+        className="inline-flex items-center justify-center w-4 h-4 ml-1 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold cursor-help hover:bg-blue-200 transition-colors align-middle"
+        style={{ lineHeight: 1 }}>
+        ?
+      </span>
+    </Tip>
+  );
+}
+
+// Cmd/Ctrl+K command palette: fuzzy search across name, title, dept, location, id.
+// Listens to its own keydown (arrow nav, Enter, Esc) and is opened/closed via context.
+function CommandPalette() {
+  const ctx = useContext(AppCtx);
+  const [q, setQ] = useState("");
+  const [idx, setIdx] = useState(0);
+  const inputRef = useRef(null);
+
+  // Reset state every time the palette opens
+  useEffect(() => {
+    if (ctx?.cmdkOpen) { setQ(""); setIdx(0); setTimeout(() => inputRef.current?.focus(), 10); }
+  }, [ctx?.cmdkOpen]);
+
+  const matches = useMemo(() => {
+    if (!ctx) return [];
+    const employees = ctx.activeEmployees || [];
+    if (!q) return employees.slice(0, 8); // Default: first few people
+    const lq = q.toLowerCase();
+    return employees.map(e => {
+      const name = `${e.first} ${e.last}`.toLowerCase();
+      let s = 0;
+      if (name === lq)              s += 200;
+      else if (name.startsWith(lq)) s += 120;
+      else if (name.includes(lq))   s += 60;
+      if (e.title?.toLowerCase().includes(lq))    s += 35;
+      if (e.dept?.toLowerCase() === lq)           s += 80;
+      else if (e.dept?.toLowerCase().includes(lq)) s += 25;
+      if (e.location?.toLowerCase().includes(lq)) s += 20;
+      if (e.id?.toLowerCase().includes(lq))       s += 15;
+      if (e.level?.toLowerCase() === lq)          s += 30;
+      return { e, s };
+    }).filter(r => r.s > 0).sort((a, b) => b.s - a.s).slice(0, 12);
+  }, [q, ctx?.activeEmployees, ctx]);
+
+  if (!ctx?.cmdkOpen) return null;
+
+  const close = () => ctx.setCmdkOpen(false);
+  const pick = (e) => { ctx.setView("org-chart"); ctx.navigateTo(e.id); close(); };
+
+  const onKey = (ev) => {
+    if (ev.key === "Escape")    { ev.preventDefault(); close(); return; }
+    if (ev.key === "ArrowDown") { ev.preventDefault(); setIdx(i => Math.min(i + 1, matches.length - 1)); return; }
+    if (ev.key === "ArrowUp")   { ev.preventDefault(); setIdx(i => Math.max(i - 1, 0)); return; }
+    if (ev.key === "Enter")     { ev.preventDefault(); const m = matches[idx]; if (m) pick(m.e || m); return; }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[10vh]"
+      style={{ background: "rgba(15, 23, 42, 0.55)", backdropFilter: "blur(4px)" }}
+      onClick={close}>
+      <div
+        className="w-full max-w-xl mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+        style={{ maxHeight: "70vh" }}
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+          <Search size={16} className="text-gray-400 shrink-0"/>
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={e => { setQ(e.target.value); setIdx(0); }}
+            onKeyDown={onKey}
+            placeholder="Search by name, title, department, location, level, or ID…"
+            className="flex-1 text-sm focus:outline-none bg-transparent"/>
+          <span className="text-[10px] text-gray-400 px-1.5 py-0.5 border border-gray-200 rounded font-mono">esc</span>
+        </div>
+        <div className="overflow-y-auto flex-1">
+          {matches.length === 0 && q && (
+            <div className="px-4 py-8 text-center text-xs text-gray-400">
+              No people match "{q}".
+            </div>
+          )}
+          {matches.length === 0 && !q && (
+            <div className="px-4 py-8 text-center text-xs text-gray-400">
+              Start typing to search across {ctx.activeEmployees?.length || 0} people.
+            </div>
+          )}
+          {matches.map((m, i) => {
+            const e = m.e || m;
+            const active = i === idx;
+            return (
+              <button
+                key={e.id}
+                onMouseEnter={() => setIdx(i)}
+                onClick={() => pick(e)}
+                className={`w-full text-left px-4 py-2 flex items-center gap-3 transition-colors ${active ? "bg-blue-50" : "hover:bg-gray-50"}`}>
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                  style={{ background: DEPT_COLORS[e.dept] || "#64748b" }}>
+                  {e.first?.[0] || ""}{e.last?.[0] || ""}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-800 truncate">{e.first} {e.last}</div>
+                  <div className="text-xs text-gray-500 truncate">{e.title} · {e.dept} · {e.location}</div>
+                </div>
+                <span className="text-[9px] font-mono text-gray-400 shrink-0">{e.level}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="px-4 py-2 border-t border-gray-100 flex items-center gap-4 text-[10px] text-gray-400">
+          <span><span className="font-mono">↑↓</span> navigate</span>
+          <span><span className="font-mono">↵</span> open</span>
+          <span><span className="font-mono">esc</span> close</span>
+          <span className="ml-auto"><span className="font-mono">⌘/Ctrl + K</span> to toggle</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Reorg ripple preview: when the user drags a node onto a new manager, we stash the
+// proposed move in `pendingDrop` and show this modal first instead of committing.
+// Confirm = run the mutation (still pushes undo); Cancel = discard the proposal.
+const DISPLAY_LEVEL_SALARY = {
+  L1: 90000,  L2: 115000, L3: 145000, L4: 185000, L5: 235000, L6: 290000, L7: 360000,
+  M1: 200000, M2: 260000, M3: 320000, M4: 400000,
+  E1: 450000, E2: 550000, E3: 750000,
+};
+const LEVEL_RANK = {
+  L1:1, L2:2, L3:3, L4:4, L5:5, L6:6, L7:7,
+  M1:8, M2:9, M3:10, M4:11,
+  E1:12, E2:13, E3:14,
+};
+function estSalary(lv) { return DISPLAY_LEVEL_SALARY[lv] || 120000; }
+
+function ReorgRipplePreview() {
+  const ctx = useContext(AppCtx);
+  const pending = ctx?.pendingDrop;
+
+  // Memoise ripples so we only walk the employee list when pending changes.
+  const ripples = useMemo(() => {
+    if (!pending || !ctx) return null;
+    const employees = ctx.employees;
+    const byId = new Map(employees.map(e => [e.id, e]));
+    const dragged = byId.get(pending.dragNodeId);
+    const target  = byId.get(pending.targetId);
+    if (!dragged || !target) return null;
+
+    // Walk descendants of dragged
+    const subtreeIds = new Set([dragged.id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      employees.forEach(e => {
+        if (!subtreeIds.has(e.id) && e.managerId && subtreeIds.has(e.managerId)) {
+          subtreeIds.add(e.id); grew = true;
+        }
+      });
+    }
+    const subtree = employees.filter(e => subtreeIds.has(e.id));
+    const directReportsOfDragged = employees.filter(e => e.managerId === dragged.id);
+
+    // Path from target up to root — used to detect dropping on a descendant
+    const ancestorIds = new Set();
+    let cur = target;
+    while (cur) { ancestorIds.add(cur.id); cur = cur.managerId ? byId.get(cur.managerId) : null; }
+    const droppedOnDescendant = ancestorIds.has(dragged.id);
+    const wouldCreateCycle = droppedOnDescendant && !pending.moveAsTeam;
+
+    const oldMgr = dragged.managerId ? byId.get(dragged.managerId) : null;
+    const newMgr = target;
+
+    // Who actually moves: team mode = whole subtree, individual = just dragged node
+    const movedPeople = pending.moveAsTeam ? subtree : [dragged];
+    const movedIds = new Set(movedPeople.map(p => p.id));
+
+    // Span-of-control deltas
+    const oldMgrDirectsBefore  = oldMgr ? employees.filter(e => e.managerId === oldMgr.id).length : 0;
+    const newMgrDirectsBefore  = employees.filter(e => e.managerId === newMgr.id).length;
+    let oldMgrDirectsAfter, newMgrDirectsAfter;
+    if (pending.moveAsTeam) {
+      // Team: only the dragged node itself was a direct report; subtree members keep their parents
+      oldMgrDirectsAfter = oldMgr ? oldMgrDirectsBefore - 1 : 0;
+      newMgrDirectsAfter = newMgrDirectsBefore + 1;
+    } else {
+      // Individual: dragged moves alone, his/her direct reports roll up to old manager
+      oldMgrDirectsAfter = oldMgr ? (oldMgrDirectsBefore - 1 + directReportsOfDragged.length) : 0;
+      newMgrDirectsAfter = newMgrDirectsBefore + 1;
+    }
+
+    // Cross-department transfers: moved people whose dept != new manager's dept
+    const crossDept = movedPeople.filter(p => p.dept !== newMgr.dept);
+
+    // Budget moved
+    const budget = movedPeople.reduce((sum, p) => sum + estSalary(p.level), 0);
+
+    // Warnings
+    const warnings = [];
+    if (wouldCreateCycle) warnings.push({ kind: "block", text: "Cannot drop a manager onto their own descendant in individual mode — would create a cycle. Hold Shift or use team mode to swap superior↔subordinate." });
+    if (newMgrDirectsAfter > 12 && !wouldCreateCycle) warnings.push({ kind: "warn", text: `${newMgr.first} ${newMgr.last} would have ${newMgrDirectsAfter} direct reports — above the 8-12 healthy span.` });
+    const draggedRank = LEVEL_RANK[dragged.level] ?? 0;
+    const newMgrRank  = LEVEL_RANK[newMgr.level]  ?? 0;
+    if (draggedRank >= newMgrRank) warnings.push({ kind: "warn", text: `Level inversion: ${dragged.first} (${dragged.level}) reporting to ${newMgr.first} (${newMgr.level}). Usually a smell unless this is a temporary acting role.` });
+    if (crossDept.length > 0) warnings.push({ kind: "info", text: `${crossDept.length} ${crossDept.length === 1 ? "person changes" : "people change"} departments (→ ${newMgr.dept}). Update titles/bands separately if needed.` });
+
+    return {
+      dragged, target, oldMgr, newMgr,
+      subtree, directReportsOfDragged,
+      movedPeople, crossDept, budget,
+      oldMgrDirectsBefore, oldMgrDirectsAfter,
+      newMgrDirectsBefore, newMgrDirectsAfter,
+      warnings, wouldCreateCycle,
+      moveAsTeam: pending.moveAsTeam,
+    };
+  }, [pending, ctx?.employees]);
+
+  if (!pending || !ripples) return null;
+
+  const { dragged, oldMgr, newMgr, movedPeople, crossDept, budget,
+          oldMgrDirectsBefore, oldMgrDirectsAfter, newMgrDirectsBefore, newMgrDirectsAfter,
+          warnings, wouldCreateCycle, moveAsTeam } = ripples;
+
+  const Stat = ({ label, before, after, suffix = "" }) => {
+    const delta = after - before;
+    const color = delta > 0 ? "text-emerald-600" : delta < 0 ? "text-rose-600" : "text-gray-400";
+    const arrow = delta > 0 ? "↑" : delta < 0 ? "↓" : "·";
+    return (
+      <div className="flex items-center justify-between text-xs py-1.5">
+        <span className="text-gray-600">{label}</span>
+        <span className="flex items-center gap-2">
+          <span className="font-mono text-gray-400">{before}{suffix}</span>
+          <span className="text-gray-300">→</span>
+          <span className="font-mono font-bold text-gray-900">{after}{suffix}</span>
+          <span className={`text-[10px] font-semibold ${color}`}>{arrow}{Math.abs(delta)}</span>
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+      style={{ background: "rgba(15, 23, 42, 0.55)", backdropFilter: "blur(4px)" }}
+      onClick={ctx.cancelDrop}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] overflow-y-auto flex flex-col"
+        onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-gray-100 flex items-start gap-3">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0"
+               style={{ background: DEPT_COLORS[dragged.dept] || "#64748b" }}>
+            {dragged.first?.[0]}{dragged.last?.[0]}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm text-gray-500">Reorg preview</div>
+            <div className="text-base font-bold text-gray-900">
+              Move {dragged.first} {dragged.last} {moveAsTeam && <span className="text-xs font-normal text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded ml-1">+ team</span>} →
+            </div>
+            <div className="text-sm text-gray-700 mt-0.5">
+              {oldMgr ? <>From <b>{oldMgr.first} {oldMgr.last}</b> ({oldMgr.dept})</> : <>From <b>top-level</b></>} → To <b>{newMgr.first} {newMgr.last}</b> ({newMgr.dept})
+            </div>
+          </div>
+          <button onClick={ctx.cancelDrop} className="text-gray-400 hover:text-gray-700 text-xl leading-none px-2">×</button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 grid grid-cols-2 gap-5">
+          {/* Span-of-control */}
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">Span of control</h3>
+            <div className="bg-gray-50 rounded-lg p-3">
+              {oldMgr && <Stat label={`${oldMgr.first}'s direct reports`} before={oldMgrDirectsBefore} after={oldMgrDirectsAfter} />}
+              <Stat label={`${newMgr.first}'s direct reports`} before={newMgrDirectsBefore} after={newMgrDirectsAfter} />
+            </div>
+            {!moveAsTeam && (
+              <div className="text-[10px] text-gray-400 mt-1.5">
+                Individual move: {dragged.first}'s direct reports roll up to their previous manager.
+              </div>
+            )}
+          </div>
+
+          {/* People moving */}
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">
+              People moving · {movedPeople.length}
+            </h3>
+            <div className="bg-gray-50 rounded-lg p-3 max-h-32 overflow-y-auto">
+              {movedPeople.slice(0, 12).map(p => (
+                <div key={p.id} className="flex items-center gap-2 py-1 text-xs">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: DEPT_COLORS[p.dept] || "#64748b" }}/>
+                  <span className="font-medium text-gray-800">{p.first} {p.last}</span>
+                  <span className="text-gray-400 ml-auto font-mono text-[10px]">{p.level}</span>
+                </div>
+              ))}
+              {movedPeople.length > 12 && <div className="text-[10px] text-gray-400 mt-1">+ {movedPeople.length - 12} more</div>}
+            </div>
+          </div>
+
+          {/* Cross-dept transfers */}
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">
+              Cross-dept transfers
+            </h3>
+            <div className="bg-gray-50 rounded-lg p-3">
+              <div className="text-2xl font-bold text-gray-900">{crossDept.length}</div>
+              <div className="text-[11px] text-gray-500 mt-0.5">
+                {crossDept.length === 0 ? "Same department, no transfer." : `Moving into ${newMgr.dept}.`}
+              </div>
+            </div>
+          </div>
+
+          {/* Budget */}
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">
+              Budget moved
+            </h3>
+            <div className="bg-gray-50 rounded-lg p-3">
+              <div className="text-2xl font-bold text-gray-900">{fmtCost(budget)}</div>
+              <div className="text-[11px] text-gray-500 mt-0.5">
+                Estimated annual base · {movedPeople.length} {movedPeople.length === 1 ? "person" : "people"}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Warnings */}
+        {warnings.length > 0 && (
+          <div className="px-5 pb-3 space-y-2">
+            {warnings.map((w, i) => {
+              const styles = w.kind === "block"
+                ? "bg-rose-50 border-rose-200 text-rose-800"
+                : w.kind === "warn"
+                ? "bg-amber-50 border-amber-200 text-amber-900"
+                : "bg-blue-50 border-blue-200 text-blue-900";
+              return (
+                <div key={i} className={`border rounded-lg px-3 py-2 text-xs ${styles}`}>
+                  <span className="font-semibold mr-1.5">{w.kind === "block" ? "Blocked:" : w.kind === "warn" ? "Warning:" : "Note:"}</span>
+                  {w.text}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-end gap-2 mt-auto">
+          <button onClick={ctx.cancelDrop}
+            className="text-sm px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors">
+            Cancel
+          </button>
+          <button onClick={ctx.confirmDrop}
+            disabled={wouldCreateCycle}
+            className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            Confirm move (Ctrl+Z to undo)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Natural-language queries: send the employee dataset to Claude with prompt caching
+// so repeat queries are cheap, then highlight any returned employee IDs on the chart.
+// API key lives only in this browser's localStorage — never sent anywhere except
+// directly to api.anthropic.com.
+function NaturalLanguageQuery() {
+  const ctx = useContext(AppCtx);
+  const [apiKey, setApiKey] = useState(() => {
+    try { return localStorage.getItem("orgSimAnthropicKey") || ""; } catch { return ""; }
+  });
+  const [question, setQuestion] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+  const [history, setHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("orgSimNLHistory") || "[]"); } catch { return []; }
+  });
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (ctx?.nlOpen) {
+      setError(null);
+      setTimeout(() => inputRef.current?.focus(), 10);
+    }
+  }, [ctx?.nlOpen]);
+
+  // Compact employee serialisation: just the fields the model needs to reason. Costs
+  // ~25 tokens per person — 200-person org fits in ~5K tokens, well under context.
+  const employeesAsContext = useMemo(() => {
+    const emps = ctx?.activeEmployees || [];
+    return emps.map(e => `${e.id} | ${e.first} ${e.last} | ${e.title} | ${e.level} | ${e.dept} | ${e.location} | mgr=${e.managerId || "—"}`).join("\n");
+  }, [ctx?.activeEmployees]);
+
+  if (!ctx?.nlOpen) return null;
+
+  const close = () => ctx.setNlOpen(false);
+
+  const saveKey = (k) => {
+    setApiKey(k);
+    try { localStorage.setItem("orgSimAnthropicKey", k); } catch {}
+  };
+  const clearKey = () => {
+    setApiKey("");
+    try { localStorage.removeItem("orgSimAnthropicKey"); } catch {}
+  };
+
+  async function ask() {
+    if (!question.trim() || !apiKey) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-opus-4-7",
+          max_tokens: 4096,
+          thinking: { type: "adaptive" },
+          output_config: {
+            effort: "medium",
+            format: {
+              type: "json_schema",
+              schema: {
+                type: "object",
+                properties: {
+                  answer: { type: "string", description: "Markdown-formatted answer to the user's question. Be concise. Cite specific people by name." },
+                  highlight_ids: { type: "array", items: { type: "string" }, description: "Employee IDs (the leftmost field in the dataset) to visually highlight on the org chart. Empty array if no specific people are relevant." },
+                  focus_id: { type: ["string", "null"], description: "Single employee ID to scroll/focus the org chart on. Use when the answer is about one specific person or one specific subtree. Null otherwise." },
+                },
+                required: ["answer", "highlight_ids", "focus_id"],
+                additionalProperties: false,
+              },
+            },
+          },
+          system: [
+            {
+              type: "text",
+              text: "You are an org analytics assistant for a recruiting/headcount planning tool. Answer questions about the organization concisely and accurately, citing specific people by name when relevant. Use markdown for formatting. When the question is about specific people or a subtree, populate highlight_ids and (if appropriate) focus_id so the UI can show them on the chart. The data format is one employee per line: `id | first last | title | level | dept | location | mgr=managerId`.",
+            },
+            {
+              type: "text",
+              text: `Current org dataset (${(ctx.activeEmployees || []).length} active people):\n\n${employeesAsContext}`,
+              cache_control: { type: "ephemeral" },
+            },
+          ],
+          messages: [{ role: "user", content: question }],
+        }),
+      });
+      if (!resp.ok) {
+        const errText = await resp.text();
+        let msg = `API error ${resp.status}`;
+        try { msg = JSON.parse(errText)?.error?.message || msg; } catch {}
+        throw new Error(msg);
+      }
+      const data = await resp.json();
+      const textBlock = data.content?.find(b => b.type === "text");
+      if (!textBlock?.text) throw new Error("No answer in response");
+      const parsed = JSON.parse(textBlock.text);
+
+      setResult(parsed);
+      const next = [{ q: question, ts: Date.now() }, ...history].slice(0, 8);
+      setHistory(next);
+      try { localStorage.setItem("orgSimNLHistory", JSON.stringify(next)); } catch {}
+
+      // Apply highlights on the chart
+      if (parsed.highlight_ids?.length) {
+        const valid = parsed.highlight_ids.filter(id => ctx.tree.map[id]);
+        ctx.setInsightHighlightIds(new Set(valid));
+      }
+      if (parsed.focus_id && ctx.tree.map[parsed.focus_id]) {
+        ctx.setView("org-chart");
+        ctx.navigateTo(parsed.focus_id);
+      }
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const onKey = (e) => {
+    if (e.key === "Escape") { close(); return; }
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ask(); return; }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[8vh]"
+      style={{ background: "rgba(15, 23, 42, 0.55)", backdropFilter: "blur(4px)" }}
+      onClick={close}>
+      <div
+        className="w-full max-w-2xl mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+        style={{ maxHeight: "82vh" }}
+        onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+          <Sparkles size={16} className="text-violet-600"/>
+          <div className="font-semibold text-sm text-gray-900">Ask the org</div>
+          <span className="text-[10px] text-gray-400 ml-2">powered by Claude Opus 4.7</span>
+          <button onClick={close} className="ml-auto text-gray-400 hover:text-gray-700 text-xl leading-none px-2">×</button>
+        </div>
+
+        {/* API key gate */}
+        {!apiKey ? (
+          <div className="px-5 py-5 space-y-3">
+            <div className="text-sm text-gray-700">
+              Paste your <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" className="text-blue-600 underline">Anthropic API key</a> to enable natural-language queries.
+            </div>
+            <div className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded p-2">
+              Your key is stored only in this browser's <code>localStorage</code> and sent directly to <code>api.anthropic.com</code>. Nothing else sees it. Clear it any time below.
+            </div>
+            <input
+              type="password"
+              placeholder="sk-ant-..."
+              autoFocus
+              onKeyDown={e => { if (e.key === "Enter" && e.target.value.startsWith("sk-")) saveKey(e.target.value.trim()); }}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+            <div className="text-[11px] text-gray-400">Press <span className="font-mono">Enter</span> to save.</div>
+          </div>
+        ) : (
+          <>
+            {/* Question input */}
+            <div className="px-5 py-3 border-b border-gray-100">
+              <textarea
+                ref={inputRef}
+                value={question}
+                onChange={e => setQuestion(e.target.value)}
+                onKeyDown={onKey}
+                placeholder="e.g. Who reports to Maya transitively? · Single points of failure in Hsinchu · Compare engineering early-career mix to product"
+                rows={3}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"/>
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  onClick={ask}
+                  disabled={loading || !question.trim()}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
+                  <Sparkles size={12}/>
+                  {loading ? "Thinking..." : "Ask"}
+                </button>
+                <span className="text-[10px] text-gray-400">⌘/Ctrl + Enter to submit</span>
+                <button onClick={clearKey} className="ml-auto text-[10px] text-gray-400 hover:text-rose-600">Clear API key</button>
+              </div>
+            </div>
+
+            {/* Output */}
+            <div className="overflow-y-auto flex-1 px-5 py-4 text-sm">
+              {error && (
+                <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded p-3 text-xs">
+                  <b>Error:</b> {error}
+                </div>
+              )}
+              {loading && (
+                <div className="text-gray-400 text-xs italic">Querying Claude — adaptive thinking, prompt caching enabled…</div>
+              )}
+              {result && !loading && (
+                <div className="space-y-3">
+                  <div className="prose prose-sm max-w-none text-gray-800 whitespace-pre-wrap">{result.answer}</div>
+                  {result.highlight_ids?.length > 0 && (
+                    <div className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded p-2">
+                      Highlighted <b>{result.highlight_ids.length}</b> {result.highlight_ids.length === 1 ? "person" : "people"} on the org chart.
+                      {result.focus_id && <> Scrolled to <b>{ctx.tree.map[result.focus_id]?.first} {ctx.tree.map[result.focus_id]?.last}</b>.</>}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!result && !loading && !error && history.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-2">Recent queries</div>
+                  <div className="space-y-1">
+                    {history.map((h, i) => (
+                      <button key={i} onClick={() => setQuestion(h.q)}
+                        className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-gray-50 text-gray-600 truncate">
+                        {h.q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ─── COMPENSATION MODEL ───
 const LEVEL_SALARY = {
@@ -3965,13 +4572,18 @@ function ScenarioView() {
 
   return (
     <div className="p-6 h-full overflow-y-auto" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-      <h2 className="text-xl font-bold text-gray-900 mb-1">What-If Scenarios</h2>
-      <div className="flex gap-1 mb-5 border-b border-gray-100 pb-2">
+      <h2 className="text-xl font-bold text-gray-900 mb-1 flex items-center">
+        What-If Scenarios
+        <Help text="Snapshot the current employee dataset, branch into alternates (reorg, cuts, M&A), then compare side-by-side with Compare/Diff. Editing a scenario does not touch your other scenarios." side="bottom" />
+      </h2>
+      <div className="flex gap-1 mb-5 border-b border-gray-100 pb-2 items-center">
         {STABS.map(t => (
-          <button key={t.id} onClick={() => setScenarioTab(t.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors ${scenarioTab === t.id ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}>
-            <t.icon size={12}/>{t.label}
-          </button>
+          <div key={t.id} className="flex items-center">
+            <button onClick={() => setScenarioTab(t.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors ${scenarioTab === t.id ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}>
+              <t.icon size={12}/>{t.label}
+            </button>
+          </div>
         ))}
       </div>
 
@@ -3979,7 +4591,7 @@ function ScenarioView() {
       {scenarioTab === "scenarios" && (
         <>
           <p className="text-sm text-gray-500 mb-4">Create alternate org structures without affecting your base data.</p>
-          <div className="flex gap-2 mb-3 flex-wrap">
+          <div className="flex gap-2 mb-3 flex-wrap items-center">
             <input value={scenarioNewName} onChange={e => setScenarioNewName(e.target.value)} placeholder="New scenario name..." className="text-sm border border-gray-200 rounded-lg px-3 py-2 flex-1 min-w-[200px] focus:outline-none focus:ring-2 focus:ring-blue-500"/>
             <button onClick={() => {
               if (scenarioNewName.trim()) {
@@ -3988,8 +4600,9 @@ function ScenarioView() {
                 setScenarioNewName("");
               }
             }} className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">Create</button>
+            <Help text="Forks the current employee list into a named snapshot. Click any scenario in the list below to switch into it; your edits go into that snapshot." />
           </div>
-          <div className="flex gap-2 mb-5 flex-wrap">
+          <div className="flex gap-2 mb-5 flex-wrap items-center">
             <button onClick={exportScenarios} title="Export all scenarios as JSON" className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1.5">
               <Download size={12}/>Export scenarios
             </button>
@@ -3998,6 +4611,7 @@ function ScenarioView() {
               <input type="file" accept=".json,application/json" className="hidden"
                 onChange={e => { const f = e.target.files?.[0]; if (f) importScenarios(f); e.target.value = ""; }}/>
             </label>
+            <Help text="Saves every scenario (including all employee snapshots) to a JSON file. Import on another browser or share with a teammate. Importing REPLACES your current scenario list." />
           </div>
           <div className="space-y-2 mb-5">
             {scenarios.map((s, i) => (
@@ -4928,19 +5542,22 @@ function HeadcountPlanningView() {
       </div>
 
       {/* Tab strip */}
-      <div className="flex gap-1 mb-4 border-b border-gray-100 pb-2">
+      <div className="flex gap-1 mb-4 border-b border-gray-100 pb-2 items-center">
         {[
-          { id: "mix",      label: "Mix",                  icon: BarChart3 },
-          { id: "pyramid",  label: "Pyramid by Level",     icon: Layers },
-          { id: "timeline", label: "Timeline",             icon: Clock },
-          { id: "plan",     label: "Headcount Plan",       icon: Target },
-          { id: "early",    label: "Early-Career Program", icon: TrendingUp },
-          { id: "reqs",     label: "Open Reqs",            icon: Flag },
+          { id: "mix",      label: "Mix",                  icon: BarChart3,   help: "Per-group current vs projected headcount, early-career vs experienced split, and the bulk distribute panel." },
+          { id: "pyramid",  label: "Pyramid by Level",     icon: Layers,      help: "Stacked bars of headcount by IC/manager/exec level, current vs projected. Spot top-heavy or bottom-heavy shapes." },
+          { id: "timeline", label: "Timeline",             icon: Clock,       help: "Quarterly hire ramp under your plan. Adjust planHorizonQ to lengthen or shorten the rollout." },
+          { id: "plan",     label: "Headcount Plan",       icon: Target,      help: "The raw editable grid: type a delta into any (group, level) cell. This is where Apply distribution writes to." },
+          { id: "early",    label: "Early-Career Program", icon: TrendingUp,  help: "Tune the early-career hire % and intern↔NCG ratio. Drives how many of your hires come from new grads." },
+          { id: "reqs",     label: "Open Reqs",            icon: Flag,        help: "Auto-generated requisitions implied by your plan, attributed to hiring managers. Export to feed your ATS." },
         ].map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors ${tab === t.id ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}>
-            <t.icon size={12}/>{t.label}
-          </button>
+          <div key={t.id} className="flex items-center">
+            <button onClick={() => setTab(t.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors ${tab === t.id ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}>
+              <t.icon size={12}/>{t.label}
+            </button>
+            <Help text={t.help} side="bottom" />
+          </div>
         ))}
       </div>
 
@@ -4964,13 +5581,19 @@ function HeadcountPlanningView() {
       {/* ── Distribute target across groups ── */}
       <div className="bg-white rounded-xl border border-gray-100 p-4 mb-5">
         <div className="flex items-center gap-3 mb-3 flex-wrap">
-          <h3 className="text-sm font-bold text-gray-700">Distribute target across {groupLabel.toLowerCase()}s</h3>
+          <h3 className="text-sm font-bold text-gray-700 flex items-center">
+            Distribute target across {groupLabel.toLowerCase()}s
+            <Help text={`A bulk-edit shortcut: type a single headcount number (positive = hire, negative = cut), pick how to split it, then "Apply distribution" writes the per-group/per-level deltas into your plan. Use this to seed a plan from a top-down target instead of typing each cell by hand. Reset clears the plan back to zero.`} side="bottom" />
+          </h3>
           <span className="text-xs text-gray-400">Spread an overall headcount target across all {groupLabel.toLowerCase()}s, then refine in the table below.</span>
         </div>
         <div className="grid grid-cols-12 gap-3 items-end">
           {/* Total target */}
           <div className="col-span-3">
-            <div className="text-[11px] font-semibold text-gray-600 mb-1">Total HC to add</div>
+            <div className="text-[11px] font-semibold text-gray-600 mb-1 flex items-center">
+              Total HC to add
+              <Help text={`The single number you want to spread. Positive = net hires; negative = net cuts. Click "= +N" to seed it from your 3yr growth target on the Headcount Plan tab.`} />
+            </div>
             <div className="flex items-center gap-2">
               <input type="number" min="-9999" value={distributeTotal}
                 onChange={e => setDistributeTotal(parseInt(e.target.value || "0", 10))}
@@ -4985,7 +5608,10 @@ function HeadcountPlanningView() {
 
           {/* Group split mode */}
           <div className="col-span-3">
-            <div className="text-[11px] font-semibold text-gray-600 mb-1">Spread across {groupLabel.toLowerCase()}s by</div>
+            <div className="text-[11px] font-semibold text-gray-600 mb-1 flex items-center">
+              Spread across {groupLabel.toLowerCase()}s by
+              <Help text={`How the total headcount delta is divided across ${groupLabel.toLowerCase()}s. "Current size" = bigger groups absorb more hires, proportional to today's headcount. "Even" = each group gets roughly the same delta regardless of size.`} />
+            </div>
             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
               <button onClick={() => setDistributeMode("proportional")}
                 className={`flex-1 text-xs px-2 py-1 rounded-md transition-colors ${distributeMode === "proportional" ? "bg-white text-blue-700 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
@@ -5000,7 +5626,10 @@ function HeadcountPlanningView() {
 
           {/* Level split mode */}
           <div className="col-span-3">
-            <div className="text-[11px] font-semibold text-gray-600 mb-1">Level mix</div>
+            <div className="text-[11px] font-semibold text-gray-600 mb-1 flex items-center">
+              Level mix
+              <Help text={`Once each group has its hire count, this decides how those hires split across IC/manager/exec levels. "Match org" = mirror today's level pyramid (L1/L2/L3/...) so the shape stays the same. "L3 only" = drop every hire at L3 (the typical mid-career IC level — assumes senior ranks fill via promotion, not external hires).`} />
+            </div>
             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
               <button onClick={() => setDistributeLevelMode("histogram")}
                 title="Spread across levels in the same proportions as the current org"
@@ -5590,7 +6219,10 @@ function HeadcountPlanningView() {
           {/* Hiring calculator */}
           <div className="bg-white rounded-xl border border-gray-100 p-4">
             <div className="flex items-center gap-3 mb-3 flex-wrap">
-              <h3 className="text-sm font-bold text-gray-700">Early-Career Hiring Calculator</h3>
+              <h3 className="text-sm font-bold text-gray-700 flex items-center">
+                Early-Career Hiring Calculator
+                <Help text={`"Early-career" = interns + new-college-grads (NCG) bucketed at L1/L2. Two ways to set the target: "Target Org Mix %" works backwards from the share of total org you want to be early-career. "Target Hiring Mix %" sets the share of *new hires* that come from early-career — easier to plan against if your recruiting team thinks in headcount-per-quarter.`} />
+              </h3>
               <div className="flex items-center gap-1 ml-2 bg-gray-100 rounded-lg p-0.5">
                 <button onClick={() => setEarlyMode("orgMix")}
                   className={`text-xs px-2.5 py-1 rounded-md transition-colors ${earlyMode === "orgMix" ? "bg-white text-emerald-700 font-semibold shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
@@ -6152,6 +6784,360 @@ function DetailPanel() {
             <button onClick={() => setShowAnnotationForm(node.id)} className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors flex items-center gap-1"><Edit3 size={10}/>Add Note</button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── WHITEBOARD ORG VIEW (sketchy hand-drawn chart via rough.js) ───
+function WhiteboardOrgView() {
+  const {
+    chartDisplayRoot, setDetailPanel,
+    getNodeColor, isFiltered,
+    showHotspots, hotspotNodeIds,
+    showFlightRisk, flightRisks,
+  } = useContext(AppCtx);
+  const containerRef = useRef(null);
+  const wrapRef = useRef(null);
+  const svgRef = useRef(null);
+  const [scale, setScale] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [autoFitKey, setAutoFitKey] = useState(0);
+
+  const NODE_W = 220, NODE_H = 74, H_GAP = 32, V_GAP = 90, MARGIN = 60;
+  const [maxDepth, setMaxDepth] = useState(2);
+
+  const layout = useMemo(() => {
+    if (!chartDisplayRoot) return null;
+    const positions = new Map();
+    let truncated = 0;
+    function place(node, x, y, depth) {
+      const kids = (depth >= maxDepth ? [] : (node.children || []));
+      const hidden = (node.children || []).length - kids.length;
+      if (hidden > 0) truncated += hidden;
+      if (kids.length === 0) {
+        positions.set(node.id, { x, y, node, hiddenChildren: hidden });
+        return NODE_W;
+      }
+      let cursor = x;
+      kids.forEach(c => {
+        const w = place(c, cursor, y + NODE_H + V_GAP, depth + 1);
+        cursor += w + H_GAP;
+      });
+      const subtreeW = cursor - x - H_GAP;
+      const cx = x + Math.max(0, (subtreeW - NODE_W) / 2);
+      positions.set(node.id, { x: cx, y, node, hiddenChildren: 0 });
+      return Math.max(subtreeW, NODE_W);
+    }
+    place(chartDisplayRoot, 0, 0, 0);
+    let minX = Infinity, maxX = -Infinity, maxY = 0;
+    positions.forEach(p => {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x + NODE_W);
+      maxY = Math.max(maxY, p.y + NODE_H);
+    });
+    return {
+      positions,
+      width: (maxX - minX) + MARGIN * 2,
+      height: maxY + MARGIN * 2,
+      offsetX: -minX + MARGIN,
+      offsetY: MARGIN,
+      truncated,
+    };
+  }, [chartDisplayRoot, maxDepth]);
+
+  useEffect(() => {
+    if (!layout || !svgRef.current || !window.rough) return;
+    const svgEl = svgRef.current;
+    while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+    const rc = window.rough.svg(svgEl);
+
+    // Edges
+    const edgeGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    layout.positions.forEach(({ node, x, y }) => {
+      const kids = node.children || [];
+      kids.forEach(c => {
+        const cp = layout.positions.get(c.id);
+        if (!cp) return;
+        const x1 = x + layout.offsetX + NODE_W / 2;
+        const y1 = y + layout.offsetY + NODE_H;
+        const x2 = cp.x + layout.offsetX + NODE_W / 2;
+        const y2 = cp.y + layout.offsetY;
+        const midY = (y1 + y2) / 2;
+        const path = `M ${x1},${y1} L ${x1},${midY} L ${x2},${midY} L ${x2},${y2}`;
+        edgeGroup.appendChild(rc.path(path, {
+          stroke: "rgba(40, 30, 20, 0.55)", strokeWidth: 1.4, roughness: 1.7, bowing: 1.4,
+        }));
+      });
+    });
+    svgEl.appendChild(edgeGroup);
+
+    // Department zones (sketchy hachure backgrounds)
+    const byDept = {};
+    layout.positions.forEach(({ node, x, y }) => {
+      const d = node.dept;
+      if (!d) return;
+      (byDept[d] = byDept[d] || []).push({ x, y });
+    });
+    const zoneGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    Object.entries(byDept).forEach(([dept, points]) => {
+      if (points.length < 2) return;
+      const xs = points.map(p => p.x), ys = points.map(p => p.y);
+      const x0 = Math.min(...xs) + layout.offsetX - 14;
+      const x1 = Math.max(...xs) + layout.offsetX + NODE_W + 14;
+      const y0 = Math.min(...ys) + layout.offsetY - 14;
+      const y1 = Math.max(...ys) + layout.offsetY + NODE_H + 18;
+      const color = DEPT_COLORS[dept] || "#64748b";
+      const zone = rc.rectangle(x0, y0, x1 - x0, y1 - y0, {
+        stroke: color, strokeWidth: 1.1, fill: color,
+        fillStyle: "hachure", hachureGap: 16, hachureAngle: -30,
+        fillWeight: 0.5, roughness: 2.2, bowing: 2.0,
+      });
+      Array.from(zone.querySelectorAll("path")).forEach(p => p.setAttribute("opacity", "0.28"));
+      zoneGroup.appendChild(zone);
+    });
+    svgEl.insertBefore(zoneGroup, edgeGroup);
+
+    // Nodes
+    layout.positions.forEach(({ node, x, y, hiddenChildren }) => {
+      const color = getNodeColor(node);
+      const dimmed = !isFiltered(node);
+      const isHotspot = showHotspots && hotspotNodeIds.has(node.id);
+      const fr = showFlightRisk ? (flightRisks?.byEmployee?.[node.id] || flightRisks?.[node.id]) : null;
+      const isDeparted = node.status && node.status !== "Active";
+
+      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      g.setAttribute("transform", `translate(${x + layout.offsetX}, ${y + layout.offsetY})`);
+      g.style.cursor = "pointer";
+      if (dimmed) g.setAttribute("opacity", "0.28");
+      if (isDeparted) g.setAttribute("opacity", "0.45");
+      g.addEventListener("click", (ev) => { ev.stopPropagation(); setDetailPanel(node); });
+
+      const card = rc.rectangle(0, 0, NODE_W, NODE_H, {
+        stroke: color, strokeWidth: 1.8, fill: color,
+        fillStyle: "solid", fillWeight: 1, roughness: 1.5,
+      });
+      Array.from(card.querySelectorAll("path")).forEach(p => {
+        if (p.getAttribute("fill") && p.getAttribute("fill") !== "none") {
+          p.setAttribute("fill-opacity", "0.16");
+        }
+      });
+      g.appendChild(card);
+
+      g.appendChild(rc.line(0, 0, 0, NODE_H, { stroke: color, strokeWidth: 4, roughness: 0.9 }));
+
+      const av = rc.circle(28, NODE_H / 2, 32, {
+        stroke: color, strokeWidth: 1.5, fill: color, fillStyle: "solid", roughness: 1.6,
+      });
+      Array.from(av.querySelectorAll("path")).forEach(p => {
+        if (p.getAttribute("fill") && p.getAttribute("fill") !== "none") {
+          p.setAttribute("fill-opacity", "0.25");
+        }
+      });
+      g.appendChild(av);
+
+      const init = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      init.setAttribute("x", 28); init.setAttribute("y", NODE_H / 2 + 5);
+      init.setAttribute("text-anchor", "middle");
+      init.setAttribute("font-family", "'Caveat', cursive");
+      init.setAttribute("font-size", "19"); init.setAttribute("font-weight", "700");
+      init.setAttribute("fill", color);
+      init.style.pointerEvents = "none";
+      init.textContent = (node.first?.[0] || "") + (node.last?.[0] || "");
+      g.appendChild(init);
+
+      const name = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      name.setAttribute("x", 54); name.setAttribute("y", 26);
+      name.setAttribute("font-family", "'Caveat', cursive");
+      name.setAttribute("font-size", "19"); name.setAttribute("font-weight", "700");
+      name.setAttribute("fill", "#111827");
+      name.style.pointerEvents = "none";
+      name.textContent = `${node.first || ""} ${node.last || ""}`.trim();
+      g.appendChild(name);
+
+      const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      title.setAttribute("x", 54); title.setAttribute("y", 44);
+      title.setAttribute("font-family", "'Patrick Hand', cursive");
+      title.setAttribute("font-size", "13");
+      title.setAttribute("fill", "#4b5563");
+      title.style.pointerEvents = "none";
+      const t = node.title || "";
+      title.textContent = t.length > 28 ? t.slice(0, 26) + "…" : t;
+      g.appendChild(title);
+
+      const tag = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      tag.setAttribute("x", 54); tag.setAttribute("y", 62);
+      tag.setAttribute("font-family", "'Patrick Hand', cursive");
+      tag.setAttribute("font-size", "11");
+      tag.setAttribute("fill", color);
+      tag.style.pointerEvents = "none";
+      tag.textContent = `#${(node.dept || "").toLowerCase()}${node.location ? "  ·  " + node.location.toLowerCase() : ""}`;
+      g.appendChild(tag);
+
+      if (isHotspot) {
+        const flag = rc.circle(NODE_W - 14, 14, 16, {
+          stroke: "#dc2626", strokeWidth: 1.6, fill: "#fecaca",
+          fillStyle: "solid", roughness: 1.6,
+        });
+        g.appendChild(flag);
+        const ex = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        ex.setAttribute("x", NODE_W - 14); ex.setAttribute("y", 18);
+        ex.setAttribute("text-anchor", "middle");
+        ex.setAttribute("font-family", "'Caveat', cursive");
+        ex.setAttribute("font-size", "14"); ex.setAttribute("font-weight", "700");
+        ex.setAttribute("fill", "#991b1b");
+        ex.style.pointerEvents = "none";
+        ex.textContent = "!";
+        g.appendChild(ex);
+      }
+      if (fr && fr.score >= 60) {
+        const ring = rc.rectangle(-3, -3, NODE_W + 6, NODE_H + 6, {
+          stroke: "#f97316", strokeWidth: 1.4, roughness: 2.0,
+        });
+        g.appendChild(ring);
+      }
+
+      if (hiddenChildren > 0) {
+        const more = rc.rectangle(NODE_W / 2 - 36, NODE_H + 8, 72, 22, {
+          stroke: "#1f2937", strokeWidth: 1.2, fill: "#fde68a",
+          fillStyle: "solid", roughness: 1.6,
+        });
+        Array.from(more.querySelectorAll("path")).forEach(p => {
+          if (p.getAttribute("fill") && p.getAttribute("fill") !== "none") {
+            p.setAttribute("fill-opacity", "0.85");
+          }
+        });
+        g.appendChild(more);
+        const mt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        mt.setAttribute("x", NODE_W / 2); mt.setAttribute("y", NODE_H + 23);
+        mt.setAttribute("text-anchor", "middle");
+        mt.setAttribute("font-family", "'Caveat', cursive");
+        mt.setAttribute("font-size", "15"); mt.setAttribute("font-weight", "700");
+        mt.setAttribute("fill", "#92400e");
+        mt.style.pointerEvents = "none";
+        mt.textContent = `+${hiddenChildren} more`;
+        g.appendChild(mt);
+      }
+
+      svgEl.appendChild(g);
+    });
+  }, [layout, getNodeColor, isFiltered, showHotspots, hotspotNodeIds, showFlightRisk, flightRisks, setDetailPanel]);
+
+  // Fit to screen whenever layout changes or container resizes
+  useEffect(() => {
+    if (!layout || !containerRef.current) return;
+    const cw = containerRef.current.clientWidth;
+    const ch = containerRef.current.clientHeight;
+    if (!cw || !ch) return;
+    const s = Math.max(0.08, Math.min(cw / layout.width, ch / layout.height, 1) * 0.92);
+    setScale(s);
+    setPan({ x: (cw - layout.width * s) / 2, y: (ch - layout.height * s) / 2 });
+  }, [layout, autoFitKey]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setAutoFitKey(k => k + 1));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const onWheel = (e) => {
+    e.preventDefault();
+    const rect = containerRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    setScale(prev => {
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const next = Math.max(0.1, Math.min(4, prev * factor));
+      setPan(p => ({
+        x: mx - (mx - p.x) * (next / prev),
+        y: my - (my - p.y) * (next / prev),
+      }));
+      return next;
+    });
+  };
+
+  const dragRef = useRef({ active: false, sx: 0, sy: 0, px: 0, py: 0 });
+  const onMouseDown = (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest("g[transform]") && e.target.tagName !== "svg") return; // let node clicks through
+    dragRef.current = { active: true, sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y };
+    containerRef.current.style.cursor = "grabbing";
+  };
+  const onMouseMove = (e) => {
+    if (!dragRef.current.active) return;
+    setPan({
+      x: dragRef.current.px + (e.clientX - dragRef.current.sx),
+      y: dragRef.current.py + (e.clientY - dragRef.current.sy),
+    });
+  };
+  const onMouseUp = () => {
+    dragRef.current.active = false;
+    if (containerRef.current) containerRef.current.style.cursor = "grab";
+  };
+
+  if (!chartDisplayRoot) {
+    return <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">No data</div>;
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="h-full w-full relative overflow-hidden"
+      style={{
+        cursor: "grab",
+        background: "radial-gradient(circle at 18% 12%, rgba(255,255,255,0.6), transparent 50%), radial-gradient(circle at 82% 78%, rgba(255,255,255,0.4), transparent 50%), #fdfbf3",
+        backgroundImage: "linear-gradient(rgba(120,90,50,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(120,90,50,0.05) 1px, transparent 1px)",
+        backgroundSize: "28px 28px",
+      }}
+      onWheel={onWheel}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
+    >
+      <div ref={wrapRef} style={{ position: "absolute", transformOrigin: "0 0", transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
+        <svg ref={svgRef} width={layout?.width || 800} height={layout?.height || 400} style={{ display: "block" }}/>
+      </div>
+
+      <div className="absolute top-3 left-3 px-3 py-1.5 rounded bg-white/85 border-2 border-stone-700/30 text-stone-700"
+        style={{ fontFamily: "'Caveat', cursive", fontSize: 22, fontWeight: 700, transform: "rotate(-1deg)" }}>
+        The Org <span style={{ color: "#b91c1c", fontSize: 18 }}>— v.draft</span>
+      </div>
+
+      <div className="absolute top-3 right-3 bg-white/90 border-2 border-stone-700/30 rounded-md px-3 py-1.5 flex items-center gap-2 text-stone-700"
+        style={{ fontFamily: "'Patrick Hand', cursive", fontSize: 13 }}>
+        <span>depth:</span>
+        <button onClick={() => setMaxDepth(d => Math.max(1, d - 1))} className="w-6 h-6 rounded hover:bg-amber-100">−</button>
+        <span className="tabular-nums w-4 text-center">{maxDepth}</span>
+        <button onClick={() => setMaxDepth(d => Math.min(15, d + 1))} className="w-6 h-6 rounded hover:bg-amber-100">+</button>
+        {layout?.truncated > 0 && (
+          <span className="text-stone-500 ml-2" style={{ fontSize: 11 }}>
+            ({layout.truncated} hidden — focus a subtree to see them)
+          </span>
+        )}
+      </div>
+
+      <div className="absolute bottom-3 right-3 bg-white/90 border-2 border-stone-700/30 rounded-md px-3 py-2 text-stone-700 max-w-[220px]"
+        style={{ fontFamily: "'Patrick Hand', cursive", fontSize: 12, transform: "rotate(-1deg)" }}>
+        click cards for details · drag to pan · scroll to zoom
+      </div>
+
+      <div className="absolute bottom-3 left-3 bg-white/90 border-2 border-stone-700/30 rounded-full p-1 flex items-center gap-1"
+        style={{ fontFamily: "'Patrick Hand', cursive" }}>
+        <button
+          onClick={() => setScale(s => Math.max(0.1, s / 1.2))}
+          className="w-7 h-7 rounded-full hover:bg-amber-100 text-base"
+          title="Zoom out">−</button>
+        <span className="text-xs px-2 tabular-nums w-12 text-center">{Math.round(scale * 100)}%</span>
+        <button
+          onClick={() => setScale(s => Math.min(4, s * 1.2))}
+          className="w-7 h-7 rounded-full hover:bg-amber-100 text-base"
+          title="Zoom in">+</button>
+        <button
+          onClick={() => setAutoFitKey(k => k + 1)}
+          className="px-2 h-7 rounded-full hover:bg-amber-100 text-xs"
+          title="Fit to screen">⤢ fit</button>
       </div>
     </div>
   );
@@ -6987,6 +7973,31 @@ function OrgChartApp() {
   const [dataNoticeDismissed, setDataNoticeDismissed] = useState(() => {
     try { return localStorage.getItem("orgSimDataNoticeAck") === "1"; } catch { return false; }
   });
+  // Tutorial mode: when on, ? help dots appear next to non-obvious controls. Persisted per device.
+  const [tutorialMode, setTutorialMode] = useState(() => {
+    try { return localStorage.getItem("orgSimTutorialMode") === "1"; } catch { return false; }
+  });
+  const toggleTutorialMode = useCallback(() => {
+    setTutorialMode(v => {
+      const next = !v;
+      try { localStorage.setItem("orgSimTutorialMode", next ? "1" : "0"); } catch {}
+      return next;
+    });
+  }, []);
+  // Cmd/Ctrl+K command palette + natural-language query modal
+  const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [nlOpen, setNlOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setCmdkOpen(o => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const dismissDataNotice = useCallback(() => {
     setDataNoticeDismissed(true);
     try { localStorage.setItem("orgSimDataNoticeAck", "1"); } catch {}
@@ -7585,24 +8596,33 @@ function OrgChartApp() {
   }, [tree, setFocusRoot, setInsightHighlightIds, setChainFilterId, setExpandedNodes, setDetailPanel, setView]);
 
   // teamDragRef.current is set synchronously in onDragStart — avoids e.shiftKey drop-event unreliability
+  // Pending drop: stash the proposed move and let ReorgRipplePreview show consequences
+  // before we mutate state. Confirm via confirmDrop, dismiss via cancelDrop.
+  const [pendingDrop, setPendingDrop] = useState(null);
   const handleDrop = useCallback((targetId) => {
     if (!dragNode || dragNode === targetId) { setDragNode(null); setDragOver(null); teamDragRef.current = false; return; }
-    // Reject drops involving nodes not in the active tree (e.g. departed employees when showDeparted is on)
     if (!tree.map[targetId] || !tree.map[dragNode]) { setDragNode(null); setDragOver(null); teamDragRef.current = false; return; }
     const moveAsTeam = teamDragRef.current || shiftHeldRef.current;
     teamDragRef.current = false;
+    setPendingDrop({ dragNodeId: dragNode, targetId, moveAsTeam });
+    setDragNode(null);
+    setDragOver(null);
+  }, [dragNode, tree.map]);
+
+  const confirmDrop = useCallback(() => {
+    if (!pendingDrop) return;
+    const { dragNodeId, targetId, moveAsTeam } = pendingDrop;
+    if (!tree.map[targetId] || !tree.map[dragNodeId]) { setPendingDrop(null); return; }
     const path = getAncestorPath(tree.map, targetId);
-    const droppedOnDescendant = path.some(n => n.id === dragNode);
+    const droppedOnDescendant = path.some(n => n.id === dragNodeId);
     setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(employees))]);
     if (droppedOnDescendant) {
-      // Swap only allowed in team mode — individual swap would orphan the chain in between.
-      if (!moveAsTeam) { setDragNode(null); setDragOver(null); return; }
+      if (!moveAsTeam) { setPendingDrop(null); return; }
       // Superior↔subordinate swap: A (dragged superior) and B (target subordinate) trade slots,
       // but neither inherits the other's old team — instead everyone formerly under A or B rolls
-      // up to A's old manager (the next-higher-up). Avoids a junior accidentally inheriting a
-      // senior's whole org (or vice versa) just because positions were swapped.
+      // up to A's old manager. Avoids a junior accidentally inheriting a senior's whole org.
       setEmployees(prev => {
-        const A = prev.find(e => e.id === dragNode);
+        const A = prev.find(e => e.id === dragNodeId);
         const B = prev.find(e => e.id === targetId);
         if (!A || !B) return prev;
         const A_oldMgr = A.managerId ?? null;
@@ -7615,24 +8635,25 @@ function OrgChartApp() {
           return e;
         });
       });
-      setDragNode(null); setDragOver(null);
+      setPendingDrop(null);
       return;
     }
     setEmployees(prev => {
-      const dragged  = prev.find(e => e.id === dragNode);
+      const dragged  = prev.find(e => e.id === dragNodeId);
       const oldMgrId = dragged?.managerId ?? null;
       return prev.map(e => {
-        if (e.id === dragNode) return { ...e, managerId: targetId };
-        if (e.managerId === dragNode) {
-          if (moveAsTeam) return e;                      // team: whole chain follows
-          return { ...e, managerId: oldMgrId };          // individual: reports roll up
+        if (e.id === dragNodeId) return { ...e, managerId: targetId };
+        if (e.managerId === dragNodeId) {
+          if (moveAsTeam) return e;
+          return { ...e, managerId: oldMgrId };
         }
         return e;
       });
     });
-    setDragNode(null);
-    setDragOver(null);
-  }, [dragNode, tree.map, employees]);
+    setPendingDrop(null);
+  }, [pendingDrop, tree.map, employees]);
+
+  const cancelDrop = useCallback(() => setPendingDrop(null), []);
 
   const undo = useCallback(() => {
     if (undoStack.length === 0) return;
@@ -7693,6 +8714,222 @@ function OrgChartApp() {
   }, [activeEmployees, filterCountry]);
   const countries = useMemo(() => [...new Set(activeEmployees.map(e => e.country || countryFor(e.location)))].sort(), [activeEmployees]);
   const businessGroups = useMemo(() => [...new Set(activeEmployees.map(e => e.bg))].sort(), [activeEmployees]);
+
+  // Exec deck PDF generator — six slides built from the live data. Uses jsPDF (loaded
+  // via CDN). All layout in points (jsPDF default for letter: 612 × 792).
+  const generateExecDeck = useCallback(() => {
+    const jsPDF = window.jspdf?.jsPDF;
+    if (!jsPDF) { alert("PDF library not loaded — reload the page and try again."); return; }
+    const doc = new jsPDF({ unit: "pt", format: "letter", orientation: "landscape" });
+    const W = 792, H = 612, M = 48;
+
+    const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+
+    // Department breakdown
+    const deptCounts = {};
+    activeEmployees.forEach(e => deptCounts[e.dept] = (deptCounts[e.dept] || 0) + 1);
+    const deptRows = Object.entries(deptCounts).sort((a, b) => b[1] - a[1]);
+
+    // Level pyramid — order top-of-org → IC, drop levels with no headcount
+    const lvCounts = {};
+    activeEmployees.forEach(e => { if (e.level) lvCounts[e.level] = (lvCounts[e.level] || 0) + 1; });
+    const ALL_LV = ["C-Suite","SVP","VP","Director","Manager","IC6","IC5","IC4","IC3","IC2","IC1"];
+    const pyramidRows = [
+      ...ALL_LV.filter(l => lvCounts[l]).map(l => [l, lvCounts[l]]),
+      // Append any levels not in the canonical list (sorted desc by count) so unknown levels still show
+      ...Object.entries(lvCounts).filter(([l]) => !ALL_LV.includes(l)).sort((a, b) => b[1] - a[1]),
+    ];
+
+    // Hotspots
+    const insights = atLeast(mode, "advanced") ? computeInsights(employees, tree) : { items: [] };
+    const topHotspots = (hotspots || []).slice(0, 8);
+
+    // Plan rollups
+    const planSum = Object.entries(plan || {}).map(([group, lvs]) => {
+      const total = Object.values(lvs).reduce((s, n) => s + (parseInt(n, 10) || 0), 0);
+      return [group, total];
+    }).filter(r => r[1] !== 0).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 10);
+
+    // Flight risks — flightRisks is { [empId]: { score, reasons } }, join with employee data
+    const empById = {};
+    activeEmployees.forEach(e => { empById[e.id] = e; });
+    const topRisks = Object.entries(flightRisks || {})
+      .map(([id, r]) => {
+        const emp = empById[id];
+        if (!emp) return null;
+        const score = r?.score || 0;
+        return { ...emp, score, risk: score >= 70 ? "High" : score >= 40 ? "Medium" : "Low" };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8);
+
+    // ─── Helpers ────────────────────────────────────────────────────────────
+    function drawHeader(title, subtitle) {
+      doc.setFillColor(15, 23, 42);
+      doc.rect(0, 0, W, 8, "F");
+      doc.setTextColor(15, 23, 42);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(20);
+      doc.text(title, M, M + 4);
+      if (subtitle) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(100, 116, 139);
+        doc.text(subtitle, M, M + 22);
+      }
+      doc.setDrawColor(226, 232, 240);
+      doc.line(M, M + 36, W - M, M + 36);
+    }
+    function drawFooter(pageNum, total) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`SemiCorp · ${scenarioName || "Base"} · ${today}`, M, H - 24);
+      doc.text(`${pageNum} / ${total}`, W - M, H - 24, { align: "right" });
+    }
+    function table(rows, x, y, colWidths, headers) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
+      let cx = x;
+      headers.forEach((h, i) => {
+        doc.text(String(h), cx, y);
+        cx += colWidths[i];
+      });
+      doc.setDrawColor(226, 232, 240);
+      doc.line(x, y + 4, x + colWidths.reduce((s, w) => s + w, 0), y + 4);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(15, 23, 42);
+      let cy = y + 20;
+      rows.forEach(row => {
+        cx = x;
+        row.forEach((cell, i) => {
+          const txt = String(cell ?? "");
+          const trim = txt.length > 60 ? txt.slice(0, 58) + "…" : txt;
+          doc.text(trim, cx, cy);
+          cx += colWidths[i];
+        });
+        cy += 16;
+      });
+      return cy;
+    }
+    function bigNum(label, value, x, y, color = [59, 130, 246]) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(36);
+      doc.setTextColor(...color);
+      doc.text(String(value), x, y);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text(label, x, y + 14);
+    }
+
+    const TOTAL = 6;
+
+    // ─── Slide 1: Cover ─────────────────────────────────────────────────────
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, W, H, "F");
+    doc.setFillColor(59, 130, 246);
+    doc.rect(0, H - 80, W, 80, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(48);
+    doc.setTextColor(255, 255, 255);
+    doc.text("SemiCorp Org", M, 220);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(20);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Headcount & Plan Overview · ${scenarioName || "Base"} scenario`, M, 250);
+    doc.setFontSize(12);
+    doc.text(today, M, 280);
+    bigNum("Active people",   activeEmployees.length, M,           360, [255, 255, 255]);
+    bigNum("Departments",     deptRows.length,        M + 200,     360, [255, 255, 255]);
+    bigNum("Locations",       locations.length,       M + 400,     360, [255, 255, 255]);
+    if (atLeast(mode, "advanced")) bigNum("Hotspots", (hotspots || []).length, M + 580, 360, [251, 191, 36]);
+    drawFooter(1, TOTAL);
+
+    // ─── Slide 2: Org shape (departments) ──────────────────────────────────
+    doc.addPage();
+    drawHeader("Org shape", "Headcount by department, current scenario");
+    table(deptRows.map(([d, n]) => [d, n, `${(n / activeEmployees.length * 100).toFixed(1)}%`]),
+      M, M + 70, [220, 100, 80], ["Department", "Headcount", "Share"]);
+    drawFooter(2, TOTAL);
+
+    // ─── Slide 3: Level pyramid ─────────────────────────────────────────────
+    doc.addPage();
+    drawHeader("Headcount pyramid", "People by level — top to bottom (executive → IC)");
+    // Bar chart: each row gets a horizontal bar
+    const maxN = Math.max(...pyramidRows.map(r => r[1]), 1);
+    const barX = M + 80;
+    const barMaxW = W - M - barX - 80;
+    let by = M + 80;
+    pyramidRows.forEach(([lv, n]) => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105);
+      doc.text(lv, M, by + 4);
+      doc.setFillColor(59, 130, 246);
+      doc.rect(barX, by - 8, (n / maxN) * barMaxW, 14, "F");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(15, 23, 42);
+      doc.text(String(n), barX + (n / maxN) * barMaxW + 6, by + 4);
+      by += 22;
+    });
+    drawFooter(3, TOTAL);
+
+    // ─── Slide 4: Hotspots ──────────────────────────────────────────────────
+    doc.addPage();
+    drawHeader(`Hotspots · ${(hotspots || []).length} flagged`, "Risk areas detected from span-of-control, tenure, and pipeline signals");
+    if (topHotspots.length === 0) {
+      doc.setFontSize(12);
+      doc.setTextColor(100, 116, 139);
+      doc.text("No hotspots detected in the current scenario.", M, M + 80);
+    } else {
+      const rows = topHotspots.map(h => {
+        const node = tree.map[h.nodeId];
+        const who = node ? `${node.first} ${node.last} (${node.title || ""})` : h.nodeId;
+        return [h.severity?.toUpperCase() || "—", who, h.type || "—", h.msg || ""];
+      });
+      table(rows, M, M + 70, [80, 240, 130, 240], ["Severity", "Owner", "Kind", "Why"]);
+    }
+    drawFooter(4, TOTAL);
+
+    // ─── Slide 5: Headcount plan ────────────────────────────────────────────
+    doc.addPage();
+    drawHeader("Headcount plan · top deltas", `Scenario: ${scenarioName || "Base"} · ${planYears || planHorizonQ / 4 || "—"} year horizon`);
+    if (planSum.length === 0) {
+      doc.setFontSize(12);
+      doc.setTextColor(100, 116, 139);
+      doc.text("No plan deltas configured. Use the Headcount Plan tab to set targets.", M, M + 80);
+    } else {
+      table(planSum.map(([g, n]) => [g, (n > 0 ? "+" : "") + n]),
+        M, M + 70, [320, 120], ["Group", "Net change"]);
+    }
+    drawFooter(5, TOTAL);
+
+    // ─── Slide 6: Top risks (flight risk) ───────────────────────────────────
+    doc.addPage();
+    drawHeader("Top retention risks", "Highest flight-risk individuals — brief, talk to managers in week 1");
+    if (topRisks.length === 0) {
+      doc.setFontSize(12);
+      doc.setTextColor(100, 116, 139);
+      doc.text("No flight-risk signals — enable the Flight Risk overlay to compute.", M, M + 80);
+    } else {
+      const rows = topRisks.map(r => [
+        `${r.first} ${r.last}`,
+        r.title || "",
+        r.dept || "",
+        (r.risk || "").toUpperCase(),
+        r.score?.toString() || "",
+      ]);
+      table(rows, M, M + 70, [180, 220, 130, 80, 60], ["Person", "Title", "Dept", "Risk", "Score"]);
+    }
+    drawFooter(6, TOTAL);
+
+    doc.save(`semicorp-exec-deck-${new Date().toISOString().slice(0, 10)}.pdf`);
+  }, [activeEmployees, employees, tree, hotspots, flightRisks, plan, scenarioName, locations, planYears, planHorizonQ, mode]);
 
   const searchResults = useMemo(() => {
     if (!searchQuery || searchQuery.length < 2) return [];
@@ -7934,6 +9171,10 @@ function OrgChartApp() {
     toggleExpand, expandAll, collapseAll, navigateTo, goToInsight, navigateToDept, focusChain, focusSubtree, handleDrop, undo,
     saveAnnotation, removeAnnotation, getNodeColor, getTenureColor, isFiltered, getTimelineMonths,
     importEmployeesCSV, exportPipelineConfig, importPipelineConfig, exportScenarios, importScenarios,
+    tutorialMode, setTutorialMode, toggleTutorialMode,
+    cmdkOpen, setCmdkOpen,
+    nlOpen, setNlOpen,
+    pendingDrop, confirmDrop, cancelDrop,
   };
 
   return (
@@ -7973,10 +9214,50 @@ function OrgChartApp() {
             0%   { opacity: 1; transform: scale(1); }
             100% { opacity: 0; transform: scale(0.85) translateY(-20px); }
           }
+
+          /* ── Print mode ───────────────────────────────────────────────
+             Strips chrome (sidebar, topbar, filters, tutorial dots, modals,
+             timeline scrubber, animations) so the active view prints cleanly.
+             Adds a header/footer with org/scenario/date for context. */
+          .print-only { display: none; }
+          @page { size: letter portrait; margin: 0.5in; }
+          @media print {
+            html, body { background: white !important; height: auto !important; overflow: visible !important; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            .h-screen, .h-full, .overflow-hidden, .overflow-y-auto, .overflow-x-auto {
+              height: auto !important; overflow: visible !important; max-height: none !important;
+            }
+            .flex-1 { flex: none !important; }
+            /* Background art and animations off — saves ink, prevents jitter */
+            * { animation: none !important; transition: none !important; box-shadow: none !important; }
+            /* Force light backgrounds on dark-mode chrome */
+            .bg-slate-900, .bg-slate-800 { background: white !important; color: black !important; }
+            .text-slate-300, .text-slate-400, .text-slate-500, .text-white { color: #111 !important; }
+            /* Page-break hints */
+            h1, h2, h3 { break-after: avoid; }
+            table, .org-tree, .card { break-inside: avoid; }
+            /* Tighter typography for paper */
+            body, p, span, div { font-size: 11pt; line-height: 1.4; }
+            h1 { font-size: 18pt; }
+            h2 { font-size: 14pt; }
+            h3 { font-size: 12pt; }
+          }
+          .print-cover {
+            padding: 24px 0 12px; border-bottom: 2px solid #111;
+            margin-bottom: 16px;
+          }
+          .print-cover h1 { font-size: 22pt; margin: 0 0 4px; font-weight: 700; }
+          .print-cover .meta { font-size: 10pt; color: #555; }
+          .print-footer {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            padding: 6px 24px; font-size: 8pt; color: #888;
+            border-top: 1px solid #ddd; display: flex; justify-content: space-between;
+          }
         `}</style>
 
         {/* Sidebar */}
-        <div className={`${sidebarCollapsed ? "w-14" : "w-56"} bg-slate-900 text-white flex flex-col shrink-0 transition-all duration-300`}>
+        <div className={`${sidebarCollapsed ? "w-14" : "w-56"} bg-slate-900 text-white flex flex-col shrink-0 transition-all duration-300 no-print`}>
           <div className="p-3 border-b border-slate-700 flex items-center gap-2">
             {!sidebarCollapsed && (
               <div className="flex items-center gap-2 flex-1">
@@ -8049,6 +9330,28 @@ function OrgChartApp() {
             )}
           </div>
 
+          {/* ── Tutorial toggle ── */}
+          <div className="p-2 border-t border-slate-700">
+            {!sidebarCollapsed ? (
+              <Tip text={tutorialMode ? "Hide the ? help dots" : "Show ? help dots next to non-obvious controls"} side="right">
+                <button
+                  onClick={toggleTutorialMode}
+                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-all ${tutorialMode ? "bg-blue-600 text-white font-semibold" : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"}`}>
+                  <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${tutorialMode ? "bg-white text-blue-600" : "bg-slate-700 text-slate-300"}`}>?</span>
+                  Tutorial mode
+                </button>
+              </Tip>
+            ) : (
+              <Tip text={`Tutorial mode: ${tutorialMode ? "on" : "off"} — toggle ? help dots`} side="right">
+                <button
+                  onClick={toggleTutorialMode}
+                  className="w-full flex items-center justify-center py-1 rounded transition-all">
+                  <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${tutorialMode ? "bg-blue-500 text-white" : "bg-slate-700 text-slate-400"}`}>?</span>
+                </button>
+              </Tip>
+            )}
+          </div>
+
           {!sidebarCollapsed && (
             <div className="p-3 border-t border-slate-700 space-y-2">
               <div className="flex justify-between text-xs"><span className="text-slate-400">Employees</span><span className="font-bold">{activeEmployees.length}</span></div>
@@ -8066,8 +9369,19 @@ function OrgChartApp() {
 
         {/* Main area */}
         <div className="flex-1 flex flex-col min-w-0">
+          {/* Print-only cover header (visible only via window.print()) */}
+          <div className="print-only print-cover">
+            <h1>SemiCorp · {VIEW_LABEL[view] || view}</h1>
+            <div className="meta">
+              Scenario: <b>{scenarioName || "Base"}</b> · {activeEmployees.length} active employees · {departments.length} departments · {locations.length} locations · printed {new Date().toLocaleString()}
+            </div>
+          </div>
+          <div className="print-only print-footer">
+            <span>SemiCorp Org Navigator</span>
+            <span>{new Date().toLocaleDateString()} · {scenarioName || "Base"} scenario</span>
+          </div>
           {/* Top bar */}
-          <div className="bg-white border-b border-gray-100 px-4 py-2 flex items-center gap-3 shrink-0 flex-wrap" style={{ boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+          <div className="bg-white border-b border-gray-100 px-4 py-2 flex items-center gap-3 shrink-0 flex-wrap no-print" style={{ boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
             {/* Search */}
             <div className="relative flex-1 max-w-md">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
@@ -8192,6 +9506,24 @@ function OrgChartApp() {
                 }}
                 className="flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors"
               ><Download size={12}/>Analytics</button>}
+              <button
+                title="Ask the org in natural language (Claude Opus 4.7)"
+                onClick={() => setNlOpen(true)}
+                className="flex items-center gap-1 text-xs bg-violet-50 border border-violet-200 text-violet-700 px-2.5 py-1.5 rounded-lg hover:bg-violet-100 transition-colors">
+                <Sparkles size={12}/>Ask
+              </button>
+              <button
+                title="Print this view (use the browser's Save as PDF for a clean PDF export)"
+                onClick={() => window.print()}
+                className="flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors">
+                <Printer size={12}/>Print / PDF
+              </button>
+              <button
+                title="Generate a 6-slide exec deck PDF (cover, org shape, pyramid, hotspots, plan, risks)"
+                onClick={generateExecDeck}
+                className="flex items-center gap-1 text-xs bg-amber-50 border border-amber-200 text-amber-700 px-2.5 py-1.5 rounded-lg hover:bg-amber-100 transition-colors">
+                <FileText size={12}/>Exec deck
+              </button>
             </div>
           </div>
 
@@ -8286,7 +9618,7 @@ function OrgChartApp() {
                   {/* View mode pills — Treemap/Sunburst are advanced */}
                   {atLeast(mode, "advanced") && (
                     <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 mr-2">
-                      {[["tree","Tree"],["treemap","Treemap"],["sunburst","Sunburst"]].map(([m,l]) => (
+                      {[["tree","Tree"],["treemap","Treemap"],["sunburst","Sunburst"],["whiteboard","Whiteboard"]].map(([m,l]) => (
                         <button key={m} onClick={() => setOrgViewMode(m)}
                           className="text-xs px-2.5 py-1 rounded-md transition-all"
                           style={{ background: orgViewMode === m ? "white" : "transparent", color: orgViewMode === m ? "#1e293b" : "#64748b", fontWeight: orgViewMode === m ? 600 : 400, boxShadow: orgViewMode === m ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }}>
@@ -8329,6 +9661,7 @@ function OrgChartApp() {
                 )}
                 {orgViewMode === "treemap" && <TreemapOrgView/>}
                 {orgViewMode === "sunburst" && <SunburstOrgView/>}
+                {orgViewMode === "whiteboard" && <WhiteboardOrgView/>}
               </div>
             )}
             {view === "timeline"    && <TimelineView/>}
@@ -8346,6 +9679,9 @@ function OrgChartApp() {
         {exitSimNode && <ExitSimModal/>}
       </div>
       </div>
+      <CommandPalette/>
+      <ReorgRipplePreview/>
+      <NaturalLanguageQuery/>
     </AppCtx.Provider>
   );
 }

@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Org Chart · Whiteboard Sketch</title>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Patrick+Hand&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background:
+      radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.6), transparent 50%),
+      radial-gradient(circle at 82% 78%, rgba(255, 255, 255, 0.4), transparent 50%),
+      #fdfbf3;
+    color: #1f2937; font-family: 'Patrick Hand', cursive; }
+  body::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      linear-gradient(rgba(120, 90, 50, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120, 90, 50, 0.05) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  #wrap { position: absolute; inset: 0; display: flex; flex-direction: column; }
+  header {
+    position: relative; z-index: 5; padding: 12px 18px;
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    border-bottom: 2px dashed rgba(60, 40, 20, 0.18);
+    background: rgba(253, 251, 243, 0.85); backdrop-filter: blur(6px);
+  }
+  h1 { font-family: 'Caveat', cursive; font-size: 30px; margin: 0; font-weight: 700; color: #1f2937; }
+  .sub { font-size: 16px; color: #6b7280; flex: 1; }
+  header label { font-size: 14px; color: #4b5563; }
+  header input[type=file] { font-size: 12px; }
+  .toolbar { display: flex; gap: 6px; }
+  .toolbar button {
+    font-family: 'Patrick Hand', cursive; font-size: 14px;
+    padding: 6px 12px; background: white; border: 1.5px solid #1f2937;
+    border-radius: 4px; cursor: pointer; transition: all 0.12s;
+  }
+  .toolbar button:hover { background: #fde68a; transform: rotate(-1deg); }
+  main {
+    position: relative; flex: 1; overflow: hidden; cursor: grab;
+  }
+  main.dragging { cursor: grabbing; }
+  #canvas-wrap { position: absolute; transform-origin: 0 0; }
+  svg { display: block; }
+  .node-name  { font-family: 'Caveat', cursive; font-size: 19px; fill: #111827; pointer-events: none; font-weight: 700; }
+  .node-title { font-family: 'Patrick Hand', cursive; font-size: 13px; fill: #4b5563; pointer-events: none; }
+  .node-dept  { font-family: 'Patrick Hand', cursive; font-size: 11px; pointer-events: none; }
+  .node-card  { cursor: pointer; }
+  .node-card:hover .node-shape { stroke-width: 2.6; }
+  .scribble { font-family: 'Caveat', cursive; font-size: 22px; color: #b91c1c; transform: rotate(-3deg); display: inline-block; }
+  .legend {
+    position: absolute; bottom: 16px; right: 16px; z-index: 5;
+    background: rgba(253, 251, 243, 0.92); border: 2px solid rgba(60, 40, 20, 0.3);
+    border-radius: 6px; padding: 10px 14px; font-family: 'Patrick Hand', cursive; font-size: 14px;
+    transform: rotate(-1deg); max-width: 220px;
+  }
+  .legend-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+  .legend-dot { width: 14px; height: 14px; border-radius: 3px; transform: rotate(2deg); }
+  .legend h4 { margin: 0 0 6px; font-family: 'Caveat', cursive; font-size: 18px; }
+  .zoom-pill {
+    position: absolute; bottom: 16px; left: 16px; z-index: 5;
+    background: rgba(253, 251, 243, 0.92); border: 2px solid rgba(60, 40, 20, 0.3);
+    border-radius: 999px; padding: 4px; display: flex; gap: 4px; align-items: center;
+    font-family: 'Patrick Hand', cursive;
+  }
+  .zoom-pill button {
+    font-family: 'Patrick Hand', cursive; font-size: 16px; width: 28px; height: 28px;
+    border: none; background: transparent; cursor: pointer; border-radius: 50%;
+  }
+  .zoom-pill button:hover { background: #fde68a; }
+  .zoom-pill .pct { font-size: 13px; padding: 0 8px; min-width: 44px; text-align: center; color: #4b5563; }
+  .empty {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-family: 'Caveat', cursive; font-size: 28px; color: #9ca3af;
+  }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <header>
+    <h1>The Org <span class="scribble">— v.draft</span></h1>
+    <div class="sub">whiteboard sketch · subject to change · do not screenshot</div>
+    <div class="toolbar">
+      <button id="btn-fit" title="Fit to screen">⤢ fit</button>
+      <button id="btn-reset" title="Reset view">↺ reset</button>
+    </div>
+    <label>Drop CSV: <input type="file" id="csv-input" accept=".csv" /></label>
+  </header>
+  <main id="main">
+    <div id="canvas-wrap">
+      <svg id="svg"></svg>
+    </div>
+  </main>
+</div>
+
+<div class="legend" id="legend"></div>
+<div class="zoom-pill">
+  <button id="btn-zoom-out" title="Zoom out">−</button>
+  <span class="pct" id="zoom-pct">100%</span>
+  <button id="btn-zoom-in" title="Zoom in">+</button>
+</div>
+
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<script src="_shared.js"></script>
+
+<script>
+const { SAMPLE, DEPT_COLORS, deptColor, buildTree, attachCSVLoader } = window.OrgShared;
+
+const elLegend = document.getElementById("legend");
+elLegend.innerHTML = `<h4>departments</h4>` + Object.entries(DEPT_COLORS).map(([d, c]) =>
+  `<div class="legend-row"><div class="legend-dot" style="background:${c}"></div>${d}</div>`
+).join("");
+
+const svg = d3.select("#svg");
+const main = document.getElementById("main");
+const canvasWrap = document.getElementById("canvas-wrap");
+
+const NODE_W = 200;
+const NODE_H = 70;
+const H_GAP  = 36;
+const V_GAP  = 100;
+const MARGIN = 80;
+
+function render(employees) {
+  if (!employees.length) {
+    svg.selectAll("*").remove();
+    svg.attr("width", 600).attr("height", 200);
+    const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    t.setAttribute("x", 300); t.setAttribute("y", 100); t.setAttribute("text-anchor", "middle");
+    t.setAttribute("class", "node-name"); t.textContent = "no people loaded — drop a CSV";
+    svg.node().appendChild(t);
+    return;
+  }
+  const { roots, byId, childrenOf } = buildTree(employees);
+
+  // Synthesize a virtual root if there are multiple top-level people
+  const rootData = roots.length === 1
+    ? toHierarchy(roots[0], childrenOf)
+    : { id: "__root", first: "Org", last: "", title: "Organization", dept: "Exec", children: roots.map(r => toHierarchy(r, childrenOf)) };
+
+  const root = d3.hierarchy(rootData);
+  d3.tree().nodeSize([NODE_W + H_GAP, NODE_H + V_GAP])(root);
+
+  // Find bounds
+  let minX = Infinity, maxX = -Infinity, maxY = 0;
+  root.each(d => { minX = Math.min(minX, d.x); maxX = Math.max(maxX, d.x); maxY = Math.max(maxY, d.y); });
+  const W = (maxX - minX) + NODE_W + MARGIN * 2;
+  const H = maxY + NODE_H + MARGIN * 2;
+
+  svg.attr("width", W).attr("height", H);
+  svg.selectAll("*").remove();
+
+  const offsetX = -minX + MARGIN;
+  const offsetY = MARGIN;
+
+  const svgEl = svg.node();
+  if (!window.rough) {
+    console.error("rough.js failed to load");
+    return;
+  }
+  const rc = rough.svg(svgEl);
+
+  // ── 1. Background atmosphere: coffee rings, doodles, scribbled annotations
+  const atmosphere = svg.append("g").attr("class", "atmosphere");
+  drawCoffeeRing(atmosphere.node(), rc, MARGIN / 2 + 40, H - MARGIN - 60, 38);
+  drawCoffeeRing(atmosphere.node(), rc, W - MARGIN - 80, MARGIN + 30, 28);
+  drawDoodleArrow(atmosphere.node(), rc, W - 220, MARGIN + 100, "this layer\nneeds work →");
+
+  // ── 2. Department zones (sketchy enclosures around each dept's nodes)
+  const zoneGroup = svg.append("g").attr("class", "zones");
+  drawDepartmentZones(zoneGroup.node(), rc, root, offsetX, offsetY);
+
+  // ── 3. Edges first so they sit underneath the cards
+  const edgeGroup = svg.append("g").attr("class", "edges");
+  root.links().forEach(({ source, target }) => {
+    const x1 = source.x + offsetX + NODE_W / 2;
+    const y1 = source.y + offsetY + NODE_H;
+    const x2 = target.x + offsetX + NODE_W / 2;
+    const y2 = target.y + offsetY;
+    const midY = (y1 + y2) / 2;
+    const path = `M ${x1},${y1} L ${x1},${midY} L ${x2},${midY} L ${x2},${y2}`;
+    const line = rc.path(path, {
+      stroke: "rgba(40, 30, 20, 0.55)",
+      strokeWidth: 1.4,
+      roughness: 1.7,
+      bowing: 1.4,
+    });
+    edgeGroup.node().appendChild(line);
+  });
+
+  // ── 4. Node cards
+  const nodeGroup = svg.append("g").attr("class", "nodes");
+  root.each(d => drawNodeCard(nodeGroup.node(), rc, d, offsetX, offsetY));
+
+  // ── 5. Sticky notes on a few interesting nodes
+  drawStickies(svg.append("g").node(), rc, root, employees, byId, childrenOf, offsetX, offsetY);
+
+  // ── 6. Center the canvas in the viewport
+  fitToScreen(W, H);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Drawing helpers
+// ─────────────────────────────────────────────────────────────────────────
+
+function drawNodeCard(parent, rc, d, offsetX, offsetY) {
+  const x = d.x + offsetX;
+  const y = d.y + offsetY;
+  const color = deptColor(d.data.dept);
+  const isVirtual = d.data.id === "__root";
+
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  g.setAttribute("class", "node-card");
+  g.setAttribute("transform", `translate(${x}, ${y})`);
+
+  // Card body — sketchy rectangle, with light dept-coloured fill
+  const card = rc.rectangle(0, 0, NODE_W, NODE_H, {
+    stroke: color,
+    strokeWidth: 1.8,
+    fill: color,
+    fillStyle: "solid",
+    fillWeight: 1,
+    roughness: 1.5,
+  });
+  Array.from(card.querySelectorAll("path")).forEach(p => {
+    if (p.getAttribute("fill") && p.getAttribute("fill") !== "none") {
+      p.setAttribute("fill-opacity", "0.16");
+    }
+    p.classList.add("node-shape");
+  });
+  g.appendChild(card);
+
+  // Left "tag" stripe
+  const stripe = rc.line(0, 0, 0, NODE_H, { stroke: color, strokeWidth: 4, roughness: 0.9 });
+  g.appendChild(stripe);
+
+  // Avatar circle (hand-drawn)
+  const av = rc.circle(28, NODE_H / 2, 32, {
+    stroke: color, strokeWidth: 1.5, fill: color, fillStyle: "solid", roughness: 1.6,
+  });
+  Array.from(av.querySelectorAll("path")).forEach(p => {
+    if (p.getAttribute("fill") && p.getAttribute("fill") !== "none") {
+      p.setAttribute("fill-opacity", "0.25");
+    }
+  });
+  g.appendChild(av);
+
+  // Initials inside avatar
+  const init = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  init.setAttribute("x", 28); init.setAttribute("y", NODE_H / 2 + 5);
+  init.setAttribute("text-anchor", "middle");
+  init.setAttribute("class", "node-name");
+  init.setAttribute("fill", color);
+  init.textContent = isVirtual ? "🏢" : ((d.data.first?.[0] || "") + (d.data.last?.[0] || ""));
+  g.appendChild(init);
+
+  // Name
+  const name = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  name.setAttribute("class", "node-name");
+  name.setAttribute("x", 54); name.setAttribute("y", 26);
+  name.textContent = isVirtual ? "Organization" : `${d.data.first} ${d.data.last}`;
+  g.appendChild(name);
+
+  // Title
+  const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  title.setAttribute("class", "node-title");
+  title.setAttribute("x", 54); title.setAttribute("y", 44);
+  title.textContent = (d.data.title || "").length > 28 ? d.data.title.slice(0, 26) + "…" : (d.data.title || "");
+  g.appendChild(title);
+
+  // Dept tag + location
+  const tag = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  tag.setAttribute("class", "node-dept");
+  tag.setAttribute("x", 54); tag.setAttribute("y", 60);
+  tag.setAttribute("fill", color);
+  tag.textContent = `#${(d.data.dept || "").toLowerCase()}${d.data.location ? "  ·  " + d.data.location.toLowerCase() : ""}`;
+  g.appendChild(tag);
+
+  parent.appendChild(g);
+}
+
+function drawDepartmentZones(parent, rc, root, offsetX, offsetY) {
+  // Gather positions per dept (skip the virtual root if any)
+  const byDept = {};
+  root.each(d => {
+    if (d.data.id === "__root") return;
+    const dept = d.data.dept;
+    if (!byDept[dept]) byDept[dept] = [];
+    byDept[dept].push({ x: d.x + offsetX, y: d.y + offsetY });
+  });
+  Object.entries(byDept).forEach(([dept, points]) => {
+    if (points.length < 2) return;
+    const xs = points.map(p => p.x);
+    const ys = points.map(p => p.y);
+    const minX = Math.min(...xs) - 18;
+    const maxX = Math.max(...xs) + NODE_W + 18;
+    const minY = Math.min(...ys) - 18;
+    const maxY = Math.max(...ys) + NODE_H + 22;
+    const color = deptColor(dept);
+    // Sketchy rounded rectangle as the dept zone
+    const zone = rc.rectangle(minX, minY, maxX - minX, maxY - minY, {
+      stroke: color,
+      strokeWidth: 1.2,
+      fill: color,
+      fillStyle: "hachure",
+      hachureGap: 14,
+      hachureAngle: -30,
+      fillWeight: 0.6,
+      roughness: 2.2,
+      bowing: 2.0,
+    });
+    Array.from(zone.querySelectorAll("path")).forEach(p => p.setAttribute("opacity", "0.35"));
+    parent.appendChild(zone);
+    // Dept name tag at top-left
+    const tagBox = rc.rectangle(minX, minY - 18, dept.length * 9 + 18, 22, {
+      stroke: color, fill: color, fillStyle: "solid", roughness: 1.4,
+    });
+    Array.from(tagBox.querySelectorAll("path")).forEach(p => {
+      if (p.getAttribute("fill") && p.getAttribute("fill") !== "none") {
+        p.setAttribute("fill-opacity", "0.85");
+      }
+    });
+    parent.appendChild(tagBox);
+    const tagText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    tagText.setAttribute("x", minX + 9); tagText.setAttribute("y", minY - 3);
+    tagText.setAttribute("class", "node-name");
+    tagText.setAttribute("fill", "white");
+    tagText.setAttribute("font-size", "16");
+    tagText.textContent = dept;
+    parent.appendChild(tagText);
+  });
+}
+
+function drawStickies(parent, rc, root, employees, byId, childrenOf, offsetX, offsetY) {
+  const STICKY_COLORS = [
+    { bg: "#fef3c7", stroke: "#b45309", text: "#92400e" }, // yellow
+    { bg: "#fce7f3", stroke: "#be185d", text: "#9d174d" }, // pink
+    { bg: "#dbeafe", stroke: "#1d4ed8", text: "#1e40af" }, // blue
+    { bg: "#dcfce7", stroke: "#15803d", text: "#166534" }, // green
+  ];
+  const STICKIES = [
+    { match: d => d.depth === 0, text: "review w/ board", text2: "before EOQ ?", colorIdx: 0 },
+    { match: d => (childrenOf.get(d.data.id) || []).length >= 4, text: "team too big?", text2: "consider split", colorIdx: 1 },
+    { match: d => d.data.location === "Hsinchu", text: "tape-out risk", text2: "monitor closely", colorIdx: 2 },
+    { match: d => d.data.title?.includes("Chief Financial"), text: "budget review", text2: "Friday 3pm", colorIdx: 3 },
+    { match: d => d.data.title?.includes("VP, ML"), text: "GPU req approved!", text2: "🎉", colorIdx: 0 },
+  ];
+
+  const placed = new Set();
+  STICKIES.forEach(spec => {
+    const candidates = root.descendants().filter(spec.match);
+    if (!candidates.length) return;
+    // Take the first that hasn't already been stickied
+    const target = candidates.find(c => !placed.has(c.data.id));
+    if (!target) return;
+    placed.add(target.data.id);
+    const color = STICKY_COLORS[spec.colorIdx % STICKY_COLORS.length];
+    const x = target.x + offsetX + NODE_W + 16;
+    const y = target.y + offsetY - 8 + (Math.random() * 12 - 6);
+    const w = 130, h = 56;
+
+    // Sticky body — slight rotation for that just-stuck feel
+    const noteG = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const rot = (Math.random() * 8 - 4).toFixed(1);
+    noteG.setAttribute("transform", `translate(${x}, ${y}) rotate(${rot})`);
+    const note = rc.rectangle(0, 0, w, h, {
+      stroke: color.stroke, strokeWidth: 1.2,
+      fill: color.bg, fillStyle: "solid", roughness: 1.4,
+    });
+    Array.from(note.querySelectorAll("path")).forEach(p => {
+      if (p.getAttribute("fill") && p.getAttribute("fill") !== "none") {
+        p.setAttribute("fill-opacity", "0.92");
+      }
+    });
+    noteG.appendChild(note);
+    // Tape strip across the top
+    const tape = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    tape.setAttribute("x", w / 2 - 18); tape.setAttribute("y", -5);
+    tape.setAttribute("width", 36); tape.setAttribute("height", 10);
+    tape.setAttribute("fill", "rgba(220, 220, 200, 0.55)");
+    tape.setAttribute("stroke", "rgba(160, 160, 140, 0.6)");
+    tape.setAttribute("stroke-width", "0.5");
+    noteG.appendChild(tape);
+
+    const t1 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    t1.setAttribute("class", "node-name");
+    t1.setAttribute("x", 10); t1.setAttribute("y", 24);
+    t1.setAttribute("fill", color.text);
+    t1.textContent = spec.text;
+    noteG.appendChild(t1);
+
+    const t2 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    t2.setAttribute("class", "node-title");
+    t2.setAttribute("x", 10); t2.setAttribute("y", 42);
+    t2.setAttribute("fill", color.text);
+    t2.textContent = spec.text2;
+    noteG.appendChild(t2);
+
+    parent.appendChild(noteG);
+
+    // Curved arrow from sticky back to the node
+    const ax = target.x + offsetX + NODE_W;
+    const ay = target.y + offsetY + NODE_H / 2;
+    const arrow = rc.path(`M ${x},${y + h / 2} Q ${x - 18},${y + h / 2 + 15} ${ax + 8},${ay}`, {
+      stroke: color.stroke, strokeWidth: 1.3, roughness: 1.8,
+    });
+    parent.appendChild(arrow);
+  });
+}
+
+function drawCoffeeRing(parent, rc, cx, cy, r) {
+  const ring = rc.circle(cx, cy, r * 2, {
+    stroke: "rgba(120, 70, 30, 0.32)",
+    strokeWidth: 2.2,
+    roughness: 2.4,
+    fill: "rgba(160, 100, 50, 0.06)",
+    fillStyle: "solid",
+  });
+  parent.appendChild(ring);
+  const innerRing = rc.circle(cx, cy, r * 1.2, {
+    stroke: "rgba(120, 70, 30, 0.18)",
+    strokeWidth: 1,
+    roughness: 1.8,
+  });
+  parent.appendChild(innerRing);
+}
+
+function drawDoodleArrow(parent, rc, x, y, label) {
+  const lines = label.split("\n");
+  lines.forEach((ln, i) => {
+    const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    t.setAttribute("x", x); t.setAttribute("y", y + i * 22);
+    t.setAttribute("class", "node-name");
+    t.setAttribute("fill", "#b91c1c");
+    t.setAttribute("transform", `rotate(-3 ${x} ${y + i * 22})`);
+    t.textContent = ln;
+    parent.appendChild(t);
+  });
+  // Wavy underline beneath the last line
+  const ux = x;
+  const uy = y + (lines.length - 1) * 22 + 6;
+  const w = lines[lines.length - 1].length * 11;
+  const wave = `M ${ux},${uy} q ${w / 4},6 ${w / 2},0 t ${w / 2},0`;
+  const wavyLine = rc.path(wave, { stroke: "#b91c1c", strokeWidth: 1.6, roughness: 1.6 });
+  parent.appendChild(wavyLine);
+}
+
+function toHierarchy(person, childrenOf) {
+  const kids = childrenOf.get(person.id) || [];
+  const node = { ...person };
+  if (kids.length) node.children = kids.map(k => toHierarchy(k, childrenOf));
+  return node;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pan + zoom
+// ─────────────────────────────────────────────────────────────────────────
+let panX = 0, panY = 0, scale = 1;
+const elZoomPct = document.getElementById("zoom-pct");
+
+function applyTransform() {
+  canvasWrap.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+  elZoomPct.textContent = `${Math.round(scale * 100)}%`;
+}
+
+function fitToScreen(W, H) {
+  const mw = main.clientWidth;
+  const mh = main.clientHeight;
+  const s = Math.min(mw / W, mh / H, 1) * 0.92;
+  scale = s;
+  panX = (mw - W * s) / 2;
+  panY = (mh - H * s) / 2;
+  applyTransform();
+}
+
+document.getElementById("btn-fit").addEventListener("click", () => {
+  const W = parseFloat(svg.attr("width"));
+  const H = parseFloat(svg.attr("height"));
+  fitToScreen(W, H);
+});
+document.getElementById("btn-reset").addEventListener("click", () => {
+  scale = 1; panX = 40; panY = 40; applyTransform();
+});
+document.getElementById("btn-zoom-in").addEventListener("click", () => {
+  scale = Math.min(scale * 1.2, 4); applyTransform();
+});
+document.getElementById("btn-zoom-out").addEventListener("click", () => {
+  scale = Math.max(scale / 1.2, 0.1); applyTransform();
+});
+
+// Mouse wheel zoom (cursor-anchored)
+main.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const rect = main.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const oldScale = scale;
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  scale = Math.max(0.1, Math.min(4, scale * factor));
+  // Zoom around cursor: world point under cursor stays put
+  panX = mx - (mx - panX) * (scale / oldScale);
+  panY = my - (my - panY) * (scale / oldScale);
+  applyTransform();
+}, { passive: false });
+
+// Drag to pan
+let dragging = false, dragSX = 0, dragSY = 0, dragPX = 0, dragPY = 0;
+main.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return;
+  dragging = true; main.classList.add("dragging");
+  dragSX = e.clientX; dragSY = e.clientY;
+  dragPX = panX;     dragPY = panY;
+});
+window.addEventListener("mousemove", (e) => {
+  if (!dragging) return;
+  panX = dragPX + (e.clientX - dragSX);
+  panY = dragPY + (e.clientY - dragSY);
+  applyTransform();
+});
+window.addEventListener("mouseup", () => { dragging = false; main.classList.remove("dragging"); });
+
+let currentEmployees = SAMPLE;
+render(currentEmployees);
+attachCSVLoader(document.getElementById("csv-input"), emps => { currentEmployees = emps; render(emps); });
+window.addEventListener("resize", () => {
+  // Keep relative position, just re-fit if user hasn't manually panned
+});
+</script>
+</body>
+</html>

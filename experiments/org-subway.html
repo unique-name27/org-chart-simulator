@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Org Chart · Subway Map</title>
+<link href="https://fonts.googleapis.com/css2?family=Helvetica+Neue:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #f7f5ee; color: #111; font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  #wrap { position: absolute; inset: 0; display: flex; flex-direction: column; }
+  header {
+    padding: 16px 22px; border-bottom: 4px solid #000;
+    display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+    background: #f7f5ee;
+  }
+  h1 { margin: 0; font-size: 22px; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 700; }
+  .sub { font-size: 11px; color: #555; letter-spacing: 0.06em; text-transform: uppercase; flex: 1; }
+  header label { font-size: 11px; color: #333; }
+  main { flex: 1; overflow: auto; position: relative; }
+  svg { display: block; }
+  .station-circle { fill: white; stroke-width: 3; transition: r 0.15s; cursor: pointer; }
+  .station-circle:hover { stroke-width: 5; }
+  .station-label { font-size: 11px; font-weight: 700; fill: #111; pointer-events: none; }
+  .station-title { font-size: 10px; fill: #555; pointer-events: none; }
+  .line-label { font-size: 11px; font-weight: 700; fill: white; letter-spacing: 0.04em; text-transform: uppercase; pointer-events: none; }
+  .interchange { fill: white; stroke: #000; stroke-width: 3; cursor: pointer; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+  .legend-bar { width: 18px; height: 4px; border-radius: 2px; }
+  .level-row { font-size: 10px; fill: #888; pointer-events: none; font-weight: 600; }
+  .grid-line { stroke: rgba(0,0,0,0.04); stroke-width: 1; }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <header>
+    <div>
+      <h1>Org · Lines &amp; Stations</h1>
+      <div class="sub">A Vignelli-inspired diagram. Each colour = a department. Each station = a person. Manager → report links rendered as track segments.</div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <label>Drop CSV: <input type="file" id="csv-input" accept=".csv" /></label>
+  </header>
+  <main id="main">
+    <svg id="svg"></svg>
+  </main>
+</div>
+
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<script src="_shared.js"></script>
+
+<script>
+const { SAMPLE, DEPT_COLORS, deptColor, ALL_LEVELS, buildTree, attachCSVLoader } = window.OrgShared;
+
+const elLegend = document.getElementById("legend");
+elLegend.innerHTML = Object.entries(DEPT_COLORS).map(([d, c]) =>
+  `<div class="legend-item"><div class="legend-bar" style="background:${c}"></div>${d} line</div>`
+).join("");
+
+const svg = d3.select("#svg");
+
+// Layout: rows = level rank (E3 top, L1 bottom). Columns = ordering within level by dept.
+// Each dept gets a "line" (coloured stripe) connecting its members across levels.
+const LEVEL_ORDER = [...ALL_LEVELS].reverse(); // E3, E2, E1, M4, M3, M2, M1, L7..L1
+function levelRank(lv) {
+  const i = LEVEL_ORDER.indexOf(lv);
+  return i < 0 ? LEVEL_ORDER.length : i;
+}
+const ROW_H = 76;
+const COL_W = 130;
+const PAD_X = 60;
+const PAD_Y = 60;
+
+function render(employees) {
+  const { byId } = buildTree(employees);
+
+  // Group employees by level row
+  const byRow = {};
+  employees.forEach(e => {
+    const r = levelRank(e.level);
+    if (!byRow[r]) byRow[r] = [];
+    byRow[r].push(e);
+  });
+  // Sort each row: by dept (alphabetical), then by name — stable within dept
+  const deptOrder = Object.keys(DEPT_COLORS);
+  Object.keys(byRow).forEach(r => {
+    byRow[r].sort((a, b) => {
+      const da = deptOrder.indexOf(a.dept), db = deptOrder.indexOf(b.dept);
+      if (da !== db) return (da < 0 ? 999 : da) - (db < 0 ? 999 : db);
+      return (a.last + a.first).localeCompare(b.last + b.first);
+    });
+  });
+
+  // Assign x,y to each employee
+  const pos = {};
+  Object.entries(byRow).forEach(([r, list]) => {
+    list.forEach((e, i) => {
+      pos[e.id] = { x: PAD_X + i * COL_W, y: PAD_Y + parseInt(r, 10) * ROW_H };
+    });
+  });
+
+  // Width = max row, height = max row index
+  const maxCols = Math.max(...Object.values(byRow).map(l => l.length));
+  const usedRows = Object.keys(byRow).map(r => parseInt(r, 10));
+  const maxRow = Math.max(...usedRows);
+  const minRow = Math.min(...usedRows);
+  const W = PAD_X * 2 + maxCols * COL_W;
+  const H = PAD_Y * 2 + (maxRow - minRow + 1) * ROW_H;
+
+  svg.attr("width", W).attr("height", H);
+  svg.selectAll("*").remove();
+
+  // Faint horizontal grid for level reading
+  const grid = svg.append("g");
+  for (let r = minRow; r <= maxRow; r++) {
+    const y = PAD_Y + r * ROW_H;
+    grid.append("line").attr("class", "grid-line").attr("x1", 0).attr("x2", W).attr("y1", y).attr("y2", y);
+    // Level label at left
+    const lvName = LEVEL_ORDER[r];
+    if (lvName) {
+      grid.append("text").attr("class", "level-row")
+        .attr("x", 12).attr("y", y + 4)
+        .text(lvName);
+    }
+  }
+
+  // Lines: for each department, route a coloured stripe through all members in
+  // dept-defined order (top down by row). Multiple stripes for the same dept
+  // become a single curving line — a "metro line".
+  const linesGroup = svg.append("g");
+  deptOrder.forEach(dept => {
+    const members = employees.filter(e => e.dept === dept);
+    if (members.length < 2) return;
+    // Order members top-down, then by their existing x within row
+    const ordered = members.slice().sort((a, b) => {
+      const dy = (pos[a.id]?.y || 0) - (pos[b.id]?.y || 0);
+      if (dy) return dy;
+      return (pos[a.id]?.x || 0) - (pos[b.id]?.x || 0);
+    });
+    // Route through positions with smooth curves
+    const points = ordered.map(e => pos[e.id]).filter(Boolean);
+    if (points.length < 2) return;
+    const pathD = roundedPath(points, 22);
+    linesGroup.append("path")
+      .attr("d", pathD)
+      .attr("stroke", deptColor(dept))
+      .attr("stroke-width", 7)
+      .attr("stroke-linecap", "round")
+      .attr("stroke-linejoin", "round")
+      .attr("fill", "none")
+      .attr("opacity", 0.85);
+    // Line label near the start
+    const start = points[0];
+    linesGroup.append("rect")
+      .attr("x", start.x - 36).attr("y", start.y - 30)
+      .attr("width", 72).attr("height", 18)
+      .attr("rx", 9).attr("fill", deptColor(dept));
+    linesGroup.append("text")
+      .attr("class", "line-label")
+      .attr("text-anchor", "middle")
+      .attr("x", start.x).attr("y", start.y - 17)
+      .text(dept.toUpperCase());
+  });
+
+  // Manager → report dotted "transfer" lines (when on different metro lines)
+  const transferGroup = svg.append("g");
+  employees.forEach(e => {
+    if (!e.managerId || !byId.has(e.managerId)) return;
+    const mgr = byId.get(e.managerId);
+    if (mgr.dept === e.dept) return; // same line — already covered
+    const a = pos[mgr.id], b = pos[e.id];
+    if (!a || !b) return;
+    transferGroup.append("path")
+      .attr("d", `M ${a.x},${a.y} L ${b.x},${b.y}`)
+      .attr("stroke", "rgba(0,0,0,0.45)")
+      .attr("stroke-width", 1.5)
+      .attr("stroke-dasharray", "3 4")
+      .attr("fill", "none");
+  });
+
+  // Stations
+  const stationGroup = svg.append("g");
+  employees.forEach(e => {
+    const p = pos[e.id]; if (!p) return;
+    const color = deptColor(e.dept);
+    const isManager = employees.some(other => other.managerId === e.id);
+    const radius = isManager ? 9 : 6;
+    // Station marker — interchange-style if manager (white core w/ thick black ring)
+    if (isManager) {
+      stationGroup.append("circle")
+        .attr("class", "interchange")
+        .attr("cx", p.x).attr("cy", p.y).attr("r", radius)
+        .attr("stroke", color);
+    } else {
+      stationGroup.append("circle")
+        .attr("class", "station-circle")
+        .attr("cx", p.x).attr("cy", p.y).attr("r", radius)
+        .attr("stroke", color);
+    }
+    // Tooltip
+    stationGroup.append("title").text(`${e.first} ${e.last} — ${e.title} (${e.dept})`);
+
+    // Label above the station, alternating slight offset for readability
+    const idxInRow = Math.round((p.x - PAD_X) / COL_W);
+    const labelOffset = idxInRow % 2 === 0 ? -16 : 22;
+    const labelY = p.y + labelOffset;
+    const tg = stationGroup.append("g");
+    tg.append("text")
+      .attr("class", "station-label")
+      .attr("x", p.x).attr("y", labelY)
+      .attr("text-anchor", "middle")
+      .text(`${e.first} ${e.last}`);
+    tg.append("text")
+      .attr("class", "station-title")
+      .attr("x", p.x).attr("y", labelY + 12)
+      .attr("text-anchor", "middle")
+      .text(truncTitle(e.title));
+  });
+}
+
+// Build an SVG path through points with rounded corners (subway-style 90°+45° bends)
+function roundedPath(pts, r) {
+  if (pts.length < 2) return "";
+  let d = `M ${pts[0].x},${pts[0].y}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const prev = pts[i - 1], cur = pts[i], next = pts[i + 1];
+    // Approach point (radius back along prev→cur direction)
+    const v1 = unit(prev, cur), v2 = unit(cur, next);
+    const ax = cur.x - v1.x * r, ay = cur.y - v1.y * r;
+    const bx = cur.x + v2.x * r, by = cur.y + v2.y * r;
+    d += ` L ${ax},${ay} Q ${cur.x},${cur.y} ${bx},${by}`;
+  }
+  const last = pts[pts.length - 1];
+  d += ` L ${last.x},${last.y}`;
+  return d;
+}
+function unit(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: dx / len, y: dy / len };
+}
+function truncTitle(t) { return (t || "").length > 22 ? (t.slice(0, 20) + "…") : (t || ""); }
+
+let currentEmployees = SAMPLE;
+render(currentEmployees);
+attachCSVLoader(document.getElementById("csv-input"), emps => { currentEmployees = emps; render(emps); });
+</script>
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Org Chart · 3D Force Graph</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0b1220; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  #graph { position: absolute; inset: 0; }
+  .panel {
+    position: absolute; top: 16px; left: 16px; z-index: 10;
+    background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 10px; padding: 12px 14px; min-width: 260px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  }
+  .panel h1 { margin: 0 0 4px; font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
+  .panel p { margin: 0 0 10px; font-size: 11px; color: #94a3b8; line-height: 1.5; }
+  .panel label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 6px; }
+  .panel input[type=file] { font-size: 11px; color: #cbd5e1; }
+  .legend { position: absolute; top: 16px; right: 16px; z-index: 10; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; padding: 10px 12px; font-size: 11px; }
+  .legend-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .info { position: absolute; bottom: 16px; left: 16px; z-index: 10; font-size: 10px; color: #64748b; }
+  .stats { font-size: 11px; color: #cbd5e1; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.15); }
+  .stat { display: flex; justify-content: space-between; padding: 2px 0; }
+  .stat span:last-child { font-weight: 600; color: #f1f5f9; }
+</style>
+</head>
+<body>
+
+<div id="graph"></div>
+
+<div class="panel">
+  <h1>3D Force Graph</h1>
+  <p>Drag to rotate · scroll to zoom · click a node to focus. The simulation balances repulsion and link springs — closely-coupled teams cluster, isolated branches spread.</p>
+  <label>Load real data (CSV exported from main app):</label>
+  <input type="file" id="csv-input" accept=".csv" />
+  <div class="stats" id="stats"></div>
+</div>
+
+<div class="legend" id="legend"></div>
+
+<div class="info">org-3d-force.html · standalone · uses 3d-force-graph + three.js</div>
+
+<script src="https://unpkg.com/three@0.150.0/build/three.min.js"></script>
+<script src="https://unpkg.com/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
+<script src="_shared.js"></script>
+
+<script>
+const { SAMPLE, deptColor, DEPT_COLORS, buildTree, depthMap, attachCSVLoader } = window.OrgShared;
+
+const elGraph  = document.getElementById("graph");
+const elLegend = document.getElementById("legend");
+const elStats  = document.getElementById("stats");
+
+// Build the legend once (depts are stable across datasets)
+elLegend.innerHTML = Object.entries(DEPT_COLORS).map(([dept, color]) =>
+  `<div class="legend-row"><div class="legend-dot" style="background:${color}"></div>${dept}</div>`
+).join("");
+
+const Graph = ForceGraph3D()(elGraph)
+  .backgroundColor("#0b1220")
+  .nodeLabel(node => `<div style="background:#0f172a;border:1px solid #334155;padding:6px 10px;border-radius:6px;color:#f1f5f9;font-size:12px"><b>${node.first} ${node.last}</b><br><span style="color:#94a3b8">${node.title}</span><br><span style="color:#64748b;font-size:10px">${node.dept} · ${node.location}</span></div>`)
+  .nodeColor(n => deptColor(n.dept))
+  .nodeVal(n => n.size)
+  .nodeOpacity(0.92)
+  .linkColor(() => "rgba(148, 163, 184, 0.35)")
+  .linkWidth(1.2)
+  .linkDirectionalParticles(2)
+  .linkDirectionalParticleSpeed(0.004)
+  .linkDirectionalParticleWidth(1.6)
+  .linkDirectionalParticleColor(l => deptColor(l.target.dept))
+  .onNodeClick(node => {
+    // Zoom to node — smooth camera flight
+    const distance = 70;
+    const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
+    Graph.cameraPosition(
+      { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+      node,
+      1500
+    );
+  });
+
+function render(employees) {
+  const { byId } = buildTree(employees);
+  const depths = depthMap(employees);
+
+  // Node size = inverse depth (CEO biggest, ICs smallest) + small bump for managers
+  const maxDepth = Math.max(...Object.values(depths), 1);
+  const nodes = employees.map(e => ({
+    ...e,
+    size: Math.max(2, (maxDepth - depths[e.id]) * 2.5 + 2),
+  }));
+  const links = employees
+    .filter(e => e.managerId && byId.has(e.managerId))
+    .map(e => ({ source: e.managerId, target: e.id }));
+
+  Graph.graphData({ nodes, links });
+
+  // Stats
+  const deptCounts = {};
+  employees.forEach(e => deptCounts[e.dept] = (deptCounts[e.dept] || 0) + 1);
+  elStats.innerHTML = `
+    <div class="stat"><span>People</span><span>${employees.length}</span></div>
+    <div class="stat"><span>Departments</span><span>${Object.keys(deptCounts).length}</span></div>
+    <div class="stat"><span>Max depth</span><span>${maxDepth + 1} levels</span></div>
+  `;
+}
+
+render(SAMPLE);
+attachCSVLoader(document.getElementById("csv-input"), render);
+
+// Keep graph filling the window
+window.addEventListener("resize", () => Graph.width(window.innerWidth).height(window.innerHeight));
+Graph.width(window.innerWidth).height(window.innerHeight);
+</script>
+</body>
+</html>
