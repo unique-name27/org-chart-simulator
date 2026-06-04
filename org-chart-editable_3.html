@@ -8762,6 +8762,7 @@ function OrgChartApp() {
   const getNodeColor = useCallback((node) => {
     if (colorBy === "department") return DEPT_COLORS[node.dept] || "#64748b";
     if (colorBy === "business_group") return BG_COLORS[node.bg] || "#64748b";
+    if (colorBy === "discipline") return FN_COLORS[node.fn] || "#64748b";
     if (colorBy === "location") return LOC_COLORS[node.location] || "#64748b";
     return "#64748b";
   }, [colorBy]);
@@ -9511,9 +9512,9 @@ function OrgChartApp() {
                 </>}
                 <div className="flex items-center gap-1 border-l border-gray-200 pl-3">
                   <span className="text-xs text-gray-400">Color:</span>
-                  {["department", "business_group", "location"].map(c => (
+                  {["department", "business_group", "discipline", "location"].map(c => (
                     <button key={c} onClick={() => setColorBy(c)} className={`text-xs px-2 py-1 rounded transition-colors ${colorBy === c ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>
-                      {c === "department" ? "Dept" : c === "business_group" ? "BU" : "Loc"}
+                      {c === "department" ? "Dept" : c === "business_group" ? "BU" : c === "discipline" ? "Discipline" : "Loc"}
                     </button>
                   ))}
                 </div>
