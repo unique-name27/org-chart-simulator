@@ -684,6 +684,50 @@ function generateSemiCompany() {
     });
   }
 
+  // ── Executive Assistants / Chiefs of Staff attached to senior leaders ──
+  const csuite = [CEO, CTO, COO, CFO, CRO, CHRO, CPO];
+  const assistantLeaders = [
+    ...csuite,
+    ...svpEmps.filter((_, i) => i % 2 === 0),   // ~half of SVPs
+    ...vpEmps.filter((_, i) => i % 5 === 0),     // a handful of VPs
+  ];
+  assistantLeaders.forEach(leader => {
+    const isExec = leader.level === "C-Suite";
+    employees.push({
+      id: rid(), ...rName(),
+      dept: leader.dept,
+      title: isExec ? rn(["Chief of Staff", "Executive Assistant", "Sr. Executive Assistant"]) : "Executive Assistant",
+      bg: leader.bg, fn: "G&A", managerId: leader.id,
+      location: leader.location, country: leader.country || countryFor(leader.location),
+      employmentType: "FTE",
+      startDate: fmt(addMonths(foundingDate, rmo(6, 90))), endDate: null, status: "Active",
+      level: "IC4", band: "Band-3", costCenter: leader.costCenter, isAssistant: true,
+    });
+  });
+
+  // ── Senior ICs reporting directly to leaders (skip-level: Directors & VPs) ──
+  const ADVISOR_TITLES = ["Principal Engineer", "Technical Advisor", "Staff Technical Program Manager",
+    "Principal Architect", "Special Projects Lead", "Senior Staff Engineer"];
+  const skipLeaders = [
+    ...dirEmps.filter((d, i) => d.status === "Active" && i % 3 === 0),
+    ...vpEmps.filter((_, i) => i % 3 === 1),
+  ];
+  skipLeaders.forEach(leader => {
+    const n = rmo(1, 2);
+    for (let i = 0; i < n; i++) {
+      const lvl = rn(["IC4", "IC5", "IC5"]);
+      employees.push({
+        id: rid(), ...rName(),
+        dept: leader.dept, title: rn(ADVISOR_TITLES),
+        bg: leader.bg, fn: leader.fn, managerId: leader.id,
+        location: leader.location, country: leader.country || countryFor(leader.location),
+        employmentType: "FTE",
+        startDate: fmt(addMonths(foundingDate, rmo(12, 110))), endDate: null, status: "Active",
+        level: lvl, band: lvl === "IC5" ? "Band-4" : "Band-3", costCenter: leader.costCenter,
+      });
+    }
+  });
+
   // ── Normalize: ensure every employee has country + employmentType ──
   // Late-injected "weirdness" employees skip the mk() helper, so backfill here.
   employees.forEach(e => {
@@ -696,6 +740,40 @@ function generateSemiCompany() {
       e.employmentType = Math.random() < bias ? "Contract" : "FTE";
     }
   });
+
+  // ── Derive Business Unit (SVP org) & Department (VP org) from the org chart ──
+  // BU = the group under the CTO / C-suite (SVP level); Department = one level deeper
+  // (VP org). The original discipline taxonomy is preserved in `taxo` and the legacy
+  // product-BU tag in `productBU` so coverage / pipeline / metrics keep working.
+  {
+    const byId = {};
+    employees.forEach(e => { byId[e.id] = e; });
+    const cleanOrg = t => (t || "").replace(/^(SVP|EVP|VP)\b[.,]?\s*(of\s+)?/i, "").replace(/\s*&\s*Co-?Founder/i, "").trim() || t;
+    const ancestorAtLevel = (e, lvl) => {
+      let cur = e, guard = 0;
+      while (cur && guard++ < 40) {
+        if (cur.level === lvl) return cur;
+        cur = cur.managerId ? byId[cur.managerId] : null;
+      }
+      return null;
+    };
+    employees.forEach(e => {
+      const svp = ancestorAtLevel(e, "SVP");
+      const vp  = ancestorAtLevel(e, "VP");
+      e.taxo = e.taxo || e.dept;          // preserve discipline taxonomy
+      e.productBU = e.productBU || e.bg;  // preserve legacy product-BU tag
+      e.bg = svp ? cleanOrg(svp.title) : "Executive Office";
+      e.dept = e.level === "C-Suite" ? "Executive Office"
+             : vp  ? cleanOrg(vp.title)
+             : svp ? cleanOrg(svp.title)
+             : "Executive Office";
+    });
+    // Stable colors for the derived Business Unit & Department values
+    const PALETTE = [...EXTRA_COLORS, ...RECRUITER_COLORS, "#2563eb", "#7c3aed", "#059669", "#d97706", "#dc2626", "#0891b2", "#e11d48", "#10b981"];
+    const hashColor = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return PALETTE[h % PALETTE.length]; };
+    [...new Set(employees.map(e => e.bg))].forEach(v => { if (v && !BG_COLORS[v]) BG_COLORS[v] = hashColor(v); });
+    [...new Set(employees.map(e => e.dept))].forEach(v => { if (v && !DEPT_COLORS[v]) DEPT_COLORS[v] = hashColor(v); });
+  }
 
   return employees;
 }
@@ -4014,9 +4092,9 @@ function DashboardView() {
   const { engRatio, dvRatio, gaRatio, avgTenure, last90Hires, last90Departures } = useMemo(() => {
     const dataNow = new Date(2025, 5, 1); // fixed "today" matching data generator (Jun 1 2025)
     const TECH_DEPTS = new Set(["IC Design","Verification","Physical Design","Software","Systems Engineering","Test Engineering","Product Engineering","Applications","Field Applications","Process Engineering","Quality & Reliability"]);
-    const eng  = activeEmployees.filter(e => TECH_DEPTS.has(e.dept)).length;
-    const des  = activeEmployees.filter(e => e.dept === "IC Design").length;
-    const dv   = activeEmployees.filter(e => e.dept === "Verification").length;
+    const eng  = activeEmployees.filter(e => TECH_DEPTS.has(e.taxo)).length;
+    const des  = activeEmployees.filter(e => e.taxo === "IC Design").length;
+    const dv   = activeEmployees.filter(e => e.taxo === "Verification").length;
     const ga   = activeEmployees.filter(e => e.fn === "G&A").length;
     const tot  = activeEmployees.length || 1;
     return {
@@ -4062,7 +4140,7 @@ function DashboardView() {
     return BUS_GROUPS.map(bg => {
       const row = { bg };
       COV_ROLES.forEach(role => {
-        row[role] = activeEmployees.filter(e => e.bg === bg && e.dept === role).length;
+        row[role] = activeEmployees.filter(e => e.productBU === bg && e.taxo === role).length;
       });
       return row;
     });
@@ -4174,7 +4252,7 @@ function DashboardView() {
             <h3 className="text-sm font-bold text-gray-700 mb-3">Critical Semiconductor Discipline Coverage</h3>
             <div className="space-y-2">
               {["IC Design", "Verification", "Physical Design", "Test Engineering", "Product Engineering", "Applications", "Field Applications", "Process Engineering", "Quality & Reliability"].map(dept => {
-                const count = activeEmployees.filter(e => e.dept === dept).length;
+                const count = activeEmployees.filter(e => e.taxo === dept).length;
                 const pct = (count / activeEmployees.length * 100).toFixed(1);
                 const minRequired = dept === "IC Design" || dept === "Verification" ? 15 : 5;
                 return (
@@ -4300,7 +4378,7 @@ function DashboardView() {
 
       {dashTab === "coverage" && (
         <div>
-          <p className="text-sm text-gray-500 mb-4">Headcount by Business Unit × semiconductor discipline. Red = below minimum viable coverage.</p>
+          <p className="text-sm text-gray-500 mb-4">Headcount by product line × semiconductor discipline. Red = below minimum viable coverage.</p>
           <div className="bg-white rounded-xl border border-gray-100 overflow-auto">
             <table className="w-full text-xs border-collapse">
               <thead>
@@ -7388,10 +7466,10 @@ function computeProductLineAssignments(employees) {
   const pl1 = [], pl2 = [], ga = [];
   const GA_SET = new Set(GA_DEPTS);
   active.forEach(e => {
-    if (GA_SET.has(e.dept)) { ga.push(e); return; }
-    if (["Automotive BU","Industrial BU"].includes(e.bg))              pl1.push(e);
-    else if (["Data Center BU","Consumer BU","IoT BU"].includes(e.bg)) pl2.push(e);
-    else if (e.bg === "Corporate")
+    if (GA_SET.has(e.taxo)) { ga.push(e); return; }
+    if (["Automotive BU","Industrial BU"].includes(e.productBU))              pl1.push(e);
+    else if (["Data Center BU","Consumer BU","IoT BU"].includes(e.productBU)) pl2.push(e);
+    else if (e.productBU === "Corporate")
       (parseInt(e.id.slice(-4)) % 2 === 0 ? pl1 : pl2).push(e);
   });
   return { pl1, pl2, ga };
@@ -7450,7 +7528,7 @@ function ProductPipelineView() {
 
   const stageEmps = useCallback((stageId, plId) => {
     const stage = stages.find(s => s.id === stageId);
-    return stage ? (assignments[plId] || []).filter(e => stage.depts.includes(e.dept)) : [];
+    return stage ? (assignments[plId] || []).filter(e => stage.depts.includes(e.taxo)) : [];
   }, [assignments, stages]);
 
   // Full grid: stageId → plId → { emps, ga, ratio, warnings, status }
@@ -7819,7 +7897,7 @@ function ExitSimModal() {
   const peers = mgr ? (tree.map[mgr.id]?.children || []).filter(c => c.id !== node.id && c.status === "Active") : [];
 
   // Pipeline stages that lose coverage
-  const lostStages = DEFAULT_PIPELINE_STAGES.filter(s => s.depts.includes(node.dept));
+  const lostStages = DEFAULT_PIPELINE_STAGES.filter(s => s.depts.includes(node.taxo));
 
   // Additional flight risk triggered for peers (disruptionRisk factor)
   const peersAtRisk = peers.filter(p => {
@@ -7906,7 +7984,7 @@ function ExitSimModal() {
           {lostStages.length > 0 && (
             <div className="rounded-xl border border-gray-100 p-4">
               <div className="text-xs font-bold text-gray-600 mb-2 flex items-center gap-1.5"><Activity size={12}/> Pipeline Coverage Impact</div>
-              <div className="text-xs text-gray-500 mb-2">{node.dept} covers {lostStages.length} NPD stage{lostStages.length > 1 ? "s" : ""}:</div>
+              <div className="text-xs text-gray-500 mb-2">{node.taxo} covers {lostStages.length} NPD stage{lostStages.length > 1 ? "s" : ""}:</div>
               <div className="flex flex-wrap gap-1">
                 {lostStages.map(s => (
                   <span key={s.id} className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">{s.emoji} {s.label}</span>
