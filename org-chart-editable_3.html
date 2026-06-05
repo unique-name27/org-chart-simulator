@@ -1580,7 +1580,7 @@ function AnalyticsView() {
             </div>
           </div>
           <div>
-            <div className="text-xs text-gray-400 font-medium">Org Health Score</div>
+            <div className="text-xs text-gray-400 font-medium">Org Health Score<Help text="Analytics — an Org Health Score (0–100) plus a ranked feed of detected issues (span-of-control, attrition, succession, structure). Click any insight to jump to the affected team; filter by category or severity, or scrub a snapshot date to see the score over time." side="bottom" width={300} /></div>
             <div className="text-sm font-bold" style={{ color: scoreColor }}>{scoreLabel}</div>
             {filters.snapshotDate && (
               <div className="text-xs text-blue-500 mt-0.5">📅 Snapshot: {new Date(filters.snapshotDate).toLocaleDateString("en-US", { year: "numeric", month: "short" })}</div>
@@ -1893,7 +1893,7 @@ function FlightRiskView() {
     <div className="p-6 h-full overflow-y-auto" style={{ fontFamily: "'DM Sans', sans-serif" }}>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Flight Risk Dashboard</h2>
+          <h2 className="text-xl font-bold text-gray-900">Flight Risk Dashboard<Help text="Ranks active employees by attrition risk, scored from tenure, role stagnation, recent manager changes, and peer departures. Sort or filter the list and click anyone to open them in the org chart." side="bottom" width={300} /></h2>
           <p className="text-sm text-gray-500">Attrition risk scores computed from tenure, stagnation, team disruption & manager signals</p>
         </div>
       </div>
@@ -3914,7 +3914,7 @@ function TimelineView() {
     <div className="p-6 h-full overflow-y-auto" style={{ fontFamily: "'DM Sans', sans-serif" }}>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Company Growth Timeline</h2>
+          <h2 className="text-xl font-bold text-gray-900">Company Growth Timeline<Help text="Replays company headcount month-by-month from founding to today. Press Play or drag the scrubber to watch hires and departures unfold; the charts below track growth, attrition, and tenure over time." side="bottom" width={300} /></h2>
           <p className="text-sm text-gray-500">From 3 co-founders to {employees.filter(e => e.status === "Active").length} employees</p>
         </div>
         <div className="text-right">
@@ -4181,7 +4181,7 @@ function DashboardView() {
 
   return (
     <div className="p-6 h-full overflow-y-auto" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-      <h2 className="text-xl font-bold text-gray-900 mb-1">Dashboards & Insights</h2>
+      <h2 className="text-xl font-bold text-gray-900 mb-1">Dashboards & Insights<Help text="Executive KPIs and analytical views. Switch sub-tabs (Executive, Semiconductor Insights, Manager Health, Hotspot Report, Skills Coverage) to drill into headcount mix, span-of-control, and discipline coverage. Click most charts to filter the org chart." side="bottom" width={300} /></h2>
       <div className="flex gap-1 mb-6 border-b border-gray-100 pb-2">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setDashTab(t.id)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors ${dashTab === t.id ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}>
@@ -5596,7 +5596,7 @@ function HeadcountPlanningView() {
     <div className="p-6 h-full overflow-y-auto" style={{ fontFamily: "'DM Sans', sans-serif" }}>
       <div className="flex items-start justify-between mb-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Headcount Planning</h2>
+          <h2 className="text-xl font-bold text-gray-900">Headcount Planning<Help text="Plan future headcount per group and level. Set 3-year targets in the grid, or use Distribute to spread a single top-down number across groups and levels, then read off the hires and attrition backfills it implies." side="bottom" width={300} /></h2>
           <div className="text-xs text-gray-500 mt-0.5">
             Early career = <span className="font-semibold text-emerald-700">L1–L2</span> · Experienced = everyone else (L3–L7, M1–M4, E1–E3)
             {planLocFilter.size > 0 && (
@@ -7641,7 +7641,7 @@ function ProductPipelineView() {
       <div className="shrink-0 px-6 pt-4 pb-3 bg-white border-b border-gray-100">
         <div className="flex items-center justify-between mb-2">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Product Development Pipeline</h2>
+            <h2 className="text-xl font-bold text-gray-900">Product Development Pipeline<Help text="Maps your workforce onto the semiconductor new-product-development stages × product lines, flagging stages that are under-staffed relative to the engineering load they carry." side="bottom" width={300} /></h2>
             <p className="text-sm text-gray-500">Cross-functional team coverage across {stages.length} semiconductor NPD stages · 2 active product lines · {assignments.ga?.length ?? 0} G&A supporting</p>
           </div>
           <div className="flex items-center gap-2">
@@ -9462,6 +9462,7 @@ function OrgChartApp() {
             {/* Filters (org chart view only) */}
             {view === "org-chart" && (
               <>
+                <Help text="Org Chart — the live reporting tree. Click a node to expand/collapse, or a person for their detail panel. Recolor nodes with the Color buttons (Dept / BU / Discipline / Location), narrow the view with these filters or search, and turn on Team Move to drag whole teams and model reorgs." side="bottom" width={320} />
                 <select value={filterDept} onChange={e => setFilterDept(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600">
                   <option value="All">All Departments</option>
                   {departments.map(d => <option key={d} value={d}>{d}</option>)}
