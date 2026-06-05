@@ -6901,6 +6901,637 @@ function DetailPanel() {
 }
 
 // ─── WHITEBOARD ORG VIEW (sketchy hand-drawn chart via rough.js) ───
+// three.js is loaded on demand (only when the 3D Galaxy view is first opened) so it
+// adds zero weight to normal page loads. Returns a promise that resolves once THREE exists.
+let _threePromise = null;
+function loadThree() {
+  if (typeof THREE !== "undefined") return Promise.resolve();
+  if (_threePromise) return _threePromise;
+  _threePromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js";
+    s.onload = () => resolve();
+    s.onerror = () => { _threePromise = null; reject(new Error("three.js load failed")); };
+    document.head.appendChild(s);
+  });
+  return _threePromise;
+}
+
+// 3D "galaxy" org view — CEO at the center, each org level a shell expanding outward.
+// Imperative three.js (UMD global THREE) driven from a useEffect. Orbit camera by
+// default; toggle into a first-person pointer-lock "fly" camera (WASD + mouse-look).
+function GalaxyOrgView() {
+  const { chartDisplayRoot, getNodeColor, colorBy, setDetailPanel } = useContext(AppCtx);
+  const mountRef = useRef(null);
+  const tipRef = useRef(null);
+  const sceneRef = useRef(null);
+  const labelLayerRef = useRef(null);
+  const reticleRef = useRef(null);
+  const hudTargetRef = useRef(null);
+  const hudSpeedRef = useRef(null);
+  const vignetteRef = useRef(null);
+  const [camMode, setCamMode] = useState("orbit");
+  const camModeRef = useRef("orbit");
+  const getColorRef = useRef(getNodeColor);
+  const setDetailRef = useRef(setDetailPanel);
+  getColorRef.current = getNodeColor;
+  setDetailRef.current = setDetailPanel;
+
+  // Load three.js on demand the first time this view mounts
+  const [threeReady, setThreeReady] = useState(typeof THREE !== "undefined");
+  useEffect(() => {
+    if (threeReady) return;
+    let alive = true;
+    loadThree().then(() => alive && setThreeReady(true)).catch(() => {});
+    return () => { alive = false; };
+  }, [threeReady]);
+
+  // ── Radial 3D layout (CEO center → shells outward), reusing _totalReports weights ──
+  const layout = useMemo(() => {
+    if (!chartDisplayRoot) return null;
+    const nodes = [];   // { node, x, y, z, depth }
+    const edges = [];   // [parentIdx, childIdx]
+    const SHELL = 165;
+    const jr = s => { const x = Math.sin(s * 12.9898) * 43758.5453; return x - Math.floor(x); }; // deterministic 0..1
+    (function place(node, depth, t0, t1, parentIdx) {
+      // superlinear radius: each level sits farther out than the last, so the
+      // lower/larger ranks (directors, managers, ICs) get spread apart
+      const r = depth === 0 ? 0 : SHELL * Math.pow(depth, 1.55);
+      const tMid = (t0 + t1) / 2;
+      const phi = depth === 0 ? 0 : 0.18 * Math.sin(tMid * 1.7) + depth * 0.05;
+      const cp = Math.cos(phi), sp = Math.sin(phi);
+      const idx = nodes.length;
+      let x = r * cp * Math.cos(tMid);
+      let z = r * cp * Math.sin(tMid);
+      let y = r * sp;
+      if (depth >= 4) { // scatter deep ranks into a cloud so they don't sit on a thin arc
+        const j = SHELL * (0.5 + (depth - 3) * 0.45);
+        x += (jr(idx * 1.7) - 0.5) * j;
+        y += (jr(idx * 2.9) - 0.5) * j * 1.5;
+        z += (jr(idx * 4.3) - 0.5) * j;
+      }
+      nodes.push({ node, x, y, z, depth });
+      if (parentIdx != null) edges.push([parentIdx, idx]);
+      const kids = node.children || [];
+      if (!kids.length || depth > 9) return;
+      const total = node._totalReports || kids.length;
+      const sweep = t1 - t0;
+      let a = t0;
+      kids.forEach(c => {
+        const share = ((c._totalReports || 0) + 1) / total;
+        const ea = a + sweep * share;
+        const m = (ea - a) * 0.08;
+        place(c, depth + 1, a + m, ea - m, idx);
+        a = ea;
+      });
+    })(chartDisplayRoot, 0, 0, Math.PI * 2, null);
+    let maxR = 1;
+    nodes.forEach(n => { maxR = Math.max(maxR, Math.hypot(n.x, n.y, n.z)); });
+    return { nodes, edges, maxR };
+  }, [chartDisplayRoot]);
+
+  // ── Build the THREE scene once per layout ──
+  useEffect(() => {
+    if (!threeReady || !layout || !mountRef.current) return;
+    const mount = mountRef.current;
+    const W = mount.clientWidth || 800, H = mount.clientHeight || 600;
+    const { nodes, edges, maxR } = layout;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(W, H);
+    mount.appendChild(renderer.domElement);
+    renderer.domElement.style.display = "block";
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x05060a);
+    scene.fog = new THREE.FogExp2(0x05060a, 0.00028);
+
+    // Starfield backdrop — multiple dense layers for a deep, busy sky
+    const starfield = new THREE.Group();
+    const starLayers = [];
+    function addStarLayer(count, rMin, rRange, color, size, opacity) {
+      const pos = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        const rr = rMin + Math.random() * rRange;
+        const th = Math.random() * Math.PI * 2;
+        const ph = Math.acos(2 * Math.random() - 1);
+        pos[i * 3] = rr * Math.sin(ph) * Math.cos(th);
+        pos[i * 3 + 1] = rr * Math.cos(ph);
+        pos[i * 3 + 2] = rr * Math.sin(ph) * Math.sin(th);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      const m = new THREE.PointsMaterial({ color, size, sizeAttenuation: false, transparent: true, opacity });
+      const p = new THREE.Points(g, m);
+      p.frustumCulled = false;
+      starfield.add(p);
+      starLayers.push({ g, m });
+    }
+    addStarLayer(34000, 6000, 18000, 0x9aa8c8, 1.6, 0.85); // deep dense field
+    addStarLayer(14000, 4500, 10000, 0xd6e2ff, 2.4, 0.95); // mid
+    addStarLayer(6000, 3000, 6500, 0xf2f7ff, 3.4, 1.0);    // near bright
+    addStarLayer(900, 4000, 15000, 0xffffff, 4.8, 1.0);    // sparse blazing "hero" stars
+    scene.add(starfield);
+
+    // Shooting stars — a small pool of streaking meteors (visible in both modes)
+    const METEOR_N = 10;
+    const meteors = [];
+    for (let i = 0; i < METEOR_N; i++) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+      const m = new THREE.LineBasicMaterial({ color: 0xcfe8ff, transparent: true, opacity: 0 });
+      const ln = new THREE.Line(g, m);
+      ln.frustumCulled = false;
+      scene.add(ln);
+      meteors.push({ ln, g, m, life: 0, maxLife: 1, head: new THREE.Vector3(), vel: new THREE.Vector3() });
+    }
+
+    // Connectors — one merged LineSegments
+    const linePos = new Float32Array(edges.length * 6);
+    edges.forEach(([pi, ci], k) => {
+      const p = nodes[pi], c = nodes[ci];
+      linePos[k * 6] = p.x; linePos[k * 6 + 1] = p.y; linePos[k * 6 + 2] = p.z;
+      linePos[k * 6 + 3] = c.x; linePos[k * 6 + 4] = c.y; linePos[k * 6 + 5] = c.z;
+    });
+    const lineGeo = new THREE.BufferGeometry();
+    lineGeo.setAttribute("position", new THREE.BufferAttribute(linePos, 3));
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x3b4a66, transparent: true, opacity: 0.32 });
+    const lines = new THREE.LineSegments(lineGeo, lineMat);
+    scene.add(lines);
+
+    // Node bodies — single InstancedMesh
+    const sizeForDepth = d => Math.max(3.4, 16 - d * 1.9);
+    const sphereGeo = new THREE.SphereGeometry(1, 14, 12);
+    const sphereMat = new THREE.MeshBasicMaterial();
+    const inst = new THREE.InstancedMesh(sphereGeo, sphereMat, nodes.length);
+    const dummy = new THREE.Object3D();
+    const col = new THREE.Color();
+    nodes.forEach((n, i) => {
+      dummy.position.set(n.x, n.y, n.z);
+      const s = sizeForDepth(n.depth);
+      dummy.scale.set(s, s, s);
+      dummy.updateMatrix();
+      inst.setMatrixAt(i, dummy.matrix);
+      col.set(getColorRef.current(n.node) || "#64748b");
+      inst.setColorAt(i, col);
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    inst.frustumCulled = false; // bounding sphere is the unit geometry at origin; keep all instances visible
+    scene.add(inst);
+
+    // Labels for senior levels (depth <= 3): canvas-texture sprites
+    function makeLabel(text) {
+      const pad = 8, fs = 30;
+      const c = document.createElement("canvas");
+      const cx = c.getContext("2d");
+      cx.font = `600 ${fs}px 'DM Sans', sans-serif`;
+      const tw = cx.measureText(text).width;
+      c.width = Math.ceil(tw + pad * 2);
+      c.height = fs + pad * 2;
+      cx.font = `600 ${fs}px 'DM Sans', sans-serif`;
+      cx.fillStyle = "rgba(5,8,16,0.66)";
+      cx.fillRect(0, 0, c.width, c.height);
+      cx.fillStyle = "#e8eefc";
+      cx.textBaseline = "middle";
+      cx.fillText(text, pad, c.height / 2);
+      const tex = new THREE.CanvasTexture(c);
+      tex.minFilter = THREE.LinearFilter;
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+      const sp = new THREE.Sprite(mat);
+      const scaleH = 13;
+      sp.scale.set(scaleH * (c.width / c.height), scaleH, 1);
+      return sp;
+    }
+    const labels = [];
+    nodes.forEach(n => {
+      if (n.depth <= 3) {
+        const sp = makeLabel(`${n.node.first} ${n.node.last}`);
+        sp.position.set(n.x, n.y + sizeForDepth(n.depth) + 9, n.z);
+        scene.add(sp);
+        labels.push(sp);
+      }
+    });
+
+    // Cameras
+    const orbitCam = new THREE.PerspectiveCamera(55, W / H, 0.5, 30000);
+    const flyCam = new THREE.PerspectiveCamera(72, W / H, 0.5, 30000);
+    const target = new THREE.Vector3(0, 0, 0);
+    const orbit = { theta: 0.9, phi: 1.05, radius: Math.max(260, maxR * 2.4) };
+    const fly = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, speed: Math.max(160, maxR * 0.9) };
+    const keys = new Set();
+    scene.add(flyCam); // so the camera-attached hyperdrive streaks render
+    const FOV_BASE = 72, FOV_HYPER = 108;
+
+    // Hyperdrive warp streaks — camera-local space, attached to flyCam
+    const WARP_N = 320;
+    const warpState = new Float32Array(WARP_N * 3);
+    for (let i = 0; i < WARP_N; i++) {
+      const a = Math.random() * Math.PI * 2, rad = 18 + Math.random() * 560;
+      warpState[i * 3] = Math.cos(a) * rad;
+      warpState[i * 3 + 1] = Math.sin(a) * rad;
+      warpState[i * 3 + 2] = -(60 + Math.random() * 1700);
+    }
+    const warpArr = new Float32Array(WARP_N * 6);
+    const warpGeo = new THREE.BufferGeometry();
+    warpGeo.setAttribute("position", new THREE.BufferAttribute(warpArr, 3));
+    const warpMat = new THREE.LineBasicMaterial({ color: 0xbcd8ff, transparent: true, opacity: 0 });
+    const warp = new THREE.LineSegments(warpGeo, warpMat);
+    warp.frustumCulled = false; warp.visible = false;
+    flyCam.add(warp);
+
+    // Smooth orbit "fly-to-node" tween
+    const flyTo = { t: 1, dur: 0.9, fromT: new THREE.Vector3(), toT: new THREE.Vector3(), fromR: 0, toR: 0 };
+
+    // LOD label pool (HTML overlay) — reveals nearby names in both modes
+    const labelDivs = [];
+    if (labelLayerRef.current) {
+      for (let i = 0; i < 16; i++) {
+        const d = document.createElement("div");
+        d.style.cssText = "position:absolute;transform:translate(-50%,-150%);pointer-events:none;white-space:nowrap;font:600 11px 'DM Sans',sans-serif;color:#dbe7ff;text-shadow:0 1px 3px rgba(0,0,0,0.95);display:none;";
+        labelLayerRef.current.appendChild(d);
+        labelDivs.push(d);
+      }
+    }
+
+    function applyOrbit() {
+      const { theta, phi, radius } = orbit;
+      orbitCam.position.set(
+        target.x + radius * Math.sin(phi) * Math.cos(theta),
+        target.y + radius * Math.cos(phi),
+        target.z + radius * Math.sin(phi) * Math.sin(theta)
+      );
+      orbitCam.lookAt(target);
+    }
+    applyOrbit();
+
+    function enterFly() {
+      fly.pos.copy(orbitCam.position);
+      const dir = target.clone().sub(orbitCam.position).normalize();
+      fly.yaw = Math.atan2(dir.x, dir.z) + Math.PI;
+      fly.pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+      renderer.domElement.requestPointerLock?.();
+    }
+    function exitFly() {
+      orbit.radius = THREE.MathUtils.clamp(flyCam.position.distanceTo(target), 50, maxR * 7);
+      orbit.theta = Math.atan2(flyCam.position.z, flyCam.position.x);
+      orbit.phi = Math.acos(THREE.MathUtils.clamp(flyCam.position.y / (orbit.radius || 1), -1, 1));
+    }
+
+    // Orbit controls — pointer drag + wheel
+    let dragging = false, lastX = 0, lastY = 0, downX = 0, downY = 0, moved = false, lastHover = 0;
+    const el = renderer.domElement;
+    el.style.cursor = "grab";
+    function onPointerDown(e) {
+      if (camModeRef.current !== "orbit") return;
+      dragging = true; moved = false;
+      lastX = downX = e.clientX; lastY = downY = e.clientY;
+    }
+    function onPointerMove(e) {
+      if (camModeRef.current === "orbit" && !dragging) { updateHover(e); return; }
+      if (!dragging) return;
+      const dx = e.clientX - lastX, dy = e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 4) moved = true;
+      orbit.theta -= dx * 0.005;
+      orbit.phi = THREE.MathUtils.clamp(orbit.phi - dy * 0.005, 0.08, Math.PI - 0.08);
+    }
+    function onPointerUp() { dragging = false; }
+    function onWheel(e) {
+      e.preventDefault();
+      orbit.radius = THREE.MathUtils.clamp(orbit.radius * (1 + (e.deltaY > 0 ? 0.12 : -0.12)), 35, maxR * 9);
+    }
+    el.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    el.addEventListener("wheel", onWheel, { passive: false });
+
+    // Raycast selection + hover
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    function pickAt(clientX, clientY, cam) {
+      const rect = el.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, cam);
+      const hit = raycaster.intersectObject(inst, false)[0];
+      return hit && hit.instanceId != null ? hit.instanceId : -1;
+    }
+    let hoverId = -1;
+    function updateHover(e) {
+      const now = performance.now();
+      if (now - lastHover < 50) return;
+      lastHover = now;
+      const id = pickAt(e.clientX, e.clientY, orbitCam);
+      const tip = tipRef.current;
+      if (!tip) return;
+      if (id >= 0) {
+        const n = nodes[id].node;
+        tip.textContent = `${n.first} ${n.last} · ${n.title || ""}`;
+        const rect = el.getBoundingClientRect();
+        tip.style.left = (e.clientX - rect.left + 12) + "px";
+        tip.style.top = (e.clientY - rect.top + 12) + "px";
+        tip.style.display = "block";
+        if (id !== hoverId) { el.style.cursor = "pointer"; hoverId = id; }
+      } else if (hoverId !== -1) {
+        tip.style.display = "none"; el.style.cursor = "grab"; hoverId = -1;
+      }
+    }
+    function onClick(e) {
+      if (camModeRef.current === "fly") {
+        raycaster.setFromCamera({ x: 0, y: 0 }, flyCam);
+        const hit = raycaster.intersectObject(inst, false)[0];
+        if (hit && hit.instanceId != null) setDetailRef.current(nodes[hit.instanceId].node);
+        return;
+      }
+      if (moved) return;
+      const id = pickAt(e.clientX, e.clientY, orbitCam);
+      if (id >= 0) {
+        const n = nodes[id];
+        flyTo.fromT.copy(target); flyTo.toT.set(n.x, n.y, n.z);
+        flyTo.fromR = orbit.radius;
+        flyTo.toR = THREE.MathUtils.clamp(sizeForDepth(n.depth) * 9 + 70, 70, maxR * 2);
+        flyTo.t = 0; flyTo.dur = 0.9;
+        setDetailRef.current(n.node);
+      }
+    }
+    el.addEventListener("click", onClick);
+
+    // Fly controls — pointer lock + WASD
+    function onKeyDown(e) {
+      if (camModeRef.current !== "fly") return;
+      const k = e.key.toLowerCase();
+      keys.add(k);
+      if ([" ", "w", "a", "s", "d"].includes(k)) e.preventDefault();
+    }
+    function onKeyUp(e) { keys.delete(e.key.toLowerCase()); }
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    function onMouseMoveLocked(e) {
+      if (document.pointerLockElement !== el) return;
+      fly.yaw -= e.movementX * 0.0022;
+      fly.pitch = THREE.MathUtils.clamp(fly.pitch - e.movementY * 0.0022, -1.5, 1.5);
+    }
+    document.addEventListener("mousemove", onMouseMoveLocked);
+    function onPointerLockChange() {
+      if (document.pointerLockElement !== el && camModeRef.current === "fly") {
+        exitFly(); setCamMode("orbit");
+      }
+    }
+    document.addEventListener("pointerlockchange", onPointerLockChange);
+
+    // Resize
+    const ro = new ResizeObserver(() => {
+      const w = mount.clientWidth, h = mount.clientHeight;
+      if (!w || !h) return;
+      renderer.setSize(w, h);
+      orbitCam.aspect = flyCam.aspect = w / h;
+      orbitCam.updateProjectionMatrix(); flyCam.updateProjectionMatrix();
+    });
+    ro.observe(mount);
+
+    // Animation loop
+    let raf = 0, last = performance.now();
+    const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), move = new THREE.Vector3();
+    const flyEuler = new THREE.Euler(0, 0, 0, "YXZ");
+    const CENTER = new THREE.Vector2(0, 0), _tmpV = new THREE.Vector3(), _tmpV2 = new THREE.Vector3();
+    let prevYaw = 0, roll = 0, hyperInt = 0, hudTimer = 0, lodTimer = 0, meteorTimer = 1.0;
+    const cand = [];
+
+    function spawnMeteor() {
+      const slot = meteors.find(o => o.life <= 0);
+      if (!slot) return;
+      const R = maxR * 2.4 + 250;
+      const d = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize();
+      slot.head.copy(d).multiplyScalar(R);
+      const v = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize();
+      slot.vel.copy(v).multiplyScalar(maxR * 1.2 + 350);
+      slot.maxLife = 1.0 + Math.random() * 1.2;
+      slot.life = slot.maxLife;
+    }
+    function updateMeteors(dt) {
+      meteorTimer -= dt;
+      if (meteorTimer <= 0) { spawnMeteor(); meteorTimer = 0.35 + Math.random() * 1.2; }
+      for (const o of meteors) {
+        if (o.life <= 0) { if (o.m.opacity !== 0) o.m.opacity = 0; continue; }
+        o.life -= dt;
+        o.head.addScaledVector(o.vel, dt);
+        const pa = o.g.attributes.position.array;
+        pa[0] = o.head.x; pa[1] = o.head.y; pa[2] = o.head.z;
+        pa[3] = o.head.x - o.vel.x * 0.05; pa[4] = o.head.y - o.vel.y * 0.05; pa[5] = o.head.z - o.vel.z * 0.05;
+        o.g.attributes.position.needsUpdate = true;
+        o.m.opacity = Math.sin(THREE.MathUtils.clamp(o.life / o.maxLife, 0, 1) * Math.PI) * 0.9;
+      }
+    }
+    function updateWarp(dt, intensity) {
+      warp.visible = intensity > 0.02;
+      if (!warp.visible) return;
+      const adv = (700 + intensity * 6000) * dt;
+      const streak = 8 + intensity * 320;
+      for (let i = 0; i < WARP_N; i++) {
+        let z = warpState[i * 3 + 2] + adv;
+        if (z > 40) { const a = Math.random() * Math.PI * 2, rad = 18 + Math.random() * 560; warpState[i * 3] = Math.cos(a) * rad; warpState[i * 3 + 1] = Math.sin(a) * rad; z = -(1300 + Math.random() * 800); }
+        warpState[i * 3 + 2] = z;
+        const rx = warpState[i * 3], ry = warpState[i * 3 + 1];
+        warpArr[i * 6] = rx; warpArr[i * 6 + 1] = ry; warpArr[i * 6 + 2] = z;
+        warpArr[i * 6 + 3] = rx; warpArr[i * 6 + 4] = ry; warpArr[i * 6 + 5] = z - streak;
+      }
+      warpGeo.attributes.position.needsUpdate = true;
+      warpMat.opacity = intensity * 0.85;
+    }
+    function updateLODLabels(cam) {
+      const layer = labelLayerRef.current; if (!layer) return;
+      cam.updateMatrixWorld();
+      cam.matrixWorldInverse.copy(cam.matrixWorld).invert(); // project() needs a current inverse
+      cam.getWorldPosition(_tmpV);
+      const D = 280;
+      cand.length = 0;
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i]; if (n.depth <= 3) continue;
+        const dx = n.x - _tmpV.x, dy = n.y - _tmpV.y, dz = n.z - _tmpV.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < D * D) cand.push([i, d2]);
+      }
+      cand.sort((a, b) => a[1] - b[1]);
+      const rect = el.getBoundingClientRect();
+      for (let k = 0; k < labelDivs.length; k++) {
+        const div = labelDivs[k];
+        if (k < cand.length) {
+          const n = nodes[cand[k][0]];
+          _tmpV2.set(n.x, n.y, n.z).project(cam);
+          if (_tmpV2.z >= 1 || Math.abs(_tmpV2.x) > 1.05 || Math.abs(_tmpV2.y) > 1.05) { div.style.display = "none"; continue; }
+          div.textContent = `${n.node.first} ${n.node.last}`;
+          div.style.left = ((_tmpV2.x * 0.5 + 0.5) * rect.width) + "px";
+          div.style.top = ((-_tmpV2.y * 0.5 + 0.5) * rect.height) + "px";
+          div.style.opacity = String(Math.max(0.18, 1 - Math.sqrt(cand[k][1]) / D));
+          div.style.display = "block";
+        } else div.style.display = "none";
+      }
+    }
+    function updateFlyHUD(spd, hyperActive) {
+      flyCam.updateMatrixWorld();
+      raycaster.setFromCamera(CENTER, flyCam);
+      const hit = raycaster.intersectObject(inst, false)[0];
+      const tgt = hudTargetRef.current, ret = reticleRef.current;
+      if (hit && hit.instanceId != null) {
+        const n = nodes[hit.instanceId].node;
+        if (tgt) { tgt.style.display = "block"; tgt.innerHTML = `<div style="font-weight:700;color:#e6f4ff">${n.first} ${n.last}</div><div style="opacity:.85">${(n.title || "").replace(/[<>]/g, "")}</div><div style="opacity:.6">${(n.dept || "").replace(/[<>]/g, "")}</div>`; }
+        if (ret) { ret.style.borderColor = "#7dd3fc"; ret.style.width = ret.style.height = "26px"; }
+      } else {
+        if (tgt) tgt.style.display = "none";
+        if (ret) { ret.style.borderColor = "rgba(220,235,255,0.55)"; ret.style.width = ret.style.height = "20px"; }
+      }
+      const sp = hudSpeedRef.current;
+      if (sp) sp.textContent = `SPD ${Math.round(spd)}${hyperActive ? "   ⚡ HYPERDRIVE" : ""}`;
+    }
+
+    function tick(now) {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      let cam;
+      if (camModeRef.current === "fly") {
+        const hyperActive = keys.has("shift");
+        hyperInt += ((hyperActive ? 1 : 0) - hyperInt) * Math.min(1, dt * 4);
+        const fov = FOV_BASE + hyperInt * (FOV_HYPER - FOV_BASE);
+        if (Math.abs(flyCam.fov - fov) > 0.05) { flyCam.fov = fov; flyCam.updateProjectionMatrix(); }
+        // banking roll from turn rate + strafe
+        const yawRate = (fly.yaw - prevYaw) / Math.max(dt, 0.001); prevYaw = fly.yaw;
+        let rollTarget = THREE.MathUtils.clamp(-yawRate * 0.05, -0.45, 0.45);
+        if (keys.has("a")) rollTarget += 0.16;
+        if (keys.has("d")) rollTarget -= 0.16;
+        roll += (rollTarget - roll) * Math.min(1, dt * 5);
+        flyEuler.set(fly.pitch, fly.yaw, roll);
+        flyCam.quaternion.setFromEuler(flyEuler);
+        fwd.set(0, 0, -1).applyQuaternion(flyCam.quaternion);
+        right.set(1, 0, 0).applyQuaternion(flyCam.quaternion);
+        move.set(0, 0, 0);
+        if (keys.has("w") || hyperActive) move.add(fwd); // hyperdrive auto-thrusts forward
+        if (keys.has("s")) move.sub(fwd);
+        if (keys.has("d")) move.add(right);
+        if (keys.has("a")) move.sub(right);
+        if (keys.has(" ")) move.add(up);
+        if (keys.has("control")) move.sub(up);
+        const spd = fly.speed * (hyperActive ? 7 : 1);
+        const moving = move.lengthSq() > 0;
+        if (moving) fly.pos.addScaledVector(move.normalize(), spd * dt);
+        flyCam.position.copy(fly.pos);
+        updateWarp(dt, hyperInt);
+        if (vignetteRef.current) vignetteRef.current.style.opacity = String(0.3 + hyperInt * 0.5);
+        hudTimer -= dt; if (hudTimer <= 0) { hudTimer = 0.07; updateFlyHUD(moving ? spd : 0, hyperActive); }
+        cam = flyCam;
+      } else {
+        if (flyTo.t < 1) {
+          flyTo.t = Math.min(1, flyTo.t + dt / flyTo.dur);
+          const e = flyTo.t < 0.5 ? 2 * flyTo.t * flyTo.t : 1 - Math.pow(-2 * flyTo.t + 2, 2) / 2;
+          target.lerpVectors(flyTo.fromT, flyTo.toT, e);
+          orbit.radius = flyTo.fromR + (flyTo.toR - flyTo.fromR) * e;
+        }
+        applyOrbit();
+        if (warp.visible) warp.visible = false;
+        cam = orbitCam;
+      }
+      updateMeteors(dt);
+      lodTimer -= dt; if (lodTimer <= 0) { lodTimer = 0.1; updateLODLabels(cam); }
+      starfield.rotation.y += dt * 0.004;
+      renderer.render(scene, cam);
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+
+    sceneRef.current = {
+      enterFly, exitFly,
+      recolor() {
+        nodes.forEach((n, i) => { col.set(getColorRef.current(n.node) || "#64748b"); inst.setColorAt(i, col); });
+        if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      },
+    };
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      el.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("click", onClick);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      document.removeEventListener("mousemove", onMouseMoveLocked);
+      document.removeEventListener("pointerlockchange", onPointerLockChange);
+      if (document.pointerLockElement === el) document.exitPointerLock?.();
+      sphereGeo.dispose(); sphereMat.dispose();
+      lineGeo.dispose(); lineMat.dispose();
+      starLayers.forEach(s => { s.g.dispose(); s.m.dispose(); });
+      warpGeo.dispose(); warpMat.dispose();
+      meteors.forEach(o => { o.g.dispose(); o.m.dispose(); });
+      labelDivs.forEach(d => d.remove());
+      labels.forEach(sp => { sp.material.map?.dispose(); sp.material.dispose(); });
+      renderer.dispose();
+      if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
+      sceneRef.current = null;
+    };
+  }, [layout, threeReady]);
+
+  useEffect(() => { camModeRef.current = camMode; }, [camMode]);
+  useEffect(() => { sceneRef.current?.recolor(); }, [colorBy]);
+
+  function setCam(m) {
+    camModeRef.current = m;
+    setCamMode(m);
+    if (m === "fly") sceneRef.current?.enterFly();
+    else { sceneRef.current?.exitFly(); if (document.pointerLockElement) document.exitPointerLock?.(); }
+  }
+
+  if (!threeReady) {
+    return <div className="h-full w-full flex items-center justify-center text-gray-400 text-sm">Loading 3D engine…</div>;
+  }
+  if (!chartDisplayRoot) {
+    return <div className="h-full w-full flex items-center justify-center text-gray-400 text-sm">No data</div>;
+  }
+
+  return (
+    <div className="flex-1 min-h-0 w-full relative overflow-hidden" style={{ background: "#05060a" }}>
+      <div ref={mountRef} className="absolute inset-0" />
+      <div ref={tipRef} className="absolute pointer-events-none px-2 py-1 rounded text-white text-xs"
+        style={{ display: "none", background: "rgba(15,23,42,0.92)", border: "1px solid rgba(148,163,184,0.4)", zIndex: 20, whiteSpace: "nowrap" }} />
+      {/* near-node LOD label layer (both modes) */}
+      <div ref={labelLayerRef} className="absolute inset-0 z-10 pointer-events-none" />
+      {/* First-person cockpit HUD */}
+      {camMode === "fly" && (<>
+        <div ref={vignetteRef} className="absolute inset-0 pointer-events-none z-20"
+          style={{ boxShadow: "inset 0 0 220px 70px rgba(2,6,20,0.92)", opacity: 0.3, transition: "opacity 0.2s" }} />
+        <div className="absolute pointer-events-none z-30" style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)" }}>
+          <div ref={reticleRef} style={{ width: 20, height: 20, border: "1.5px solid rgba(220,235,255,0.55)", borderRadius: "50%", transition: "width .12s, height .12s, border-color .12s", boxShadow: "0 0 8px rgba(125,211,252,0.4)" }} />
+          <div style={{ position: "absolute", left: "50%", top: "50%", width: 3, height: 3, background: "#bfe3ff", transform: "translate(-50%,-50%)", borderRadius: "50%" }} />
+        </div>
+        <div ref={hudTargetRef} className="absolute pointer-events-none z-30"
+          style={{ display: "none", left: "50%", top: "calc(50% + 28px)", transform: "translateX(-50%)", textAlign: "center", fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#cfe6ff", textShadow: "0 1px 4px rgba(0,0,0,0.9)" }} />
+        <div className="absolute pointer-events-none z-30"
+          style={{ left: "50%", bottom: 16, transform: "translateX(-50%)", fontFamily: "monospace", fontSize: 12, letterSpacing: 1, color: "#9fd0ff", background: "rgba(2,8,23,0.5)", border: "1px solid rgba(125,211,252,0.3)", borderRadius: 8, padding: "5px 14px", backdropFilter: "blur(3px)" }}>
+          <span ref={hudSpeedRef}>SPD 0</span>
+        </div>
+      </>)}
+      <div className="absolute top-3 left-3 z-10 flex gap-1 bg-black/40 rounded-lg p-1" style={{ backdropFilter: "blur(4px)" }}>
+        {[["orbit", "🛰 Orbit"], ["fly", "🚀 Fly"]].map(([m, l]) => (
+          <button key={m} onClick={() => setCam(m)}
+            className="text-xs px-2.5 py-1 rounded-md transition-colors"
+            style={{ background: camMode === m ? "#2563eb" : "transparent", color: camMode === m ? "white" : "#cbd5e1", fontWeight: camMode === m ? 600 : 400 }}>
+            {l}
+          </button>
+        ))}
+      </div>
+      <div className="absolute top-3 right-3 z-10 text-white px-3 py-1.5 rounded-md" style={{ fontSize: 11, background: "rgba(0,0,0,0.4)", color: "#cbd5e1", backdropFilter: "blur(4px)" }}>
+        Colored by {colorBy === "business_group" ? "Business Unit" : colorBy === "department" ? "Department" : colorBy === "discipline" ? "Discipline" : "Location"} · CEO at center, levels fan outward
+      </div>
+      <div className="absolute bottom-3 left-3 z-10 px-3 py-1.5 rounded-md" style={{ fontSize: 11, maxWidth: 380, background: "rgba(0,0,0,0.4)", color: "#cbd5e1", backdropFilter: "blur(4px)" }}>
+        {camMode === "fly"
+          ? "Fly: mouse to look · W/A/S/D thrust · Space up · Ctrl down · hold Shift = ⚡HYPERDRIVE · click to select target · Esc exits"
+          : "Orbit: drag to rotate · scroll to zoom · hover for name · click to fly to a node + open details"}
+      </div>
+    </div>
+  );
+}
+
 function WhiteboardOrgView() {
   const {
     chartDisplayRoot, setDetailPanel,
@@ -9675,7 +10306,7 @@ function OrgChartApp() {
                   {/* View mode pills — Treemap/Sunburst are advanced */}
                   {atLeast(mode, "advanced") && (
                     <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 mr-2">
-                      {[["tree","Tree"],["treemap","Treemap"],["sunburst","Sunburst"],["whiteboard","Whiteboard"]].map(([m,l]) => (
+                      {[["tree","Tree"],["treemap","Treemap"],["sunburst","Sunburst"],["whiteboard","Whiteboard"],["galaxy","3D Galaxy"]].map(([m,l]) => (
                         <button key={m} onClick={() => setOrgViewMode(m)}
                           className="text-xs px-2.5 py-1 rounded-md transition-all"
                           style={{ background: orgViewMode === m ? "white" : "transparent", color: orgViewMode === m ? "#1e293b" : "#64748b", fontWeight: orgViewMode === m ? 600 : 400, boxShadow: orgViewMode === m ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }}>
@@ -9719,6 +10350,7 @@ function OrgChartApp() {
                 {orgViewMode === "treemap" && <TreemapOrgView/>}
                 {orgViewMode === "sunburst" && <SunburstOrgView/>}
                 {orgViewMode === "whiteboard" && <WhiteboardOrgView/>}
+                {orgViewMode === "galaxy" && <GalaxyOrgView/>}
               </div>
             )}
             {view === "timeline"    && <TimelineView/>}
