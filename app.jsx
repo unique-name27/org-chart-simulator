@@ -8409,6 +8409,7 @@ function CityOrgView() {
     function frame(now) {
       if (pausedRef.current || document.hidden) { last = now; raf = requestAnimationFrame(frame); return; } // skip all work while an interior is open or tab is hidden
       const dt = Math.min(0.05, (now - last) / 1000); last = now; clock += dt;
+      cam.fps = (cam.fps || 60) * 0.92 + (1 / Math.max(dt, 0.001)) * 0.08; // smoothed; shown when URL has #fps
       const tod = timeOfDay(), sky = skyState(tod), ang = sky.ang;
       const rain = Math.max(0, Math.min(1, (Math.sin(Date.now() / 1000 * 0.045) - 0.42) / 0.5)); // slow weather cycle
       const season = seasonState(Date.now() / 1000); curSeason = season;
@@ -8512,6 +8513,7 @@ function CityOrgView() {
       drawMinimap();
       drawClock(tod, sky, season);
       if (activity > 0.88) { ctx.fillStyle = "rgba(234,88,12,0.92)"; ctx.fillRect(W - 124, 56, 112, 16); ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = "bold 10px 'DM Sans', sans-serif"; ctx.fillText("🚗 RUSH HOUR", W - 68, 67); }
+      if (location.hash.indexOf("fps") >= 0) { ctx.fillStyle = "rgba(2,8,23,0.62)"; ctx.fillRect(8, 8, 78, 22); ctx.fillStyle = cam.fps > 50 ? "#9ef7b0" : cam.fps > 30 ? "#ffd66b" : "#ff8a8a"; ctx.font = "bold 13px monospace"; ctx.textAlign = "left"; ctx.fillText(Math.round(cam.fps) + " FPS", 14, 23); }
       raf = requestAnimationFrame(frame);
     }
 
