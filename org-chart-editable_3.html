@@ -8461,15 +8461,18 @@ function CityOrgView() {
       cars.forEach(move); peds.forEach(move);
       boats.forEach(bt => { bt.pos += bt.dir * bt.spd * dt; if (bt.pos > layout.extentY) bt.pos = 0; else if (bt.pos < 0) bt.pos = layout.extentY; });
       const items = [];
-      sorted.forEach(({ b, i }) => items.push({ d: b.gx + b.gy, kind: "b", b, i }));
-      layout.trees.forEach(gt => items.push({ d: gt.gx + gt.gy, kind: "t", g: gt }));
-      cars.forEach(c => { if (activity > c.act) items.push({ d: c.gx + c.gy, kind: "c", c }); }); // rush-hour density
-      peds.forEach(p => { if (activity > p.act) items.push({ d: p.gx + p.gy, kind: "p", p }); });
+      // viewport culling: only assemble/sort/draw items near the visible canvas.
+      const zc = cam.zoom, PADX = 90 * zc;
+      const inView = (gx, gy, pt, pb) => { const sx = ((gx - gy) * TW / 2) * zc + cam.ox, sy = ((gx + gy) * TH / 2) * zc + cam.oy; return sx > -PADX && sx < W + PADX && sy > -pt && sy < H + pb; };
+      sorted.forEach(({ b, i }) => { if (inView(b.gx, b.gy, 340 * zc, 90 * zc)) items.push({ d: b.gx + b.gy, kind: "b", b, i }); }); // tall top margin for skyscrapers
+      layout.trees.forEach(gt => { if (inView(gt.gx, gt.gy, 50 * zc, 40)) items.push({ d: gt.gx + gt.gy, kind: "t", g: gt }); });
+      cars.forEach(c => { if (activity > c.act && inView(c.gx, c.gy, 40, 40)) items.push({ d: c.gx + c.gy, kind: "c", c }); }); // rush-hour density
+      peds.forEach(p => { if (activity > p.act && inView(p.gx, p.gy, 40, 40)) items.push({ d: p.gx + p.gy, kind: "p", p }); });
       boats.forEach(bt => items.push({ d: riverX + bt.pos, kind: "boat", bt }));
-      fountains.forEach(f => items.push({ d: f.gx + f.gy, kind: "f", f }));
+      fountains.forEach(f => { if (inView(f.gx, f.gy, 60, 60)) items.push({ d: f.gx + f.gy, kind: "f", f }); });
       if (stadium) items.push({ d: stadium.gx + stadium.gy - 0.5, kind: "S", s: stadium });
       if (park) items.push({ d: park.gx + park.gy - 0.5, kind: "K", p: park });
-      layout.lamps.forEach(L => items.push({ d: L.gx + L.gy, kind: "l", L }));
+      layout.lamps.forEach(L => { if (inView(L.gx, L.gy, 60 * zc, 30)) items.push({ d: L.gx + L.gy, kind: "l", L }); });
       items.sort((p, q) => p.d - q.d);
       items.forEach(it => {
         if (it.kind === "b") {
