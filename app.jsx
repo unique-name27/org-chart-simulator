@@ -8468,23 +8468,23 @@ function CityOrgView() {
         if (hasRiver) for (let y = 1; y < layout.extentY; y += 2.4) { const p = w2s(riverX + Math.sin(clock + y) * 0.2, y); ctx.fillStyle = `rgba(255,214,140,${0.22 * sky.night})`; ctx.fillRect(p[0] - 1.2, p[1] - 7, 2.4, 14); } // shimmering reflections
         ctx.restore();
       }
-      // ── signage: blue BU district banners + a department nameplate on every building ──
+      // ── signage: department names sit on their building's facade; the BU name is painted on the street in front of the block ──
       ctx.textAlign = "center";
       if (cam.zoom > 0.6) {
         ctx.font = `${Math.max(8, Math.round(9.5 * Math.min(1.5, cam.zoom)))}px 'DM Sans', sans-serif`;
         sorted.forEach(({ b, i }) => {
           if (i === hover) return;
-          const cc = w2s(b.gx, b.gy), ty = cc[1] - b.h * cam.zoom - 4, w = ctx.measureText(b.name).width + 8;
-          ctx.fillStyle = "rgba(15,23,42,0.72)"; ctx.fillRect(cc[0] - w / 2, ty - 11, w, 13);
-          ctx.fillStyle = "#e6eefc"; ctx.fillText(b.name, cc[0], ty - 1);
+          const cc = w2s(b.gx, b.gy), ly = cc[1] - Math.max(7, b.h * cam.zoom * 0.5), w = ctx.measureText(b.name).width + 7;
+          ctx.fillStyle = "rgba(15,23,42,0.5)"; ctx.fillRect(cc[0] - w / 2, ly - 6, w, 12);
+          ctx.fillStyle = "#eef4ff"; ctx.fillText(b.name, cc[0], ly + 3);
         });
       }
       ctx.font = `bold ${Math.max(10, Math.round(12.5 * Math.min(1.3, cam.zoom)))}px 'DM Sans', sans-serif`;
       layout.districtCenters.forEach(d => {
-        const s = w2s(d.gx, d.gy), yy = s[1] - 18, w = ctx.measureText(d.bu).width + 16;
-        ctx.fillStyle = "rgba(37,99,235,0.94)"; ctx.fillRect(s[0] - w / 2, yy - 10, w, 19);
-        ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fillRect(s[0] - w / 2, yy + 7, w, 2);
-        ctx.fillStyle = "#fff"; ctx.fillText(d.bu, s[0], yy + 3);
+        const s = w2s(d.gx, d.gy + layout.DSIZE + layout.GAP * 0.5), w = ctx.measureText(d.bu).width + 18; // street in front of the block
+        ctx.fillStyle = "rgba(37,99,235,0.94)"; ctx.fillRect(s[0] - w / 2, s[1] - 9, w, 18);
+        ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fillRect(s[0] - w / 2, s[1] + 9, w, 2);
+        ctx.fillStyle = "#fff"; ctx.fillText(d.bu, s[0], s[1] + 4);
       });
       ctx.font = `${Math.max(9, Math.round(10 * Math.min(1.3, cam.zoom)))}px 'DM Sans', sans-serif`;
       const landTag = (p, txt, col) => { if (!p) return; const s = w2s(p.gx, p.gy), w = ctx.measureText(txt).width + 12; ctx.fillStyle = col; ctx.fillRect(s[0] - w / 2, s[1] - 44, w, 15); ctx.fillStyle = "#fff"; ctx.fillText(txt, s[0], s[1] - 33); };
