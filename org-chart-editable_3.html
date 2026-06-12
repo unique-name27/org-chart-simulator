@@ -6280,6 +6280,13 @@ function BuildingInterior({ building, onClose, onSelect }) {
   const mountRef = useRef(null), tipRef = useRef(null);
   const selRef = useRef(onSelect);
   selRef.current = onSelect;
+  const [fp, setFp] = useState(null);
+  const fpRef = useRef(null);
+  fpRef.current = (emp) => setFp(emp || true);
+  const fpOpenRef = useRef(false);
+  useEffect(() => {
+    fpOpenRef.current = !!fp;
+  }, [fp]);
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
@@ -6930,7 +6937,7 @@ function BuildingInterior({ building, onClose, onSelect }) {
     }
     let raf = 0, last = performance.now(), clock = 0, hover = -1;
     function frame(now) {
-      if (document.hidden) {
+      if (document.hidden || fpOpenRef.current) {
         last = now;
         raf = requestAnimationFrame(frame);
         return;
@@ -7104,7 +7111,7 @@ function BuildingInterior({ building, onClose, onSelect }) {
       if (moved) return;
       const rect = canvas.getBoundingClientRect();
       const h = pick(e.clientX - rect.left, e.clientY - rect.top);
-      if (h >= 0) selRef.current(workers[h].e);
+      if (h >= 0) fpRef.current(workers[h].e);
     }
     function onWheel(e) {
       e.preventDefault();
@@ -7149,7 +7156,290 @@ function BuildingInterior({ building, onClose, onSelect }) {
       if (canvas.parentNode === mount) mount.removeChild(canvas);
     };
   }, [building]);
-  return /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 z-30", style: { background: "#0e1018" } }, /* @__PURE__ */ React.createElement("div", { ref: mountRef, className: "absolute inset-0" }), /* @__PURE__ */ React.createElement("div", { ref: tipRef, className: "absolute pointer-events-none px-2 py-1 rounded text-white text-xs", style: { display: "none", background: "rgba(15,23,42,0.92)", border: "1px solid rgba(148,163,184,0.4)", zIndex: 20, lineHeight: 1.4 } }), /* @__PURE__ */ React.createElement("button", { onClick: onClose, className: "absolute top-3 left-3 z-10 text-xs px-3 py-1.5 rounded-lg bg-white/90 text-gray-700 hover:bg-white font-medium shadow" }, "\u2190 Back to city"), /* @__PURE__ */ React.createElement("div", { className: "absolute top-3 right-3 z-10 px-3 py-1.5 rounded-md text-white", style: { fontSize: 12, background: "rgba(2,8,23,0.6)", backdropFilter: "blur(4px)" } }, "\u{1F3E2} ", building.name, " ", /* @__PURE__ */ React.createElement("span", { style: { opacity: 0.8, fontWeight: 400 } }, "\xB7 ", building.bu, " \xB7 ", (building.members || []).length, " people")), /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-3 left-3 z-10 px-3 py-1.5 rounded-md", style: { fontSize: 11, background: "rgba(2,8,23,0.5)", color: "#dbe7ff" } }, "a working floor \u2014 engineering teams get a server room (\u{1F5A5}\uFE0F) & lab (\u{1F52C}) with whiteboards; other teams get offices & lounges. People hold meetings, grab coffee (\u2615), tinker (\u{1F527}) & chat (\u{1F4AC}) \xB7 gold tie = a lead \xB7 hover a person for their name \xB7 click their card \xB7 drag/scroll to look"));
+  return /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 z-30", style: { background: "#0e1018" } }, /* @__PURE__ */ React.createElement("div", { ref: mountRef, className: "absolute inset-0" }), /* @__PURE__ */ React.createElement("div", { ref: tipRef, className: "absolute pointer-events-none px-2 py-1 rounded text-white text-xs", style: { display: "none", background: "rgba(15,23,42,0.92)", border: "1px solid rgba(148,163,184,0.4)", zIndex: 20, lineHeight: 1.4 } }), /* @__PURE__ */ React.createElement("button", { onClick: onClose, className: "absolute top-3 left-3 z-10 text-xs px-3 py-1.5 rounded-lg bg-white/90 text-gray-700 hover:bg-white font-medium shadow" }, "\u2190 Back to city"), /* @__PURE__ */ React.createElement("button", { onClick: () => setFp(true), className: "absolute top-3 left-32 z-10 text-xs px-3 py-1.5 rounded-lg bg-indigo-600/90 text-white hover:bg-indigo-600 font-medium shadow" }, "\u{1F3AE} First person"), /* @__PURE__ */ React.createElement("div", { className: "absolute top-3 right-3 z-10 px-3 py-1.5 rounded-md text-white", style: { fontSize: 12, background: "rgba(2,8,23,0.6)", backdropFilter: "blur(4px)" } }, "\u{1F3E2} ", building.name, " ", /* @__PURE__ */ React.createElement("span", { style: { opacity: 0.8, fontWeight: 400 } }, "\xB7 ", building.bu, " \xB7 ", (building.members || []).length, " people")), /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-3 left-3 z-10 px-3 py-1.5 rounded-md", style: { fontSize: 11, background: "rgba(2,8,23,0.5)", color: "#dbe7ff" } }, "a working floor \u2014 engineering teams get a server room (\u{1F5A5}\uFE0F) & lab (\u{1F52C}) with whiteboards; other teams get offices & lounges \xB7 ", /* @__PURE__ */ React.createElement("b", null, "click anyone to walk the floor in first-person 3D"), " \xB7 gold tie = a lead \xB7 hover for a name \xB7 drag/scroll to look"), fp && /* @__PURE__ */ React.createElement(BuildingFP3D, { building, focusEmp: fp === true ? null : fp, onClose: () => setFp(null), onSelect }));
+}
+function BuildingFP3D({ building, focusEmp, onClose, onSelect }) {
+  const mountRef = useRef(null), tipRef = useRef(null);
+  const selRef = useRef(onSelect);
+  selRef.current = onSelect;
+  const [ready, setReady] = useState(typeof THREE !== "undefined");
+  const [locked, setLocked] = useState(false);
+  useEffect(() => {
+    if (ready) return;
+    let alive = true;
+    loadThree().then(() => alive && setReady(true)).catch(() => {
+    });
+    return () => {
+      alive = false;
+    };
+  }, [ready]);
+  useEffect(() => {
+    if (!ready) return;
+    const mount = mountRef.current;
+    if (!mount) return;
+    const all = building.members || [];
+    let mgr = all[0] || null;
+    all.forEach((e) => {
+      if (mgr && levelIndex(e.level) > levelIndex(mgr.level)) mgr = e;
+    });
+    const staff = all.filter((e) => e !== mgr), nStaff = staff.length;
+    const ZONE = 3.4, PODW = 3.4;
+    const podN = Math.max(1, Math.ceil(nStaff / 4)), podCols = Math.max(1, Math.round(Math.sqrt(podN * 1.7))), podRows = Math.ceil(podN / podCols), workW = podCols * PODW;
+    const ENG_KW = /eng|verif|emul|silicon|hardware|software|firmware|rtl|asic|fpga|\blab\b|research|r&d|\bml\b|\bai\b|platform|infra|\bqa\b|\btest\b|devops|cloud|systems|robot|mechanical|electrical|physics|chip|semiconductor/i;
+    let engN = 0;
+    all.forEach((m) => {
+      if (ENG_KW.test((m.fn || "") + " " + (m.title || "") + " " + (m.bucket || ""))) engN++;
+    });
+    const isEng = building.style === "lab" || building.style === "factory" || ENG_KW.test(building.name || "") || all.length > 0 && engN >= all.length * 0.4;
+    const rooms = [];
+    let rxc = 0;
+    const addRoom = (k, w) => {
+      rooms.push({ kind: k, x0: rxc, x1: rxc + w });
+      rxc += w + 0.3;
+    };
+    addRoom("office", 3);
+    if (isEng) {
+      addRoom("server", 3);
+      if (nStaff >= 6) addRoom("lab", 4.2);
+      if (nStaff >= 8) addRoom("meet", 4);
+      if (nStaff >= 11) addRoom("break", 4);
+    } else {
+      if (nStaff >= 6) addRoom("meet", 4);
+      if (nStaff >= 8) addRoom("priv", 3.4);
+      if (nStaff >= 11) addRoom("break", 4);
+      if (nStaff >= 15) addRoom("lounge", 3.4);
+    }
+    const FW = Math.max(workW, rxc - 0.3, 6), FH = ZONE + podRows * PODW + 0.6;
+    const office = rooms.find((r) => r.kind === "office");
+    const offDesk = { x: office ? (office.x0 + office.x1) / 2 : 1.5, z: office ? ZONE - 1 : 1.5 };
+    const seats = staff.map((e, i) => {
+      const p = Math.floor(i / 4), sub = i % 4, col2 = p % podCols, row = Math.floor(p / podCols);
+      return { e, x: col2 * PODW + sub % 2 * 1.05 + 0.5, z: ZONE + row * PODW + Math.floor(sub / 2) * 1.2 + 0.5 };
+    });
+    if (mgr) seats.push({ e: mgr, x: offDesk.x, z: offDesk.z });
+    const S = 2, WX = FW * S, WZ = FH * S, eye = 1.6;
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    let W = mount.clientWidth || 800, H = mount.clientHeight || 600;
+    renderer.setSize(W, H);
+    mount.appendChild(renderer.domElement);
+    const el = renderer.domElement;
+    el.style.display = "block";
+    el.style.cursor = "pointer";
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(921624);
+    scene.fog = new THREE.Fog(921624, Math.max(WX, WZ) * 0.85, Math.max(WX, WZ) * 2.4);
+    const cam = new THREE.PerspectiveCamera(66, W / H, 0.05, 500);
+    scene.add(new THREE.AmbientLight(16777215, 0.78));
+    const dl = new THREE.DirectionalLight(16777215, 0.5);
+    dl.position.set(WX * 0.3, 30, WZ * 0.15);
+    scene.add(dl);
+    scene.add(new THREE.HemisphereLight(12375807, 2107440, 0.35));
+    const junk = [];
+    const T = (o) => {
+      junk.push(o);
+      return o;
+    };
+    const floor = new THREE.Mesh(T(new THREE.PlaneGeometry(WX, WZ)), T(new THREE.MeshLambertMaterial({ color: 3817808 })));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(WX / 2, 0, WZ / 2);
+    scene.add(floor);
+    const ceil = new THREE.Mesh(T(new THREE.PlaneGeometry(WX, WZ)), T(new THREE.MeshLambertMaterial({ color: 1316639 })));
+    ceil.rotation.x = Math.PI / 2;
+    ceil.position.set(WX / 2, 3.2, WZ / 2);
+    scene.add(ceil);
+    const zoneColors = { office: 5982830, meet: 4151930, break: 7107712, lounge: 8018506, server: 2371651, lab: 14081764, priv: 6510154 };
+    rooms.forEach((r) => {
+      const w = (r.x1 - r.x0) * S;
+      const m = new THREE.Mesh(T(new THREE.PlaneGeometry(w, ZONE * S)), T(new THREE.MeshLambertMaterial({ color: zoneColors[r.kind] || 3817808 })));
+      m.rotation.x = -Math.PI / 2;
+      m.position.set((r.x0 + r.x1) / 2 * S, 0.02, ZONE / 2 * S);
+      scene.add(m);
+    });
+    const wallMat = T(new THREE.MeshLambertMaterial({ color: 2764605 })), wallH = 3.2;
+    const mkWall = (x, z, w, d) => {
+      const m = new THREE.Mesh(T(new THREE.BoxGeometry(w, wallH, d)), wallMat);
+      m.position.set(x, wallH / 2, z);
+      scene.add(m);
+    };
+    mkWall(WX / 2, 0.06, WX, 0.12);
+    mkWall(WX / 2, WZ - 0.06, WX, 0.12);
+    mkWall(0.06, WZ / 2, 0.12, WZ);
+    mkWall(WX - 0.06, WZ / 2, 0.12, WZ);
+    const rackMat = T(new THREE.MeshLambertMaterial({ color: 2106927, emissive: 926743, emissiveIntensity: 0.7 })), benchMat = T(new THREE.MeshLambertMaterial({ color: 11450047 })), tableMat = T(new THREE.MeshLambertMaterial({ color: 7231292 })), couchMat = T(new THREE.MeshLambertMaterial({ color: 4744335 }));
+    rooms.forEach((r) => {
+      const cx = (r.x0 + r.x1) / 2 * S;
+      if (r.kind === "server") for (let i = 0; i < 3; i++) {
+        const m = new THREE.Mesh(T(new THREE.BoxGeometry(0.5, 2, 0.5)), rackMat);
+        m.position.set((r.x0 + 0.6 + i * 0.7) * S, 1, 0.7 * S);
+        scene.add(m);
+      }
+      else if (r.kind === "lab") for (let i = 0; i < 2; i++) {
+        const m = new THREE.Mesh(T(new THREE.BoxGeometry(1.4, 0.9, 0.7)), benchMat);
+        m.position.set((r.x0 + 1 + i * 1.6) * S, 0.45, 0.7 * S);
+        scene.add(m);
+      }
+      else if (r.kind === "meet") {
+        const m = new THREE.Mesh(T(new THREE.BoxGeometry(2, 0.8, 1)), tableMat);
+        m.position.set(cx, 0.5, ZONE / 2 * S);
+        scene.add(m);
+      } else if (r.kind === "lounge") {
+        const m = new THREE.Mesh(T(new THREE.BoxGeometry(1.6, 0.7, 0.8)), couchMat);
+        m.position.set(cx, 0.35, (ZONE - 0.8) * S);
+        scene.add(m);
+      }
+    });
+    const n = Math.max(1, seats.length);
+    const deskGeo = T(new THREE.BoxGeometry(1.3, 1, 0.7)), deskMat = T(new THREE.MeshLambertMaterial({ color: 9071172 }));
+    const monGeo = T(new THREE.BoxGeometry(0.5, 0.4, 0.06)), monMat = T(new THREE.MeshLambertMaterial({ color: 1185308, emissive: 1917024, emissiveIntensity: 0.7 }));
+    const chairGeo = T(new THREE.BoxGeometry(0.55, 0.5, 0.55)), chairMat = T(new THREE.MeshLambertMaterial({ color: 3095122 }));
+    const bodyGeo = T(new THREE.CylinderGeometry(0.24, 0.32, 0.95, 8)), bodyMat = T(new THREE.MeshLambertMaterial({ color: 16777215 }));
+    const headGeo = T(new THREE.SphereGeometry(0.2, 12, 10)), headMat = T(new THREE.MeshLambertMaterial({ color: 16777215 }));
+    const deskInst = new THREE.InstancedMesh(deskGeo, deskMat, n), monInst = new THREE.InstancedMesh(monGeo, monMat, n), chairInst = new THREE.InstancedMesh(chairGeo, chairMat, n), bodyInst = new THREE.InstancedMesh(bodyGeo, bodyMat, n), headInst = new THREE.InstancedMesh(headGeo, headMat, n);
+    const dummy = new THREE.Object3D(), col = new THREE.Color();
+    seats.forEach((s, i) => {
+      const x = s.x * S, z = s.z * S;
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.position.set(x, 0.25, z + 0.05);
+      dummy.updateMatrix();
+      chairInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, 0.5, z - 0.75);
+      dummy.updateMatrix();
+      deskInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, 1.15, z - 0.66);
+      dummy.updateMatrix();
+      monInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, 0.78, z);
+      dummy.scale.set(1, 0.72, 1);
+      dummy.updateMatrix();
+      bodyInst.setMatrixAt(i, dummy.matrix);
+      col.set(FN_COLORS[s.e && s.e.fn] || building.color || "#6b9");
+      bodyInst.setColorAt(i, col);
+      dummy.scale.set(1, 1, 1);
+      dummy.position.set(x, 1.3, z);
+      dummy.updateMatrix();
+      headInst.setMatrixAt(i, dummy.matrix);
+      col.set(SKIN[i * 13 % SKIN.length]);
+      headInst.setColorAt(i, col);
+    });
+    [deskInst, monInst, chairInst, bodyInst, headInst].forEach((m) => {
+      m.instanceMatrix.needsUpdate = true;
+    });
+    if (bodyInst.instanceColor) bodyInst.instanceColor.needsUpdate = true;
+    if (headInst.instanceColor) headInst.instanceColor.needsUpdate = true;
+    scene.add(deskInst, monInst, chairInst, bodyInst, headInst);
+    const keys = /* @__PURE__ */ new Set();
+    const fpc = { yaw: Math.PI, pitch: 0, pos: new THREE.Vector3(WX / 2, eye, WZ - 2) };
+    const fSeat = focusEmp ? seats.find((s) => s.e === focusEmp) : null;
+    if (fSeat) {
+      fpc.pos.set(fSeat.x * S, eye, fSeat.z * S + 2.4);
+      fpc.yaw = Math.atan2(fSeat.x * S - fpc.pos.x, fSeat.z * S - fpc.pos.z);
+    }
+    function applyCam() {
+      cam.position.copy(fpc.pos);
+      const cp = Math.cos(fpc.pitch);
+      cam.lookAt(fpc.pos.x + Math.sin(fpc.yaw) * cp, fpc.pos.y + Math.sin(fpc.pitch), fpc.pos.z + Math.cos(fpc.yaw) * cp);
+    }
+    applyCam();
+    function onKeyDown(e) {
+      const k = e.key.toLowerCase();
+      keys.add(k);
+      if (["w", "a", "s", "d", " "].includes(k)) e.preventDefault();
+    }
+    function onKeyUp(e) {
+      keys.delete(e.key.toLowerCase());
+    }
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    function onMouseMove(e) {
+      if (document.pointerLockElement !== el) return;
+      fpc.yaw -= e.movementX * 22e-4;
+      fpc.pitch = THREE.MathUtils.clamp(fpc.pitch - e.movementY * 22e-4, -1.4, 1.4);
+    }
+    document.addEventListener("mousemove", onMouseMove);
+    const raycaster = new THREE.Raycaster();
+    function pickCenter() {
+      raycaster.setFromCamera({ x: 0, y: 0 }, cam);
+      const hit = raycaster.intersectObject(bodyInst, false)[0];
+      return hit && hit.instanceId != null ? hit.instanceId : -1;
+    }
+    function onClick() {
+      if (document.pointerLockElement === el) {
+        const id = pickCenter();
+        if (id >= 0 && seats[id]) selRef.current(seats[id].e);
+      } else el.requestPointerLock && el.requestPointerLock();
+    }
+    el.addEventListener("click", onClick);
+    function onPLC() {
+      setLocked(document.pointerLockElement === el);
+    }
+    document.addEventListener("pointerlockchange", onPLC);
+    const ro = new ResizeObserver(() => {
+      W = mount.clientWidth || 800;
+      H = mount.clientHeight || 600;
+      renderer.setSize(W, H);
+      cam.aspect = W / H;
+      cam.updateProjectionMatrix();
+    });
+    ro.observe(mount);
+    let raf = 0, last = performance.now(), lastPick = 0;
+    function frame(now) {
+      raf = requestAnimationFrame(frame);
+      const dt = Math.min(0.05, (now - last) / 1e3);
+      last = now;
+      if (document.hidden) return;
+      const sp = (keys.has("shift") ? 8 : 4) * dt, fx = Math.sin(fpc.yaw), fz = Math.cos(fpc.yaw);
+      if (keys.has("w")) {
+        fpc.pos.x += fx * sp;
+        fpc.pos.z += fz * sp;
+      }
+      if (keys.has("s")) {
+        fpc.pos.x -= fx * sp;
+        fpc.pos.z -= fz * sp;
+      }
+      if (keys.has("d")) {
+        fpc.pos.x += fz * sp;
+        fpc.pos.z -= fx * sp;
+      }
+      if (keys.has("a")) {
+        fpc.pos.x -= fz * sp;
+        fpc.pos.z += fx * sp;
+      }
+      fpc.pos.x = THREE.MathUtils.clamp(fpc.pos.x, 0.4, WX - 0.4);
+      fpc.pos.z = THREE.MathUtils.clamp(fpc.pos.z, 0.4, WZ - 0.4);
+      fpc.pos.y = eye;
+      applyCam();
+      if (document.pointerLockElement === el && now - lastPick > 80) {
+        lastPick = now;
+        const id = pickCenter(), tip = tipRef.current;
+        if (tip) {
+          if (id >= 0 && seats[id]) {
+            const e2 = seats[id].e;
+            tip.textContent = `${e2.first} ${e2.last}${e2.title ? " \xB7 " + e2.title : ""}`;
+            tip.style.display = "block";
+          } else tip.style.display = "none";
+        }
+      }
+      renderer.render(scene, cam);
+    }
+    raf = requestAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("pointerlockchange", onPLC);
+      el.removeEventListener("click", onClick);
+      if (document.pointerLockElement === el) document.exitPointerLock && document.exitPointerLock();
+      [deskInst, monInst, chairInst, bodyInst, headInst].forEach((m) => m.dispose());
+      junk.forEach((o) => o.dispose && o.dispose());
+      renderer.dispose();
+      if (el.parentNode === mount) mount.removeChild(el);
+    };
+  }, [ready, building, focusEmp]);
+  return /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 z-40", style: { background: "#0e1018" } }, /* @__PURE__ */ React.createElement("div", { ref: mountRef, className: "absolute inset-0" }), /* @__PURE__ */ React.createElement("div", { className: "absolute", style: { left: "50%", top: "50%", width: 6, height: 6, marginLeft: -3, marginTop: -3, borderRadius: 3, background: "rgba(255,255,255,0.85)", boxShadow: "0 0 3px rgba(0,0,0,0.6)", pointerEvents: "none" } }), /* @__PURE__ */ React.createElement("div", { ref: tipRef, className: "absolute", style: { display: "none", left: "50%", top: "calc(50% + 16px)", transform: "translateX(-50%)", pointerEvents: "none", padding: "3px 9px", borderRadius: 6, background: "rgba(2,8,23,0.8)", color: "#dbe7ff", fontSize: 12, whiteSpace: "nowrap" } }), /* @__PURE__ */ React.createElement("button", { onClick: onClose, className: "absolute top-3 left-3 z-10 text-xs px-3 py-1.5 rounded-lg bg-white/90 text-gray-700 hover:bg-white font-medium shadow" }, "\u2190 Back to floor"), /* @__PURE__ */ React.createElement("div", { className: "absolute top-3 right-3 z-10 px-3 py-1.5 rounded-md text-white", style: { fontSize: 12, background: "rgba(2,8,23,0.6)" } }, "\u{1F3AE} First person \xB7 ", building.name), !ready && /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 flex items-center justify-center text-white/80 text-sm" }, "Loading 3D engine\u2026"), ready && !locked && /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 flex items-center justify-center", style: { pointerEvents: "none" } }, /* @__PURE__ */ React.createElement("div", { className: "px-4 py-2 rounded-lg text-white text-sm", style: { background: "rgba(2,8,23,0.72)" } }, "Click to look around \xB7 ", /* @__PURE__ */ React.createElement("b", null, "WASD"), " walk \xB7 ", /* @__PURE__ */ React.createElement("b", null, "Shift"), " run \xB7 ", /* @__PURE__ */ React.createElement("b", null, "Esc"), " release \xB7 aim at a person & click for their card")));
 }
 function CityOrgView() {
   const { activeEmployees, tree, colorBy, setDetailPanel } = useContext(AppCtx);

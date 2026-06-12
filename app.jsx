@@ -7789,6 +7789,9 @@ function blitGlow(ctx, x, y, rx, ry, rgb, alpha) { // caller sets globalComposit
 function BuildingInterior({ building, onClose, onSelect }) {
   const mountRef = useRef(null), tipRef = useRef(null);
   const selRef = useRef(onSelect); selRef.current = onSelect;
+  const [fp, setFp] = useState(null); // first-person 3D overlay: null=off, true=enter at the door, or a focused employee
+  const fpRef = useRef(null); fpRef.current = emp => setFp(emp || true);
+  const fpOpenRef = useRef(false); useEffect(() => { fpOpenRef.current = !!fp; }, [fp]);
   useEffect(() => {
     const mount = mountRef.current; if (!mount) return;
     const all = building.members || [];
@@ -8022,7 +8025,7 @@ function BuildingInterior({ building, onClose, onSelect }) {
     }
     let raf = 0, last = performance.now(), clock = 0, hover = -1;
     function frame(now) {
-      if (document.hidden) { last = now; raf = requestAnimationFrame(frame); return; }
+      if (document.hidden || fpOpenRef.current) { last = now; raf = requestAnimationFrame(frame); return; }
       const dt = Math.min(0.05, (now - last) / 1000); last = now; clock += dt;
       const tod = timeOfDay(), sky = skyState(tod), z = cam.zoom, wh = WALLH * z;
       workers.forEach(w => updWorker(w, dt)); updMeeting(dt);
@@ -8067,7 +8070,7 @@ function BuildingInterior({ building, onClose, onSelect }) {
       else if (tip) { tip.style.display = "none"; canvas.style.cursor = "grab"; }
     }
     function onUp() { dragging = false; canvas.style.cursor = "grab"; }
-    function onClick(e) { if (moved) return; const rect = canvas.getBoundingClientRect(); const h = pick(e.clientX - rect.left, e.clientY - rect.top); if (h >= 0) selRef.current(workers[h].e); }
+    function onClick(e) { if (moved) return; const rect = canvas.getBoundingClientRect(); const h = pick(e.clientX - rect.left, e.clientY - rect.top); if (h >= 0) fpRef.current(workers[h].e); } // click a person → walk in first person
     function onWheel(e) { e.preventDefault(); const rect = canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top, k = e.deltaY < 0 ? 1.12 : 1 / 1.12, nz = Math.max(0.3, Math.min(3, cam.zoom * k)), f = nz / cam.zoom; cam.ox = mx - (mx - cam.ox) * f; cam.oy = my - (my - cam.oy) * f; cam.zoom = nz; }
     canvas.addEventListener("pointerdown", onDown); window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp); canvas.addEventListener("click", onClick); canvas.addEventListener("wheel", onWheel, { passive: false });
     const ro = new ResizeObserver(() => { W = mount.clientWidth || 800; H = mount.clientHeight || 600; canvas.width = W * dpr; canvas.height = H * dpr; canvas.style.width = W + "px"; canvas.style.height = H + "px"; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); fit(); });
@@ -8081,10 +8084,171 @@ function BuildingInterior({ building, onClose, onSelect }) {
       <div ref={mountRef} className="absolute inset-0" />
       <div ref={tipRef} className="absolute pointer-events-none px-2 py-1 rounded text-white text-xs" style={{ display: "none", background: "rgba(15,23,42,0.92)", border: "1px solid rgba(148,163,184,0.4)", zIndex: 20, lineHeight: 1.4 }} />
       <button onClick={onClose} className="absolute top-3 left-3 z-10 text-xs px-3 py-1.5 rounded-lg bg-white/90 text-gray-700 hover:bg-white font-medium shadow">← Back to city</button>
+      <button onClick={() => setFp(true)} className="absolute top-3 left-32 z-10 text-xs px-3 py-1.5 rounded-lg bg-indigo-600/90 text-white hover:bg-indigo-600 font-medium shadow">🎮 First person</button>
       <div className="absolute top-3 right-3 z-10 px-3 py-1.5 rounded-md text-white" style={{ fontSize: 12, background: "rgba(2,8,23,0.6)", backdropFilter: "blur(4px)" }}>
         🏢 {building.name} <span style={{ opacity: 0.8, fontWeight: 400 }}>· {building.bu} · {(building.members || []).length} people</span>
       </div>
-      <div className="absolute bottom-3 left-3 z-10 px-3 py-1.5 rounded-md" style={{ fontSize: 11, background: "rgba(2,8,23,0.5)", color: "#dbe7ff" }}>a working floor — engineering teams get a server room (🖥️) & lab (🔬) with whiteboards; other teams get offices & lounges. People hold meetings, grab coffee (☕), tinker (🔧) & chat (💬) · gold tie = a lead · hover a person for their name · click their card · drag/scroll to look</div>
+      <div className="absolute bottom-3 left-3 z-10 px-3 py-1.5 rounded-md" style={{ fontSize: 11, background: "rgba(2,8,23,0.5)", color: "#dbe7ff" }}>a working floor — engineering teams get a server room (🖥️) & lab (🔬) with whiteboards; other teams get offices & lounges · <b>click anyone to walk the floor in first-person 3D</b> · gold tie = a lead · hover for a name · drag/scroll to look</div>
+      {fp && <BuildingFP3D building={building} focusEmp={fp === true ? null : fp} onClose={() => setFp(null)} onSelect={onSelect} />}
+    </div>
+  );
+}
+
+// First-person 3D walkthrough of a building's floor. three.js (lazy-loaded, UMD global THREE);
+// the room is rebuilt from the same floor-plan heuristics as the 2D view, and every employee is
+// an instanced 3D figure. Pointer-lock mouse-look + WASD; crosshair-click opens a person's card.
+function BuildingFP3D({ building, focusEmp, onClose, onSelect }) {
+  const mountRef = useRef(null), tipRef = useRef(null);
+  const selRef = useRef(onSelect); selRef.current = onSelect;
+  const [ready, setReady] = useState(typeof THREE !== "undefined");
+  const [locked, setLocked] = useState(false);
+  useEffect(() => { if (ready) return; let alive = true; loadThree().then(() => alive && setReady(true)).catch(() => {}); return () => { alive = false; }; }, [ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const mount = mountRef.current; if (!mount) return;
+
+    // ----- floor plan (mirrors the 2D interior heuristics) -----
+    const all = building.members || [];
+    let mgr = all[0] || null; all.forEach(e => { if (mgr && levelIndex(e.level) > levelIndex(mgr.level)) mgr = e; });
+    const staff = all.filter(e => e !== mgr), nStaff = staff.length;
+    const ZONE = 3.4, PODW = 3.4;
+    const podN = Math.max(1, Math.ceil(nStaff / 4)), podCols = Math.max(1, Math.round(Math.sqrt(podN * 1.7))), podRows = Math.ceil(podN / podCols), workW = podCols * PODW;
+    const ENG_KW = /eng|verif|emul|silicon|hardware|software|firmware|rtl|asic|fpga|\blab\b|research|r&d|\bml\b|\bai\b|platform|infra|\bqa\b|\btest\b|devops|cloud|systems|robot|mechanical|electrical|physics|chip|semiconductor/i;
+    let engN = 0; all.forEach(m => { if (ENG_KW.test((m.fn || "") + " " + (m.title || "") + " " + (m.bucket || ""))) engN++; });
+    const isEng = building.style === "lab" || building.style === "factory" || ENG_KW.test(building.name || "") || (all.length > 0 && engN >= all.length * 0.4);
+    const rooms = []; let rxc = 0; const addRoom = (k, w) => { rooms.push({ kind: k, x0: rxc, x1: rxc + w }); rxc += w + 0.3; };
+    addRoom("office", 3);
+    if (isEng) { addRoom("server", 3); if (nStaff >= 6) addRoom("lab", 4.2); if (nStaff >= 8) addRoom("meet", 4); if (nStaff >= 11) addRoom("break", 4); }
+    else { if (nStaff >= 6) addRoom("meet", 4); if (nStaff >= 8) addRoom("priv", 3.4); if (nStaff >= 11) addRoom("break", 4); if (nStaff >= 15) addRoom("lounge", 3.4); }
+    const FW = Math.max(workW, rxc - 0.3, 6), FH = ZONE + podRows * PODW + 0.6;
+    const office = rooms.find(r => r.kind === "office");
+    const offDesk = { x: office ? (office.x0 + office.x1) / 2 : 1.5, z: office ? ZONE - 1.0 : 1.5 };
+    const seats = staff.map((e, i) => { const p = Math.floor(i / 4), sub = i % 4, col = p % podCols, row = Math.floor(p / podCols); return { e, x: col * PODW + (sub % 2) * 1.05 + 0.5, z: ZONE + row * PODW + Math.floor(sub / 2) * 1.2 + 0.5 }; });
+    if (mgr) seats.push({ e: mgr, x: offDesk.x, z: offDesk.z });
+
+    const S = 2, WX = FW * S, WZ = FH * S, eye = 1.6;
+
+    // ----- renderer / scene -----
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    let W = mount.clientWidth || 800, H = mount.clientHeight || 600;
+    renderer.setSize(W, H); mount.appendChild(renderer.domElement);
+    const el = renderer.domElement; el.style.display = "block"; el.style.cursor = "pointer";
+    const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0e1018);
+    scene.fog = new THREE.Fog(0x0e1018, Math.max(WX, WZ) * 0.85, Math.max(WX, WZ) * 2.4);
+    const cam = new THREE.PerspectiveCamera(66, W / H, 0.05, 500);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.78));
+    const dl = new THREE.DirectionalLight(0xffffff, 0.5); dl.position.set(WX * 0.3, 30, WZ * 0.15); scene.add(dl);
+    scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x202830, 0.35));
+
+    const junk = []; const T = o => { junk.push(o); return o; };
+    // floor, ceiling, zone carpets
+    const floor = new THREE.Mesh(T(new THREE.PlaneGeometry(WX, WZ)), T(new THREE.MeshLambertMaterial({ color: 0x3a4150 }))); floor.rotation.x = -Math.PI / 2; floor.position.set(WX / 2, 0, WZ / 2); scene.add(floor);
+    const ceil = new THREE.Mesh(T(new THREE.PlaneGeometry(WX, WZ)), T(new THREE.MeshLambertMaterial({ color: 0x14171f }))); ceil.rotation.x = Math.PI / 2; ceil.position.set(WX / 2, 3.2, WZ / 2); scene.add(ceil);
+    const zoneColors = { office: 0x5b4a6e, meet: 0x3f5a7a, break: 0x6c7480, lounge: 0x7a5a4a, server: 0x243043, lab: 0xd6dee4, priv: 0x63564a };
+    rooms.forEach(r => { const w = (r.x1 - r.x0) * S; const m = new THREE.Mesh(T(new THREE.PlaneGeometry(w, ZONE * S)), T(new THREE.MeshLambertMaterial({ color: zoneColors[r.kind] || 0x3a4150 }))); m.rotation.x = -Math.PI / 2; m.position.set((r.x0 + r.x1) / 2 * S, 0.02, ZONE / 2 * S); scene.add(m); });
+    // walls
+    const wallMat = T(new THREE.MeshLambertMaterial({ color: 0x2a2f3d })), wallH = 3.2;
+    const mkWall = (x, z, w, d) => { const m = new THREE.Mesh(T(new THREE.BoxGeometry(w, wallH, d)), wallMat); m.position.set(x, wallH / 2, z); scene.add(m); };
+    mkWall(WX / 2, 0.06, WX, 0.12); mkWall(WX / 2, WZ - 0.06, WX, 0.12); mkWall(0.06, WZ / 2, 0.12, WZ); mkWall(WX - 0.06, WZ / 2, 0.12, WZ);
+    // a few room props
+    const rackMat = T(new THREE.MeshLambertMaterial({ color: 0x20262f, emissive: 0x0e2417, emissiveIntensity: 0.7 })), benchMat = T(new THREE.MeshLambertMaterial({ color: 0xaeb6bf })), tableMat = T(new THREE.MeshLambertMaterial({ color: 0x6e573c })), couchMat = T(new THREE.MeshLambertMaterial({ color: 0x48648f }));
+    rooms.forEach(r => {
+      const cx = (r.x0 + r.x1) / 2 * S;
+      if (r.kind === "server") for (let i = 0; i < 3; i++) { const m = new THREE.Mesh(T(new THREE.BoxGeometry(0.5, 2.0, 0.5)), rackMat); m.position.set((r.x0 + 0.6 + i * 0.7) * S, 1.0, 0.7 * S); scene.add(m); }
+      else if (r.kind === "lab") for (let i = 0; i < 2; i++) { const m = new THREE.Mesh(T(new THREE.BoxGeometry(1.4, 0.9, 0.7)), benchMat); m.position.set((r.x0 + 1 + i * 1.6) * S, 0.45, 0.7 * S); scene.add(m); }
+      else if (r.kind === "meet") { const m = new THREE.Mesh(T(new THREE.BoxGeometry(2.0, 0.8, 1.0)), tableMat); m.position.set(cx, 0.5, ZONE / 2 * S); scene.add(m); }
+      else if (r.kind === "lounge") { const m = new THREE.Mesh(T(new THREE.BoxGeometry(1.6, 0.7, 0.8)), couchMat); m.position.set(cx, 0.35, (ZONE - 0.8) * S); scene.add(m); }
+    });
+
+    // ----- desks / chairs / monitors / people (instanced) -----
+    const n = Math.max(1, seats.length);
+    const deskGeo = T(new THREE.BoxGeometry(1.3, 1.0, 0.7)), deskMat = T(new THREE.MeshLambertMaterial({ color: 0x8a6a44 }));
+    const monGeo = T(new THREE.BoxGeometry(0.5, 0.4, 0.06)), monMat = T(new THREE.MeshLambertMaterial({ color: 0x12161c, emissive: 0x1d4060, emissiveIntensity: 0.7 }));
+    const chairGeo = T(new THREE.BoxGeometry(0.55, 0.5, 0.55)), chairMat = T(new THREE.MeshLambertMaterial({ color: 0x2f3a52 }));
+    const bodyGeo = T(new THREE.CylinderGeometry(0.24, 0.32, 0.95, 8)), bodyMat = T(new THREE.MeshLambertMaterial({ color: 0xffffff }));
+    const headGeo = T(new THREE.SphereGeometry(0.2, 12, 10)), headMat = T(new THREE.MeshLambertMaterial({ color: 0xffffff }));
+    const deskInst = new THREE.InstancedMesh(deskGeo, deskMat, n), monInst = new THREE.InstancedMesh(monGeo, monMat, n), chairInst = new THREE.InstancedMesh(chairGeo, chairMat, n), bodyInst = new THREE.InstancedMesh(bodyGeo, bodyMat, n), headInst = new THREE.InstancedMesh(headGeo, headMat, n);
+    const dummy = new THREE.Object3D(), col = new THREE.Color();
+    seats.forEach((s, i) => {
+      const x = s.x * S, z = s.z * S;
+      dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+      dummy.position.set(x, 0.25, z + 0.05); dummy.updateMatrix(); chairInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, 0.5, z - 0.75); dummy.updateMatrix(); deskInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, 1.15, z - 0.66); dummy.updateMatrix(); monInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, 0.78, z); dummy.scale.set(1, 0.72, 1); dummy.updateMatrix(); bodyInst.setMatrixAt(i, dummy.matrix);
+      col.set(FN_COLORS[s.e && s.e.fn] || building.color || "#6b9"); bodyInst.setColorAt(i, col);
+      dummy.scale.set(1, 1, 1); dummy.position.set(x, 1.3, z); dummy.updateMatrix(); headInst.setMatrixAt(i, dummy.matrix);
+      col.set(SKIN[(i * 13) % SKIN.length]); headInst.setColorAt(i, col);
+    });
+    [deskInst, monInst, chairInst, bodyInst, headInst].forEach(m => { m.instanceMatrix.needsUpdate = true; });
+    if (bodyInst.instanceColor) bodyInst.instanceColor.needsUpdate = true;
+    if (headInst.instanceColor) headInst.instanceColor.needsUpdate = true;
+    scene.add(deskInst, monInst, chairInst, bodyInst, headInst);
+
+    // ----- first-person camera + controls -----
+    const keys = new Set();
+    const fpc = { yaw: Math.PI, pitch: 0, pos: new THREE.Vector3(WX / 2, eye, WZ - 2) };
+    const fSeat = focusEmp ? seats.find(s => s.e === focusEmp) : null;
+    if (fSeat) { fpc.pos.set(fSeat.x * S, eye, fSeat.z * S + 2.4); fpc.yaw = Math.atan2(fSeat.x * S - fpc.pos.x, fSeat.z * S - fpc.pos.z); }
+    function applyCam() { cam.position.copy(fpc.pos); const cp = Math.cos(fpc.pitch); cam.lookAt(fpc.pos.x + Math.sin(fpc.yaw) * cp, fpc.pos.y + Math.sin(fpc.pitch), fpc.pos.z + Math.cos(fpc.yaw) * cp); }
+    applyCam();
+    function onKeyDown(e) { const k = e.key.toLowerCase(); keys.add(k); if (["w", "a", "s", "d", " "].includes(k)) e.preventDefault(); }
+    function onKeyUp(e) { keys.delete(e.key.toLowerCase()); }
+    window.addEventListener("keydown", onKeyDown); window.addEventListener("keyup", onKeyUp);
+    function onMouseMove(e) { if (document.pointerLockElement !== el) return; fpc.yaw -= e.movementX * 0.0022; fpc.pitch = THREE.MathUtils.clamp(fpc.pitch - e.movementY * 0.0022, -1.4, 1.4); }
+    document.addEventListener("mousemove", onMouseMove);
+    const raycaster = new THREE.Raycaster();
+    function pickCenter() { raycaster.setFromCamera({ x: 0, y: 0 }, cam); const hit = raycaster.intersectObject(bodyInst, false)[0]; return hit && hit.instanceId != null ? hit.instanceId : -1; }
+    function onClick() { if (document.pointerLockElement === el) { const id = pickCenter(); if (id >= 0 && seats[id]) selRef.current(seats[id].e); } else el.requestPointerLock && el.requestPointerLock(); }
+    el.addEventListener("click", onClick);
+    function onPLC() { setLocked(document.pointerLockElement === el); }
+    document.addEventListener("pointerlockchange", onPLC);
+    const ro = new ResizeObserver(() => { W = mount.clientWidth || 800; H = mount.clientHeight || 600; renderer.setSize(W, H); cam.aspect = W / H; cam.updateProjectionMatrix(); });
+    ro.observe(mount);
+
+    let raf = 0, last = performance.now(), lastPick = 0;
+    function frame(now) {
+      raf = requestAnimationFrame(frame);
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      if (document.hidden) return;
+      const sp = (keys.has("shift") ? 8 : 4) * dt, fx = Math.sin(fpc.yaw), fz = Math.cos(fpc.yaw);
+      if (keys.has("w")) { fpc.pos.x += fx * sp; fpc.pos.z += fz * sp; }
+      if (keys.has("s")) { fpc.pos.x -= fx * sp; fpc.pos.z -= fz * sp; }
+      if (keys.has("d")) { fpc.pos.x += fz * sp; fpc.pos.z -= fx * sp; }
+      if (keys.has("a")) { fpc.pos.x -= fz * sp; fpc.pos.z += fx * sp; }
+      fpc.pos.x = THREE.MathUtils.clamp(fpc.pos.x, 0.4, WX - 0.4); fpc.pos.z = THREE.MathUtils.clamp(fpc.pos.z, 0.4, WZ - 0.4); fpc.pos.y = eye;
+      applyCam();
+      if (document.pointerLockElement === el && now - lastPick > 80) {
+        lastPick = now; const id = pickCenter(), tip = tipRef.current;
+        if (tip) { if (id >= 0 && seats[id]) { const e2 = seats[id].e; tip.textContent = `${e2.first} ${e2.last}${e2.title ? " · " + e2.title : ""}`; tip.style.display = "block"; } else tip.style.display = "none"; }
+      }
+      renderer.render(scene, cam);
+    }
+    raf = requestAnimationFrame(frame);
+
+    return () => {
+      cancelAnimationFrame(raf); ro.disconnect();
+      window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp);
+      document.removeEventListener("mousemove", onMouseMove); document.removeEventListener("pointerlockchange", onPLC); el.removeEventListener("click", onClick);
+      if (document.pointerLockElement === el) document.exitPointerLock && document.exitPointerLock();
+      [deskInst, monInst, chairInst, bodyInst, headInst].forEach(m => m.dispose());
+      junk.forEach(o => o.dispose && o.dispose());
+      renderer.dispose();
+      if (el.parentNode === mount) mount.removeChild(el);
+    };
+  }, [ready, building, focusEmp]);
+
+  return (
+    <div className="absolute inset-0 z-40" style={{ background: "#0e1018" }}>
+      <div ref={mountRef} className="absolute inset-0" />
+      <div className="absolute" style={{ left: "50%", top: "50%", width: 6, height: 6, marginLeft: -3, marginTop: -3, borderRadius: 3, background: "rgba(255,255,255,0.85)", boxShadow: "0 0 3px rgba(0,0,0,0.6)", pointerEvents: "none" }} />
+      <div ref={tipRef} className="absolute" style={{ display: "none", left: "50%", top: "calc(50% + 16px)", transform: "translateX(-50%)", pointerEvents: "none", padding: "3px 9px", borderRadius: 6, background: "rgba(2,8,23,0.8)", color: "#dbe7ff", fontSize: 12, whiteSpace: "nowrap" }} />
+      <button onClick={onClose} className="absolute top-3 left-3 z-10 text-xs px-3 py-1.5 rounded-lg bg-white/90 text-gray-700 hover:bg-white font-medium shadow">← Back to floor</button>
+      <div className="absolute top-3 right-3 z-10 px-3 py-1.5 rounded-md text-white" style={{ fontSize: 12, background: "rgba(2,8,23,0.6)" }}>🎮 First person · {building.name}</div>
+      {!ready && <div className="absolute inset-0 flex items-center justify-center text-white/80 text-sm">Loading 3D engine…</div>}
+      {ready && !locked && <div className="absolute inset-0 flex items-center justify-center" style={{ pointerEvents: "none" }}><div className="px-4 py-2 rounded-lg text-white text-sm" style={{ background: "rgba(2,8,23,0.72)" }}>Click to look around · <b>WASD</b> walk · <b>Shift</b> run · <b>Esc</b> release · aim at a person &amp; click for their card</div></div>}
     </div>
   );
 }
