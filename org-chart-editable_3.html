@@ -7335,14 +7335,32 @@ function BuildingFP3D({ building, focusEmp, onClose, onSelect }) {
       plant(office.x1 - 0.5, 0.6);
     }
     const rackMat = T(new THREE.MeshLambertMaterial({ color: 2106927, emissive: 1194530, emissiveIntensity: 0.8 }));
+    const serverLeds = [], ledColor = new THREE.Color();
     rooms.forEach((r) => {
       const cx = (r.x0 + r.x1) / 2;
       if (r.kind === "server") {
-        for (let i = 0; i < 3; i++) {
+        const data = [];
+        for (let k = 0; k < 3; k++) {
+          const rx = (r.x0 + 0.6 + k * 0.7) * S;
           const m = new THREE.Mesh(T(new THREE.BoxGeometry(0.5, 2, 0.5)), rackMat);
-          m.position.set((r.x0 + 0.6 + i * 0.7) * S, 1, 0.7 * S);
+          m.position.set(rx, 1, 0.7 * S);
           scene.add(m);
+          for (let row = 0; row < 7; row++) for (let c2 = 0; c2 < 2; c2++) data.push({ x: rx - 0.12 + c2 * 0.24, y: 0.45 + row * 0.22, z: 0.7 * S + 0.27, phase: Math.random() * 6.28, rate: 2 + Math.random() * 4 });
         }
+        const ledMesh = new THREE.InstancedMesh(T(new THREE.BoxGeometry(0.09, 0.05, 0.03)), T(new THREE.MeshBasicMaterial({ color: 16777215 })), data.length);
+        ledMesh.frustumCulled = false;
+        const dm = new THREE.Object3D();
+        data.forEach((L, i) => {
+          dm.position.set(L.x, L.y, L.z);
+          dm.updateMatrix();
+          ledMesh.setMatrixAt(i, dm.matrix);
+        });
+        ledMesh.instanceMatrix.needsUpdate = true;
+        scene.add(ledMesh);
+        serverLeds.push({ mesh: ledMesh, data });
+        const pl = new THREE.PointLight(4890879, 0.6, 9);
+        pl.position.set(cx * S, 2, 1.2 * S);
+        scene.add(pl);
       } else if (r.kind === "lab") {
         for (let i = 0; i < 2; i++) {
           addBox(1.4, 0.9, 0.7, 11450047, (r.x0 + 1 + i * 1.6) * S, 0.45, 0.7 * S);
@@ -7527,7 +7545,7 @@ function BuildingFP3D({ building, focusEmp, onClose, onSelect }) {
       cam.updateProjectionMatrix();
     });
     ro.observe(mount);
-    let raf = 0, last = performance.now(), lastPick = 0;
+    let raf = 0, last = performance.now(), lastPick = 0, lastLed = 0;
     function frame(now) {
       raf = requestAnimationFrame(frame);
       const dt = Math.min(0.05, (now - last) / 1e3);
@@ -7555,6 +7573,17 @@ function BuildingFP3D({ building, focusEmp, onClose, onSelect }) {
       fpc.pos.y = eye;
       applyCam();
       rackMat.emissiveIntensity = 0.5 + 0.4 * Math.abs(Math.sin(now * 4e-3));
+      if (serverLeds.length && now - lastLed > 110) {
+        lastLed = now;
+        for (const sl of serverLeds) {
+          for (let i = 0; i < sl.data.length; i++) {
+            const L = sl.data[i], on = Math.sin(now * 1e-3 * L.rate + L.phase) > 0;
+            ledColor.setHex(on ? i % 3 ? 3989610 : 16761421 : 728850);
+            sl.mesh.setColorAt(i, ledColor);
+          }
+          if (sl.mesh.instanceColor) sl.mesh.instanceColor.needsUpdate = true;
+        }
+      }
       for (let i = 0; i < people.length; i++) updPerson(people[i], dt);
       for (let i = 0; i < people.length; i++) {
         const p = people[i], x = p.x * S, z = p.z * S;
@@ -7606,6 +7635,7 @@ function BuildingFP3D({ building, focusEmp, onClose, onSelect }) {
       el.removeEventListener("click", onClick);
       if (document.pointerLockElement === el) document.exitPointerLock && document.exitPointerLock();
       [deskInst, monInst, chairInst, bodyInst, headInst].forEach((m) => m.dispose());
+      serverLeds.forEach((sl) => sl.mesh.dispose());
       junk.forEach((o) => o.dispose && o.dispose());
       renderer.dispose();
       if (el.parentNode === mount) mount.removeChild(el);

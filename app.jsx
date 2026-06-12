@@ -8165,9 +8165,17 @@ function BuildingFP3D({ building, focusEmp, onClose, onSelect }) {
     if (office) { const ox = offDesk.x * S, oz = offDesk.z * S; addBox(1.8, 1.0, 0.9, 0x6e4f33, ox, 0.5, oz - 0.6); addBox(0.5, 0.4, 0.06, 0x12161c, ox, 1.2, oz - 0.5, 0x1d4060); addBox(0.7, 1.05, 0.7, 0x384563, ox, 0.52, oz + 0.05); addBox(0.5, 2.2, 1.0, 0x6a4a30, (office.x0 + 0.55) * S, 1.1, 0.6 * S); plant(office.x1 - 0.5, 0.6); }
     // per-room props
     const rackMat = T(new THREE.MeshLambertMaterial({ color: 0x20262f, emissive: 0x123a22, emissiveIntensity: 0.8 }));
+    const serverLeds = [], ledColor = new THREE.Color();
     rooms.forEach(r => {
       const cx = (r.x0 + r.x1) / 2;
-      if (r.kind === "server") { for (let i = 0; i < 3; i++) { const m = new THREE.Mesh(T(new THREE.BoxGeometry(0.5, 2.0, 0.5)), rackMat); m.position.set((r.x0 + 0.6 + i * 0.7) * S, 1.0, 0.7 * S); scene.add(m); } }
+      if (r.kind === "server") {
+        const data = [];
+        for (let k = 0; k < 3; k++) { const rx = (r.x0 + 0.6 + k * 0.7) * S; const m = new THREE.Mesh(T(new THREE.BoxGeometry(0.5, 2.0, 0.5)), rackMat); m.position.set(rx, 1.0, 0.7 * S); scene.add(m); for (let row = 0; row < 7; row++) for (let c2 = 0; c2 < 2; c2++) data.push({ x: rx - 0.12 + c2 * 0.24, y: 0.45 + row * 0.22, z: 0.7 * S + 0.27, phase: Math.random() * 6.28, rate: 2 + Math.random() * 4 }); }
+        const ledMesh = new THREE.InstancedMesh(T(new THREE.BoxGeometry(0.09, 0.05, 0.03)), T(new THREE.MeshBasicMaterial({ color: 0xffffff })), data.length); ledMesh.frustumCulled = false;
+        const dm = new THREE.Object3D(); data.forEach((L, i) => { dm.position.set(L.x, L.y, L.z); dm.updateMatrix(); ledMesh.setMatrixAt(i, dm.matrix); }); ledMesh.instanceMatrix.needsUpdate = true; scene.add(ledMesh);
+        serverLeds.push({ mesh: ledMesh, data });
+        const pl = new THREE.PointLight(0x4aa0ff, 0.6, 9); pl.position.set(cx * S, 2.0, 1.2 * S); scene.add(pl);
+      }
       else if (r.kind === "lab") { for (let i = 0; i < 2; i++) { addBox(1.4, 0.9, 0.7, 0xaeb6bf, (r.x0 + 1 + i * 1.6) * S, 0.45, 0.7 * S); addBox(0.4, 0.3, 0.05, 0x12161c, (r.x0 + 1 + i * 1.6) * S, 1.05, 0.55 * S, 0x1f6f4a); } whiteboard(cx, r.x1 - r.x0); }
       else if (r.kind === "meet") { addBox(2.0, 0.8, 1.0, 0x6e573c, cx * S, 0.5, ZONE / 2 * S); whiteboard(cx, r.x1 - r.x0); }
       else if (r.kind === "break") { addBox((r.x1 - r.x0 - 0.4) * S, 0.9, 0.5, 0xc4ccd6, cx * S, 0.45, 0.45 * S); addBox(0.7, 1.9, 0.7, 0xcfd6de, (r.x0 + 0.6) * S, 0.95, 0.5 * S); addBox(0.4, 0.5, 0.4, 0x2b2f3a, (r.x0 + 1.5) * S, 1.15, 0.45 * S); addCyl(0.18, 0.2, 1.0, 0xdfe7ef, (r.x0 + 2.6) * S, 0.5, 0.5 * S); addCyl(0.5, 0.5, 0.06, 0xdfe4ea, (r.x0 + 1.2) * S, 0.78, (ZONE - 1.0) * S); }
@@ -8241,7 +8249,7 @@ function BuildingFP3D({ building, focusEmp, onClose, onSelect }) {
     const ro = new ResizeObserver(() => { W = mount.clientWidth || 800; H = mount.clientHeight || 600; renderer.setSize(W, H); cam.aspect = W / H; cam.updateProjectionMatrix(); });
     ro.observe(mount);
 
-    let raf = 0, last = performance.now(), lastPick = 0;
+    let raf = 0, last = performance.now(), lastPick = 0, lastLed = 0;
     function frame(now) {
       raf = requestAnimationFrame(frame);
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
@@ -8253,8 +8261,9 @@ function BuildingFP3D({ building, focusEmp, onClose, onSelect }) {
       if (keys.has("a")) { fpc.pos.x -= fz * sp; fpc.pos.z += fx * sp; }
       fpc.pos.x = THREE.MathUtils.clamp(fpc.pos.x, 0.4, WX - 0.4); fpc.pos.z = THREE.MathUtils.clamp(fpc.pos.z, 0.4, WZ - 0.4); fpc.pos.y = eye;
       applyCam();
-      // animate people (seated ⇄ walking) + blinking server racks
+      // animate people (seated ⇄ walking) + blinking server racks/LEDs
       rackMat.emissiveIntensity = 0.5 + 0.4 * Math.abs(Math.sin(now * 0.004));
+      if (serverLeds.length && now - lastLed > 110) { lastLed = now; for (const sl of serverLeds) { for (let i = 0; i < sl.data.length; i++) { const L = sl.data[i], on = Math.sin(now * 0.001 * L.rate + L.phase) > 0; ledColor.setHex(on ? (i % 3 ? 0x3ce06a : 0xffc24d) : 0x0b1f12); sl.mesh.setColorAt(i, ledColor); } if (sl.mesh.instanceColor) sl.mesh.instanceColor.needsUpdate = true; } }
       for (let i = 0; i < people.length; i++) updPerson(people[i], dt);
       for (let i = 0; i < people.length; i++) {
         const p = people[i], x = p.x * S, z = p.z * S;
@@ -8276,6 +8285,7 @@ function BuildingFP3D({ building, focusEmp, onClose, onSelect }) {
       document.removeEventListener("mousemove", onMouseMove); document.removeEventListener("pointerlockchange", onPLC); el.removeEventListener("click", onClick);
       if (document.pointerLockElement === el) document.exitPointerLock && document.exitPointerLock();
       [deskInst, monInst, chairInst, bodyInst, headInst].forEach(m => m.dispose());
+      serverLeds.forEach(sl => sl.mesh.dispose());
       junk.forEach(o => o.dispose && o.dispose());
       renderer.dispose();
       if (el.parentNode === mount) mount.removeChild(el);
