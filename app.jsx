@@ -1001,7 +1001,7 @@ function computeInsights(allEmployees, tree, filters = {}) {
       affectedIds: deptHead ? [deptHead.id] : [],
       dept: d, location: null, bg: null,
       impact: rate > 0.2 ? "High" : "Medium",
-      narrative: `${d} has lost ${gone} employees in the last 6 months — an annualised rate of ${Math.round(rate * 100)}%, roughly ${Math.round((rate - 0.1) * 100)} percentage points above the healthy 10% ceiling. Beyond the immediate productivity gap, each departure triggers an estimated 6–9 months of knowledge reconstruction. Replacement cost per IC typically runs 1.5–2× annual salary when recruiting, onboarding, and ramp time are factored in.`,
+      narrative: `${d} has lost ${gone} employees in the last 6 months — an annualised rate of ${Math.round(rate * 100)}%, roughly ${Math.round((rate - 0.1) * 100)} percentage points above the healthy 10% ceiling. Beyond the immediate productivity gap, each departure triggers an estimated 6–9 months of knowledge reconstruction.`,
       recommendation: `Conduct stay interviews with remaining ${d} employees this month. Cross-reference exit survey themes against manager tenure, span of control, and promotion velocity.`,
     });
   });
@@ -2300,18 +2300,11 @@ function CommandPalette() {
 // Reorg ripple preview: when the user drags a node onto a new manager, we stash the
 // proposed move in `pendingDrop` and show this modal first instead of committing.
 // Confirm = run the mutation (still pushes undo); Cancel = discard the proposal.
-const DISPLAY_LEVEL_SALARY = {
-  L1: 90000,  L2: 115000, L3: 145000, L4: 185000, L5: 235000, L6: 290000, L7: 360000,
-  M1: 200000, M2: 260000, M3: 320000, M4: 400000,
-  E1: 450000, E2: 550000, E3: 750000,
-};
 const LEVEL_RANK = {
   L1:1, L2:2, L3:3, L4:4, L5:5, L6:6, L7:7,
   M1:8, M2:9, M3:10, M4:11,
   E1:12, E2:13, E3:14,
 };
-function estSalary(lv) { return DISPLAY_LEVEL_SALARY[lv] || 120000; }
-
 function ReorgRipplePreview() {
   const ctx = useContext(AppCtx);
   const pending = ctx?.pendingDrop;
@@ -2370,9 +2363,6 @@ function ReorgRipplePreview() {
     // Cross-department transfers: moved people whose dept != new manager's dept
     const crossDept = movedPeople.filter(p => p.dept !== newMgr.dept);
 
-    // Budget moved
-    const budget = movedPeople.reduce((sum, p) => sum + estSalary(p.level), 0);
-
     // Warnings
     const warnings = [];
     if (wouldCreateCycle) warnings.push({ kind: "block", text: "Cannot drop a manager onto their own descendant in individual mode — would create a cycle. Hold Shift or use team mode to swap superior↔subordinate." });
@@ -2385,7 +2375,7 @@ function ReorgRipplePreview() {
     return {
       dragged, target, oldMgr, newMgr,
       subtree, directReportsOfDragged,
-      movedPeople, crossDept, budget,
+      movedPeople, crossDept,
       oldMgrDirectsBefore, oldMgrDirectsAfter,
       newMgrDirectsBefore, newMgrDirectsAfter,
       warnings, wouldCreateCycle,
@@ -2395,7 +2385,7 @@ function ReorgRipplePreview() {
 
   if (!pending || !ripples) return null;
 
-  const { dragged, oldMgr, newMgr, movedPeople, crossDept, budget,
+  const { dragged, oldMgr, newMgr, movedPeople, crossDept,
           oldMgrDirectsBefore, oldMgrDirectsAfter, newMgrDirectsBefore, newMgrDirectsAfter,
           warnings, wouldCreateCycle, moveAsTeam } = ripples;
 
@@ -2488,18 +2478,6 @@ function ReorgRipplePreview() {
             </div>
           </div>
 
-          {/* Budget */}
-          <div>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">
-              Budget moved
-            </h3>
-            <div className="bg-gray-50 rounded-lg p-3">
-              <div className="text-2xl font-bold text-gray-900">{fmtCost(budget)}</div>
-              <div className="text-[11px] text-gray-500 mt-0.5">
-                Estimated annual base · {movedPeople.length} {movedPeople.length === 1 ? "person" : "people"}
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Warnings */}
@@ -2768,15 +2746,6 @@ function NaturalLanguageQuery() {
     </div>
   );
 }
-
-// ─── COMPENSATION MODEL ───
-const LEVEL_SALARY = {
-  IC1: 90000, IC2: 115000, IC3: 145000, IC4: 185000, IC5: 235000, IC6: 290000,
-  Manager: 200000, Director: 260000, VP: 340000, SVP: 420000, "C-Suite": 550000,
-};
-// Replacement cost = 1.5× base salary (industry standard for knowledge workers)
-function replacementCost(level) { return Math.round((LEVEL_SALARY[level] || 120000) * 1.5); }
-function fmtCost(n) { return n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : `$${Math.round(n / 1000)}K`; }
 
 // ─── LEVEL DISPLAY MAPPING (L1-L7 / M1-M4 / E1-E3) ───
 // Internal data still uses IC1..C-Suite; UI surfaces the new labels via displayLevel().
@@ -6983,18 +6952,6 @@ function DetailPanel() {
             </div>
           ))}
         </div>
-        {atLeast(mode, "advanced") && (
-          <div className="flex items-center justify-between mb-4 p-2.5 rounded-lg bg-amber-50 border border-amber-100">
-            <div>
-              <div className="text-xs text-amber-600 font-medium">Est. replacement cost</div>
-              <div className="text-lg font-black text-amber-800">{fmtCost(replacementCost(node.level))}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-xs text-amber-600 font-medium">Base salary</div>
-              <div className="text-sm font-bold text-amber-700">{fmtCost(LEVEL_SALARY[node.level] || 120000)}</div>
-            </div>
-          </div>
-        )}
         {nodeHotspots.length > 0 && (
           <div className="mb-4">
             <h4 className="text-xs font-bold text-red-600 mb-2 flex items-center gap-1"><AlertTriangle size={12}/>Issues Detected</h4>
@@ -9858,7 +9815,6 @@ function ExitSimModal() {
     return totalPeers > 2 && departedCount / totalPeers > 0.4;
   });
 
-  const cost = replacementCost(node.level);
   const timeToBP = node.level === "IC1" ? "3-6 mo" : node.level.startsWith("IC") ? "6-12 mo" : "9-18 mo";
 
   return (
@@ -9874,13 +9830,8 @@ function ExitSimModal() {
         </div>
 
         <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-          {/* Cost */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl p-3 bg-red-50 border border-red-100">
-              <div className="text-xs text-red-500 font-semibold">Replacement cost</div>
-              <div className="text-2xl font-black text-red-700">{fmtCost(cost)}</div>
-              <div className="text-xs text-red-400">1.5× {fmtCost(LEVEL_SALARY[node.level]||120000)} salary</div>
-            </div>
+          {/* Time to productivity */}
+          <div className="grid grid-cols-1 gap-3">
             <div className="rounded-xl p-3 bg-orange-50 border border-orange-100">
               <div className="text-xs text-orange-500 font-semibold">Time to full productivity</div>
               <div className="text-2xl font-black text-orange-700">{timeToBP}</div>
