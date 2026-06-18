@@ -1,10 +1,18 @@
-# org-chart-tycoon-fast
+# org-chart-simulator
 
-Performance-focused fork of [org-chart-tycoon](https://github.com/unique-name27/org-chart-tycoon).
+Interactive org chart simulator — explore your organization as a 3D galaxy, fly through
+it first-person at warp speed, or walk a SimCity-style isometric **City** of your company
+(step inside buildings, team-aware interiors, day/night + weather). Plus org-health
+analytics, a drag-and-drop reorg simulator, and a multi-year growth timeline.
 
-Live: https://unique-name27.github.io/org-chart-tycoon-fast/org-chart-editable_3.html
+## ▶ Live site
 
-## What's different (performance)
+- **Open the app:** https://unique-name27.github.io/org-chart-simulator/org-chart-editable_3.html
+- **Landing page:** https://unique-name27.github.io/org-chart-simulator/
+
+## Performance (this is the "fast" build)
+
+This repo is the performance-tuned version of the simulator. Key wins:
 
 - **No in-browser Babel.** The original transpiled ~680 KB of JSX with
   `@babel/standalone` (~3 MB) on every page load. Here the JSX is **precompiled**
@@ -19,6 +27,8 @@ Live: https://unique-name27.github.io/org-chart-tycoon-fast/org-chart-editable_3
   sprite via `drawImage`.
 - **Viewport culling.** City buildings/trees/cars/pedestrians/fountains/lamps
   outside the visible canvas are no longer assembled, depth-sorted, or drawn.
+- **Lazy three.js.** The 3D Galaxy view only loads three.js the first time it's opened,
+  so normal page loads carry no WebGL weight.
 
 ## Editing
 
@@ -34,3 +44,5 @@ and injects it into `app.template.html` (the HTML shell, which has the CDN
 `<script>` tags for React/Recharts/etc. but **not** Babel), writing
 `org-chart-editable_3.html`. Commit the regenerated HTML — that's what GitHub
 Pages serves.
+
+Append `#fps` to the app URL for an on-screen FPS meter.
