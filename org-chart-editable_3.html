@@ -3153,7 +3153,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
   pptx.writeFile({ fileName: deckName }).catch((err) => alert("Could not write PowerPoint: " + ((err == null ? void 0 : err.message) || err)));
 }
 function OrgSlideView() {
-  const { tree, activeEmployees, focusRoot } = useContext(AppCtx);
+  const { tree, activeEmployees, focusRoot, importEmployeesCSV } = useContext(AppCtx);
   const svgRef = useRef(null);
   const people = useMemo(() => {
     const list = Object.values(tree.map || {});
@@ -3211,6 +3211,117 @@ function OrgSlideView() {
     setOpenRoles((prev) => [...prev, ...additions]);
     setNewRole((r) => ({ ...r, title: "" }));
   }
+  function parseOpeningsRows(header, rows) {
+    const hl = header.map((h) => (h || "").trim().toLowerCase());
+    const find = (aliases) => {
+      for (let i = 0; i < hl.length; i++) if (aliases.includes(hl[i])) return i;
+      for (let i = 0; i < hl.length; i++) if (hl[i] && aliases.some((a) => hl[i].includes(a))) return i;
+      return -1;
+    };
+    const ci = {
+      manager: find(["manager", "manager id", "managerid", "manager name", "manager employee id", "reports to", "reportsto", "supervisor", "under", "hiring manager"]),
+      title: find(["title", "role", "job title", "jobtitle", "position", "open role", "req title", "requisition", "req"]),
+      level: find(["level", "grade", "job level", "joblevel", "band", "seniority"]),
+      count: find(["count", "openings", "opening", "headcount", "hc", "qty", "quantity", "number", "num", "reqs", "positions"]),
+      dept: find(["dept", "department", "team", "org unit", "orgunit", "function"])
+    };
+    const nodes = Object.values(tree.map);
+    const byName = {};
+    nodes.forEach((n) => {
+      byName[`${n.first} ${n.last}`.trim().toLowerCase()] = n;
+    });
+    const added = [];
+    let skipped = 0;
+    const unresolved = [];
+    rows.forEach((r) => {
+      const g = (i) => {
+        var _a;
+        return i >= 0 ? ((_a = r[i]) != null ? _a : "").toString().trim() : "";
+      };
+      const mRaw = g(ci.manager);
+      let mgr;
+      if (ci.manager < 0 || !mRaw) mgr = rootNode;
+      else {
+        mgr = tree.map[mRaw] || byName[mRaw.toLowerCase()] || nodes.find((n) => `${n.first} ${n.last}`.toLowerCase().includes(mRaw.toLowerCase()));
+        if (!mgr) {
+          skipped++;
+          unresolved.push(mRaw);
+          return;
+        }
+      }
+      const title2 = g(ci.title) || "Open role";
+      const lvNorm = normalizeLevel(g(ci.level));
+      const level = lvNorm ? displayLevel(lvNorm) : g(ci.level) || "L4";
+      const cnt = Math.max(1, Math.min(50, parseInt(g(ci.count), 10) || 1));
+      const dept = g(ci.dept) || mgr.dept || "";
+      const stamp = Date.now();
+      for (let k = 0; k < cnt; k++) added.push({ id: `open_imp_${stamp}_${Math.round(Math.random() * 1e6)}_${added.length}`, managerId: mgr.id, title: title2, level, dept });
+    });
+    return { added, skipped, unresolved };
+  }
+  function importOpenings(file) {
+    const name = (file.name || "").toLowerCase();
+    const isExcel = /\.(xlsx|xlsm|xlsb|xls)$/.test(name);
+    const reader = new FileReader();
+    const handle = (header, rows) => {
+      const { added, skipped, unresolved } = parseOpeningsRows(header, rows);
+      if (!added.length) {
+        alert("No open positions could be imported.\nCheck the file has a Title column, and (optionally) a Manager column matching names or employee IDs in your org.");
+        return;
+      }
+      setOpenRoles((prev) => [...prev, ...added]);
+      const uniqMgr = new Set(added.map((a) => a.managerId)).size;
+      let msg = `Imported ${added.length} open position${added.length === 1 ? "" : "s"} across ${uniqMgr} manager${uniqMgr === 1 ? "" : "s"}.`;
+      if (skipped) {
+        const u = [...new Set(unresolved)];
+        msg += `
+Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched manager: ${u.slice(0, 5).join(", ")}${u.length > 5 ? "\u2026" : ""}` : ""}.`;
+      }
+      alert(msg);
+    };
+    if (isExcel) {
+      reader.onload = (ev) => {
+        try {
+          const XLSX = window.XLSX;
+          if (!XLSX) throw new Error("Excel library not loaded \u2014 reload and try again.");
+          const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
+          const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "", raw: false, blankrows: false });
+          const rows = aoa.map((rr) => rr.map((c) => c == null ? "" : String(c))).filter((rr) => rr.some((c) => c.trim() !== ""));
+          if (rows.length < 2) throw new Error("The first sheet has no data rows.");
+          handle(rows[0].map((c) => (c || "").trim()), rows.slice(1));
+        } catch (err) {
+          alert("Could not read Excel file: " + err.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+    reader.onload = (ev) => {
+      try {
+        const rows = parseCSV(String(ev.target.result || ""));
+        if (rows.length < 2) throw new Error("File has no data rows.");
+        handle(rows[0].map((c) => (c || "").trim()), rows.slice(1));
+      } catch (err) {
+        alert("Could not read CSV: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+  function downloadOpeningsTemplate() {
+    const mgrs = attachOptions.slice(0, 3);
+    const roleEx = ["Senior Engineer", "Product Manager", "Program Manager"];
+    const lvlEx = ["L4", "M1", "L3"];
+    const ex = (mgrs.length ? mgrs : [rootNode].filter(Boolean)).map((m, i) => [
+      `${m.first} ${m.last}`,
+      roleEx[i % 3],
+      lvlEx[i % 3],
+      String(i % 2 + 1),
+      m.dept || ""
+    ]);
+    if (!ex.length) ex.push(["<manager name or employee ID>", "Senior Engineer", "L4", "2", "Engineering"]);
+    const cols = ["Manager", "Title", "Level", "Count", "Department"];
+    downloadFile("open-positions-template.csv", [cols.join(","), ...ex.map((r) => r.map(csvCell).join(","))].join("\n"), "text/csv");
+  }
   const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "\u2019" : "\u2019s"} organization` : "Org chart";
   const title = titleText.trim() || autoTitle;
   const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  \xB7  ${rootNode._totalReports || 0} people in org` : "";
@@ -3246,7 +3357,29 @@ function OrgSlideView() {
   }
   const safeName = (title || "org-slide").replace(/[^\w\- ]+/g, "").replace(/\s+/g, "-").slice(0, 60) || "org-slide";
   if (!rootNode || !layout) return /* @__PURE__ */ React.createElement("div", { className: "p-8 text-gray-500" }, "No org data loaded yet. Import a headcount file to begin.");
-  return /* @__PURE__ */ React.createElement("div", { className: "h-full flex overflow-hidden", style: { fontFamily: "'DM Sans', sans-serif" } }, /* @__PURE__ */ React.createElement("div", { className: "w-72 shrink-0 border-r border-gray-100 bg-gray-50 overflow-y-auto p-4 space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "text-sm font-bold text-gray-900" }, "Slide builder"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-gray-500 mt-0.5" }, "Turn any slice of the org into a clean slide. Export a PNG to paste anywhere, or an editable PowerPoint.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Top of the box"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "h-full flex overflow-hidden", style: { fontFamily: "'DM Sans', sans-serif" } }, /* @__PURE__ */ React.createElement("div", { className: "w-72 shrink-0 border-r border-gray-100 bg-gray-50 overflow-y-auto p-4 space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { className: "text-sm font-bold text-gray-900" }, "Slide builder"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-gray-500 mt-0.5" }, "Turn any slice of the org into a clean slide. Export a PNG to paste anywhere, or an editable PowerPoint."), /* @__PURE__ */ React.createElement(
+    "label",
+    {
+      title: "Import employees from Excel (.xlsx) or CSV \u2014 opens the guided mapping dialog. Replaces or appends the current org.",
+      className: "mt-2 w-full flex items-center justify-center gap-1.5 text-xs bg-white border border-gray-200 text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer"
+    },
+    /* @__PURE__ */ React.createElement(Plus, { size: 12 }),
+    "Import headcount (Excel/CSV)",
+    /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "file",
+        accept: ".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
+        className: "hidden",
+        onChange: (e) => {
+          var _a;
+          const f = (_a = e.target.files) == null ? void 0 : _a[0];
+          if (f && importEmployeesCSV) importEmployeesCSV(f);
+          e.target.value = "";
+        }
+      }
+    )
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Top of the box"), /* @__PURE__ */ React.createElement(
     "input",
     {
       value: search,
@@ -3312,7 +3445,29 @@ function OrgSlideView() {
       className: "w-12 text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white",
       title: "How many"
     }
-  ), /* @__PURE__ */ React.createElement("button", { onClick: addOpenRole, className: "flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-600 text-white px-2 py-1 rounded-md font-medium hover:bg-emerald-700" }, /* @__PURE__ */ React.createElement(Plus, { size: 12 }), "Add")), openRoles.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "space-y-1 max-h-32 overflow-y-auto pt-1 border-t border-gray-100" }, openRoles.map((r) => {
+  ), /* @__PURE__ */ React.createElement("button", { onClick: addOpenRole, className: "flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-600 text-white px-2 py-1 rounded-md font-medium hover:bg-emerald-700" }, /* @__PURE__ */ React.createElement(Plus, { size: 12 }), "Add")), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 pt-1 border-t border-gray-100" }, /* @__PURE__ */ React.createElement(
+    "label",
+    {
+      title: "Bulk-import open positions from Excel/CSV \u2014 columns: Manager, Title, Level, Count, Department (all auto-detected).",
+      className: "flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md hover:bg-emerald-100 cursor-pointer"
+    },
+    /* @__PURE__ */ React.createElement(Plus, { size: 11 }),
+    "Import openings",
+    /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "file",
+        accept: ".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
+        className: "hidden",
+        onChange: (e) => {
+          var _a;
+          const f = (_a = e.target.files) == null ? void 0 : _a[0];
+          if (f) importOpenings(f);
+          e.target.value = "";
+        }
+      }
+    )
+  ), /* @__PURE__ */ React.createElement("button", { onClick: downloadOpeningsTemplate, className: "text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-1", title: "Download a starter CSV pre-filled with managers from this org" }, /* @__PURE__ */ React.createElement(Download, { size: 11 }), "Template")), openRoles.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "space-y-1 max-h-32 overflow-y-auto pt-1 border-t border-gray-100" }, openRoles.map((r) => {
     const mgr = tree.map[r.managerId];
     return /* @__PURE__ */ React.createElement("div", { key: r.id, className: "flex items-center gap-1.5 text-[11px] text-gray-600" }, /* @__PURE__ */ React.createElement("span", { className: "inline-block w-1.5 h-1.5 rounded-full border border-emerald-500 shrink-0", style: { borderStyle: "dashed" } }), /* @__PURE__ */ React.createElement("span", { className: "flex-1 min-w-0 truncate" }, r.title, " ", /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, "\xB7 ", r.level, " \xB7 under ", mgr ? `${mgr.first} ${mgr.last}` : "\u2014")), /* @__PURE__ */ React.createElement("button", { onClick: () => setOpenRoles((prev) => prev.filter((x) => x.id !== r.id)), className: "text-gray-300 hover:text-red-500 shrink-0" }, /* @__PURE__ */ React.createElement(X, { size: 11 })));
   })), openRoles.some((r) => !attachOptions.some((n) => n.id === r.managerId)) && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-amber-600" }, "Some open roles sit under a manager not shown at this depth \u2014 increase \u201CLevels deep\u201D or change the root to see them.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Slide title"), /* @__PURE__ */ React.createElement(

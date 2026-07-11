@@ -3391,7 +3391,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
 
 // The Slide Builder view.
 function OrgSlideView() {
-  const { tree, activeEmployees, focusRoot } = useContext(AppCtx);
+  const { tree, activeEmployees, focusRoot, importEmployeesCSV } = useContext(AppCtx);
   const svgRef = useRef(null);
 
   // People who can head a slide (anyone in the tree). Default to the focused subtree
@@ -3454,6 +3454,98 @@ function OrgSlideView() {
     setNewRole(r => ({ ...r, title: "" }));
   }
 
+  // ─── Bulk-import open positions from Excel/CSV ───
+  // Flexible columns (auto-detected): Manager (name OR employee ID), Title, Level,
+  // Count, Department. Rows with no/blank manager fall under the current root.
+  function parseOpeningsRows(header, rows) {
+    const hl = header.map(h => (h || "").trim().toLowerCase());
+    const find = aliases => {
+      for (let i = 0; i < hl.length; i++) if (aliases.includes(hl[i])) return i;
+      for (let i = 0; i < hl.length; i++) if (hl[i] && aliases.some(a => hl[i].includes(a))) return i;
+      return -1;
+    };
+    const ci = {
+      manager: find(["manager", "manager id", "managerid", "manager name", "manager employee id", "reports to", "reportsto", "supervisor", "under", "hiring manager"]),
+      title:   find(["title", "role", "job title", "jobtitle", "position", "open role", "req title", "requisition", "req"]),
+      level:   find(["level", "grade", "job level", "joblevel", "band", "seniority"]),
+      count:   find(["count", "openings", "opening", "headcount", "hc", "qty", "quantity", "number", "num", "reqs", "positions"]),
+      dept:    find(["dept", "department", "team", "org unit", "orgunit", "function"]),
+    };
+    const nodes = Object.values(tree.map);
+    const byName = {};
+    nodes.forEach(n => { byName[`${n.first} ${n.last}`.trim().toLowerCase()] = n; });
+    const added = []; let skipped = 0; const unresolved = [];
+    rows.forEach(r => {
+      const g = i => (i >= 0 ? (r[i] ?? "").toString().trim() : "");
+      const mRaw = g(ci.manager);
+      let mgr;
+      if (ci.manager < 0 || !mRaw) mgr = rootNode;
+      else {
+        mgr = tree.map[mRaw] || byName[mRaw.toLowerCase()] ||
+          nodes.find(n => `${n.first} ${n.last}`.toLowerCase().includes(mRaw.toLowerCase()));
+        if (!mgr) { skipped++; unresolved.push(mRaw); return; }
+      }
+      const title = g(ci.title) || "Open role";
+      const lvNorm = normalizeLevel(g(ci.level));
+      const level = lvNorm ? displayLevel(lvNorm) : (g(ci.level) || "L4");
+      const cnt = Math.max(1, Math.min(50, parseInt(g(ci.count), 10) || 1));
+      const dept = g(ci.dept) || mgr.dept || "";
+      const stamp = Date.now();
+      for (let k = 0; k < cnt; k++) added.push({ id: `open_imp_${stamp}_${Math.round(Math.random() * 1e6)}_${added.length}`, managerId: mgr.id, title, level, dept });
+    });
+    return { added, skipped, unresolved };
+  }
+
+  function importOpenings(file) {
+    const name = (file.name || "").toLowerCase();
+    const isExcel = /\.(xlsx|xlsm|xlsb|xls)$/.test(name);
+    const reader = new FileReader();
+    const handle = (header, rows) => {
+      const { added, skipped, unresolved } = parseOpeningsRows(header, rows);
+      if (!added.length) { alert("No open positions could be imported.\nCheck the file has a Title column, and (optionally) a Manager column matching names or employee IDs in your org."); return; }
+      setOpenRoles(prev => [...prev, ...added]);
+      const uniqMgr = new Set(added.map(a => a.managerId)).size;
+      let msg = `Imported ${added.length} open position${added.length === 1 ? "" : "s"} across ${uniqMgr} manager${uniqMgr === 1 ? "" : "s"}.`;
+      if (skipped) { const u = [...new Set(unresolved)]; msg += `\nSkipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` — unmatched manager: ${u.slice(0, 5).join(", ")}${u.length > 5 ? "…" : ""}` : ""}.`; }
+      alert(msg);
+    };
+    if (isExcel) {
+      reader.onload = ev => {
+        try {
+          const XLSX = window.XLSX;
+          if (!XLSX) throw new Error("Excel library not loaded — reload and try again.");
+          const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
+          const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "", raw: false, blankrows: false });
+          const rows = aoa.map(rr => rr.map(c => (c == null ? "" : String(c)))).filter(rr => rr.some(c => c.trim() !== ""));
+          if (rows.length < 2) throw new Error("The first sheet has no data rows.");
+          handle(rows[0].map(c => (c || "").trim()), rows.slice(1));
+        } catch (err) { alert("Could not read Excel file: " + err.message); }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+    reader.onload = ev => {
+      try {
+        const rows = parseCSV(String(ev.target.result || ""));
+        if (rows.length < 2) throw new Error("File has no data rows.");
+        handle(rows[0].map(c => (c || "").trim()), rows.slice(1));
+      } catch (err) { alert("Could not read CSV: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+
+  function downloadOpeningsTemplate() {
+    const mgrs = attachOptions.slice(0, 3);
+    const roleEx = ["Senior Engineer", "Product Manager", "Program Manager"];
+    const lvlEx = ["L4", "M1", "L3"];
+    const ex = (mgrs.length ? mgrs : [rootNode].filter(Boolean)).map((m, i) => [
+      `${m.first} ${m.last}`, roleEx[i % 3], lvlEx[i % 3], String((i % 2) + 1), m.dept || "",
+    ]);
+    if (!ex.length) ex.push(["<manager name or employee ID>", "Senior Engineer", "L4", "2", "Engineering"]);
+    const cols = ["Manager", "Title", "Level", "Count", "Department"];
+    downloadFile("open-positions-template.csv", [cols.join(","), ...ex.map(r => r.map(csvCell).join(","))].join("\n"), "text/csv");
+  }
+
   const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "’" : "’s"} organization` : "Org chart";
   const title = titleText.trim() || autoTitle;
   const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  ·  ${(rootNode._totalReports || 0)} people in org` : "";
@@ -3496,6 +3588,13 @@ function OrgSlideView() {
         <div>
           <h2 className="text-sm font-bold text-gray-900">Slide builder</h2>
           <p className="text-xs text-gray-500 mt-0.5">Turn any slice of the org into a clean slide. Export a PNG to paste anywhere, or an editable PowerPoint.</p>
+          <label
+            title="Import employees from Excel (.xlsx) or CSV — opens the guided mapping dialog. Replaces or appends the current org."
+            className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs bg-white border border-gray-200 text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+            <Plus size={12}/>Import headcount (Excel/CSV)
+            <input type="file" accept=".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f && importEmployeesCSV) importEmployeesCSV(f); e.target.value = ""; }}/>
+          </label>
         </div>
 
         <div>
@@ -3592,6 +3691,17 @@ function OrgSlideView() {
               className="w-12 text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white" title="How many" />
             <button onClick={addOpenRole} className="flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-600 text-white px-2 py-1 rounded-md font-medium hover:bg-emerald-700">
               <Plus size={12}/>Add
+            </button>
+          </div>
+          <div className="flex items-center gap-2 pt-1 border-t border-gray-100">
+            <label title="Bulk-import open positions from Excel/CSV — columns: Manager, Title, Level, Count, Department (all auto-detected)."
+              className="flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md hover:bg-emerald-100 cursor-pointer">
+              <Plus size={11}/>Import openings
+              <input type="file" accept=".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) importOpenings(f); e.target.value = ""; }}/>
+            </label>
+            <button onClick={downloadOpeningsTemplate} className="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-1" title="Download a starter CSV pre-filled with managers from this org">
+              <Download size={11}/>Template
             </button>
           </div>
           {openRoles.length > 0 && (
