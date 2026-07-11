@@ -1473,6 +1473,7 @@ function OrgOverview({ insights, score, breakdown, employees, tree }) {
 function AnalyticsView() {
   var _a, _b, _c;
   const { employees, tree, goToInsight } = useContext(AppCtx);
+  const [tab, setTab] = useState("insights");
   const [filters, setFilters] = useState({ location: "All", bg: "All", fn: "All", dept: "All", snapshotDate: null });
   const [activeInsight, setActiveInsight] = useState(null);
   const [catFilter, setCatFilter] = useState("all");
@@ -1520,7 +1521,16 @@ function AnalyticsView() {
     ["manager-risk", "Managers"],
     ["org-depth", "Org Depth"]
   ];
-  return /* @__PURE__ */ React.createElement("div", { className: "h-full flex flex-col overflow-hidden", style: { fontFamily: "'DM Sans', sans-serif" } }, /* @__PURE__ */ React.createElement("div", { className: "bg-white border-b border-gray-100 px-6 py-3 flex items-center gap-6 shrink-0 flex-wrap", style: { boxShadow: "0 1px 3px rgba(0,0,0,0.04)" } }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-4 shrink-0" }, /* @__PURE__ */ React.createElement("div", { className: "relative w-16 h-16" }, /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 64 64", className: "w-full h-full -rotate-90" }, /* @__PURE__ */ React.createElement("circle", { cx: "32", cy: "32", r: "26", fill: "none", stroke: "#f1f5f9", strokeWidth: "7" }), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "h-full flex flex-col overflow-hidden", style: { fontFamily: "'DM Sans', sans-serif" } }, /* @__PURE__ */ React.createElement("div", { className: "bg-white border-b border-gray-100 px-4 pt-2 flex gap-1 shrink-0" }, [["insights", "Insights", Zap], ["flight-risk", "Flight Risk", AlertTriangle]].map(([id, label, Icon]) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: id,
+      onClick: () => setTab(id),
+      className: `flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors ${tab === id ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`
+    },
+    /* @__PURE__ */ React.createElement(Icon, { size: 13 }),
+    label
+  ))), tab === "flight-risk" && /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-hidden" }, /* @__PURE__ */ React.createElement(FlightRiskView, null)), tab === "insights" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "bg-white border-b border-gray-100 px-6 py-3 flex items-center gap-6 shrink-0 flex-wrap", style: { boxShadow: "0 1px 3px rgba(0,0,0,0.04)" } }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-4 shrink-0" }, /* @__PURE__ */ React.createElement("div", { className: "relative w-16 h-16" }, /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 64 64", className: "w-full h-full -rotate-90" }, /* @__PURE__ */ React.createElement("circle", { cx: "32", cy: "32", r: "26", fill: "none", stroke: "#f1f5f9", strokeWidth: "7" }), /* @__PURE__ */ React.createElement(
     "circle",
     {
       cx: "32",
@@ -1628,7 +1638,7 @@ function AnalyticsView() {
       onSelect: () => setActiveInsight((prev) => (prev == null ? void 0 : prev.id) === ins.id ? null : ins),
       onZoom: () => zoomToInsight(ins)
     }
-  )))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-hidden", style: { animation: "chartFadeIn 0.2s ease" }, key: (_c = activeInsight == null ? void 0 : activeInsight.id) != null ? _c : "overview" }, activeInsight ? /* @__PURE__ */ React.createElement(InsightFocusPanel, { insight: activeInsight, onZoom: () => zoomToInsight(activeInsight) }) : /* @__PURE__ */ React.createElement(OrgOverview, { insights: allInsights, score, breakdown, employees, tree }))));
+  )))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-hidden", style: { animation: "chartFadeIn 0.2s ease" }, key: (_c = activeInsight == null ? void 0 : activeInsight.id) != null ? _c : "overview" }, activeInsight ? /* @__PURE__ */ React.createElement(InsightFocusPanel, { insight: activeInsight, onZoom: () => zoomToInsight(activeInsight) }) : /* @__PURE__ */ React.createElement(OrgOverview, { insights: allInsights, score, breakdown, employees, tree })))));
 }
 function seededRandom(seed) {
   let h = 2166136261;
@@ -1895,8 +1905,8 @@ const MODE_LEVEL = { simple: 0, advanced: 1, expert: 2 };
 function atLeast(current, required) {
   return MODE_LEVEL[current] >= MODE_LEVEL[required];
 }
-const VIEW_MIN_MODE = { "org-chart": "simple", "slides": "simple", "timeline": "advanced", "dashboards": "advanced", "scenarios": "advanced", "headcount": "advanced", "analytics": "advanced", "flight-risk": "advanced", "pipeline": "expert" };
-const VIEW_LABEL = { "org-chart": "Org Chart", "timeline": "Timeline", "dashboards": "Dashboards", "scenarios": "Scenarios", "headcount": "Headcount Plan", "analytics": "Analytics", "flight-risk": "Flight Risk", "pipeline": "Product Pipeline" };
+const VIEW_MIN_MODE = { "org-chart": "simple", "slides": "simple", "timeline": "advanced", "dashboards": "advanced", "headcount": "advanced", "analytics": "advanced", "pipeline": "expert" };
+const VIEW_LABEL = { "org-chart": "Org Chart", "timeline": "Timeline", "dashboards": "Dashboards", "headcount": "Headcount Plan", "analytics": "Analytics", "pipeline": "Product Pipeline" };
 const MODE_META = {
   simple: { label: "Simple", color: "#2563eb", desc: "Org chart & people search" },
   advanced: { label: "Advanced", color: "#7c3aed", desc: "Dashboards, analytics & headcount planning" },
@@ -3101,7 +3111,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
   pptx.writeFile({ fileName: deckName }).catch((err) => alert("Could not write PowerPoint: " + ((err == null ? void 0 : err.message) || err)));
 }
 function OrgSlideView() {
-  const { tree, activeEmployees, focusRoot, scenarioName } = useContext(AppCtx);
+  const { tree, activeEmployees, focusRoot } = useContext(AppCtx);
   const svgRef = useRef(null);
   const people = useMemo(() => {
     const list = Object.values(tree.map || {});
@@ -3126,8 +3136,8 @@ function OrgSlideView() {
   const layout = useMemo(() => rootNode ? computeSlideLayout(rootNode, { maxDepth, dens, wrap, wrapCols: wrapColsVal }) : null, [rootNode, maxDepth, dens, wrap, wrapColsVal]);
   const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "\u2019" : "\u2019s"} organization` : "Org chart";
   const title = titleText.trim() || autoTitle;
-  const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  \xB7  ${rootNode._totalReports || 0} people in org  \xB7  ${scenarioName || "Base"} scenario` : "";
-  const footer = `${scenarioName || "Base"} scenario  \xB7  ${(/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" })}`;
+  const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  \xB7  ${rootNode._totalReports || 0} people in org` : "";
+  const footer = (/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" });
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const base = q ? people.filter((p) => `${p.first} ${p.last} ${p.title} ${p.dept}`.toLowerCase().includes(q)) : people;
@@ -4343,7 +4353,7 @@ function DashboardView() {
       setView("timeline");
     } },
     { label: "Departures (90d)", value: last90Departures, icon: AlertCircle, color: "#ef4444", action: () => {
-      setView("flight-risk");
+      setView("analytics");
     } }
   ].map((kpi, i) => /* @__PURE__ */ React.createElement("div", { key: i, onClick: kpi.action, className: "bg-white rounded-xl p-4 border border-gray-100 cursor-pointer hover:shadow-md transition-all hover:-translate-y-0.5", style: { boxShadow: "0 1px 3px rgba(0,0,0,0.04)" } }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 mb-2" }, /* @__PURE__ */ React.createElement("div", { className: "p-1.5 rounded-lg", style: { background: `${kpi.color}15` } }, /* @__PURE__ */ React.createElement(kpi.icon, { size: 14, style: { color: kpi.color } })), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-gray-400" }, kpi.label), /* @__PURE__ */ React.createElement(ArrowRight, { size: 10, className: "text-gray-300 ml-auto" })), /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-black text-gray-900" }, kpi.value)))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4 mb-6" }, /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl p-4 border border-gray-100" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-gray-700 mb-3" }, "Headcount by Department ", /* @__PURE__ */ React.createElement("span", { className: "text-gray-400 font-normal text-xs ml-1" }, "\xB7 click bar to filter")), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 250 }, /* @__PURE__ */ React.createElement(BarChart, { data: deptData.slice(0, 10), layout: "vertical", margin: { left: 80 }, style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement(XAxis, { type: "number", tick: { fontSize: 10 } }), /* @__PURE__ */ React.createElement(YAxis, { type: "category", dataKey: "name", tick: { fontSize: 10 }, width: 75 }), /* @__PURE__ */ React.createElement(Tooltip, { contentStyle: { fontSize: 11 } }), /* @__PURE__ */ React.createElement(Bar, { dataKey: "value", radius: [0, 4, 4, 0], onClick: (data) => navigateToDept(data.name) }, deptData.slice(0, 10).map((d, i) => /* @__PURE__ */ React.createElement(Cell, { key: i, fill: d.fill, className: "cursor-pointer hover:opacity-80" })))))), /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl p-4 border border-gray-100" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-gray-700 mb-3" }, "Business Unit Mix"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 250 }, /* @__PURE__ */ React.createElement(PieChart, null, /* @__PURE__ */ React.createElement(Pie, { data: bgData, dataKey: "value", nameKey: "name", cx: "50%", cy: "50%", innerRadius: 50, outerRadius: 90, paddingAngle: 3, label: ({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`, style: { fontSize: 10 } }, bgData.map((d, i) => /* @__PURE__ */ React.createElement(Cell, { key: i, fill: d.fill }))), /* @__PURE__ */ React.createElement(Tooltip, { contentStyle: { fontSize: 11 } }))))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl p-4 border border-gray-100" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-gray-700 mb-3" }, "By Location ", /* @__PURE__ */ React.createElement("span", { className: "text-gray-400 font-normal text-xs ml-1" }, "\xB7 click to filter")), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 200 }, /* @__PURE__ */ React.createElement(BarChart, { data: locData, layout: "vertical", margin: { left: 70 }, style: { cursor: "pointer" } }, /* @__PURE__ */ React.createElement(XAxis, { type: "number", tick: { fontSize: 10 } }), /* @__PURE__ */ React.createElement(YAxis, { type: "category", dataKey: "name", tick: { fontSize: 10 }, width: 65 }), /* @__PURE__ */ React.createElement(Tooltip, { contentStyle: { fontSize: 11 } }), /* @__PURE__ */ React.createElement(Bar, { dataKey: "value", radius: [0, 4, 4, 0], onClick: (data) => {
     setFocusRoot(null);
@@ -4421,453 +4431,6 @@ function DashboardView() {
       );
     }), /* @__PURE__ */ React.createElement("td", { className: "text-center px-3 py-2 font-bold text-gray-700" }, total));
   }), /* @__PURE__ */ React.createElement("tr", { className: "border-t-2 border-gray-200 bg-gray-50" }, /* @__PURE__ */ React.createElement("td", { className: "px-3 py-2 text-xs font-semibold text-gray-500 sticky left-0 bg-gray-50" }, "Min. viable"), COV_ROLES.map((r) => /* @__PURE__ */ React.createElement("td", { key: r, className: "text-center px-2 py-2 text-xs text-gray-400 font-medium" }, COV_MIN[r])), /* @__PURE__ */ React.createElement("td", null))))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-4 mt-3 text-xs text-gray-500" }, /* @__PURE__ */ React.createElement("span", { className: "flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "inline-block w-3 h-3 rounded", style: { background: "#fef2f2", border: "1px solid #fca5a5" } }), " Critical (<50% of min)"), /* @__PURE__ */ React.createElement("span", { className: "flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "inline-block w-3 h-3 rounded", style: { background: "#fffbeb", border: "1px solid #fde68a" } }), " Warning (<min)"), /* @__PURE__ */ React.createElement("span", { className: "flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "inline-block w-3 h-3 rounded", style: { background: "rgba(37,99,235,0.2)", border: "1px solid #bfdbfe" } }), " Sufficient"))));
-}
-function ScenarioView() {
-  const {
-    employees,
-    setEmployees,
-    scenarios,
-    setScenarios,
-    scenarioName,
-    setScenarioName,
-    undoStack,
-    undo,
-    scenarioNewName,
-    setScenarioNewName,
-    exportScenarios,
-    importScenarios
-  } = useContext(AppCtx);
-  const [scenarioTab, setScenarioTab] = useState("scenarios");
-  const [hcTargets, setHcTargets] = useState({});
-  const [planHorizon, setPlanHorizon] = useState(2);
-  const [orgTarget, setOrgTarget] = useState("");
-  const [diffBase, setDiffBase] = useState(null);
-  const [recruiters, setRecruiters] = useState([]);
-  const [newRecName, setNewRecName] = useState("");
-  const addRecruiter = () => {
-    if (!newRecName.trim()) return;
-    setRecruiters((p) => [...p, { id: `REC-${Date.now()}`, name: newRecName.trim(), depts: [], locations: [], levelGroups: [], fns: [] }]);
-    setNewRecName("");
-  };
-  const updateRecruiter = (id, field, value) => setRecruiters((p) => p.map((r) => r.id === id ? { ...r, [field]: value } : r));
-  const removeRecruiter = (id) => setRecruiters((p) => p.filter((r) => r.id !== id));
-  const toggleTag = (r, field, tag) => updateRecruiter(r.id, field, r[field].includes(tag) ? r[field].filter((x) => x !== tag) : [...r[field], tag]);
-  const activeEmps = useMemo(() => employees.filter((e) => e.status === "Active"), [employees]);
-  const depts = useMemo(() => [...new Set(activeEmps.map((e) => e.dept))].sort(), [activeEmps]);
-  const ATTRITION_RATE = 0.1;
-  const hcCurrent = useMemo(() => {
-    const m = {};
-    depts.forEach((d) => {
-      m[d] = activeEmps.filter((e) => e.dept === d).length;
-    });
-    return m;
-  }, [activeEmps, depts]);
-  const hcHistory = useMemo(() => {
-    const byYear = {};
-    employees.forEach((e) => {
-      const yr = new Date(e.startDate).getFullYear();
-      byYear[yr] = (byYear[yr] || 0) + 1;
-    });
-    return Object.keys(byYear).map(Number).sort().map((yr) => ({ year: String(yr), hires: byYear[yr] || 0 }));
-  }, [employees]);
-  const hcTrend = useMemo(() => {
-    const years = hcHistory.map((r) => Number(r.year));
-    const minYr = years[0] || 2018;
-    const maxYr = 2025;
-    return Array.from({ length: maxYr - minYr + 1 }, (_, i) => {
-      const yr = minYr + i;
-      const count = employees.filter((e) => {
-        const sy = new Date(e.startDate).getFullYear();
-        if (sy > yr) return false;
-        if (!e.endDate) return true;
-        return new Date(e.endDate).getFullYear() >= yr;
-      }).length;
-      return { year: String(yr), headcount: count };
-    });
-  }, [employees, hcHistory]);
-  const projection = useMemo(() => {
-    const baseTotal = depts.reduce((s, d) => s + (hcCurrent[d] || 0), 0);
-    const rows = [{ year: "Now", total: baseTotal }];
-    const cur = { ...hcCurrent };
-    for (let y = 1; y <= planHorizon; y++) {
-      let total = 0;
-      depts.forEach((d) => {
-        const prev = cur[d] || 0;
-        const tgt = hcTargets[d] != null ? Number(hcTargets[d]) : prev;
-        const growthThisYear = Math.ceil(Math.max(0, tgt - prev) / (planHorizon - y + 1));
-        cur[d] = prev + growthThisYear;
-        total += cur[d];
-      });
-      rows.push({ year: String(2025 + y), total });
-    }
-    return rows;
-  }, [depts, hcCurrent, hcTargets, planHorizon]);
-  const planTableData = useMemo(() => depts.map((d) => {
-    const cur = hcCurrent[d] || 0;
-    const tgt = hcTargets[d] != null ? Number(hcTargets[d]) : null;
-    const netNew = tgt != null ? Math.max(0, tgt - cur) : null;
-    const attrBackfill = tgt != null ? Math.round(cur * ATTRITION_RATE * planHorizon) : null;
-    const totalHires = netNew != null ? netNew + (attrBackfill || 0) : null;
-    const hiresPerYear = totalHires != null ? (totalHires / planHorizon).toFixed(1) : null;
-    return { d, cur, tgt, netNew, attrBackfill, totalHires, hiresPerYear };
-  }), [depts, hcCurrent, hcTargets, planHorizon]);
-  const deptFnMap = useMemo(() => {
-    const m = {};
-    activeEmps.forEach((e) => {
-      if (!m[e.dept]) m[e.dept] = e.bucket;
-    });
-    return m;
-  }, [activeEmps]);
-  const recruiterCoverage = useMemo(() => {
-    const result = {};
-    recruiters.forEach((r) => {
-      result[r.id] = planTableData.filter((row) => row.netNew != null && row.netNew > 0).filter((row) => {
-        if (r.depts.length > 0 && !r.depts.includes(row.d)) return false;
-        if (r.fns.length > 0 && !r.fns.includes(deptFnMap[row.d])) return false;
-        return true;
-      }).map((row) => row.d);
-    });
-    return result;
-  }, [recruiters, planTableData, deptFnMap]);
-  const uncoveredDepts = useMemo(() => {
-    const covered = new Set(Object.values(recruiterCoverage).flat());
-    return planTableData.filter((row) => row.netNew != null && row.netNew > 0 && !covered.has(row.d)).map((row) => row.d);
-  }, [recruiterCoverage, planTableData]);
-  const deptRecruiters = useMemo(() => {
-    const m = {};
-    recruiters.forEach((r) => {
-      (recruiterCoverage[r.id] || []).forEach((d) => {
-        if (!m[d]) m[d] = [];
-        m[d].push(r);
-      });
-    });
-    return m;
-  }, [recruiters, recruiterCoverage]);
-  const REC_FILLS_MO = 15;
-  const REC_TARGET_LOAD = 15;
-  const capacityStats = useMemo(() => {
-    const totalNetNew = planTableData.reduce((s, r) => {
-      var _a;
-      return s + ((_a = r.netNew) != null ? _a : 0);
-    }, 0);
-    const totalAttr = planTableData.reduce((s, r) => {
-      var _a;
-      return s + ((_a = r.attrBackfill) != null ? _a : 0);
-    }, 0);
-    const totalPositions = totalNetNew + totalAttr;
-    const horizonMonths = planHorizon * 12;
-    const monthlyDemand = horizonMonths > 0 ? totalPositions / horizonMonths : 0;
-    const recommended = Math.ceil(monthlyDemand / REC_FILLS_MO);
-    const currentCapacity = recruiters.length * REC_FILLS_MO;
-    const monthsToFill = currentCapacity > 0 ? Math.ceil(totalPositions / currentCapacity) : null;
-    const onTrack = monthsToFill != null && monthsToFill <= horizonMonths;
-    const recStats = recruiters.map((r) => {
-      const covered = recruiterCoverage[r.id] || [];
-      const openReqs = covered.reduce((s, d) => {
-        var _a, _b;
-        return s + ((_b = (_a = planTableData.find((x) => x.d === d)) == null ? void 0 : _a.netNew) != null ? _b : 0);
-      }, 0);
-      const attrMo = covered.reduce((s, d) => {
-        const row = planTableData.find((x) => x.d === d);
-        return s + ((row == null ? void 0 : row.attrBackfill) != null ? row.attrBackfill / horizonMonths : 0);
-      }, 0);
-      const loadPct = openReqs / REC_TARGET_LOAD;
-      const status = openReqs === 0 ? "idle" : loadPct > 1.33 ? "overloaded" : loadPct > 1 ? "over" : loadPct >= 0.8 ? "on-target" : "under";
-      const moClear = Math.ceil(openReqs / REC_FILLS_MO);
-      return { id: r.id, openReqs, attrMo, loadPct, status, moClear };
-    });
-    return { totalNetNew, totalAttr, totalPositions, monthlyDemand, recommended, currentCapacity, monthsToFill, onTrack, recStats };
-  }, [recruiters, recruiterCoverage, planTableData, planHorizon]);
-  const diffData = useMemo(() => {
-    if (!diffBase) return null;
-    const base = scenarios.find((s) => s.name === diffBase);
-    if (!(base == null ? void 0 : base.data)) return null;
-    const baseActive = base.data.filter((e) => e.status === "Active");
-    const currActive = activeEmps;
-    const moved = currActive.filter((c) => {
-      const b = base.data.find((e) => e.id === c.id);
-      return b && b.managerId !== c.managerId;
-    }).map((c) => {
-      const b = base.data.find((e) => e.id === c.id);
-      const oldMgr = base.data.find((e) => e.id === b.managerId);
-      const newMgr = currActive.find((e) => e.id === c.managerId);
-      return { ...c, oldMgr: oldMgr ? `${oldMgr.first} ${oldMgr.last}` : "\u2014", newMgr: newMgr ? `${newMgr.first} ${newMgr.last}` : "\u2014" };
-    });
-    const deptDelta = {};
-    const allDepts = [...new Set([...baseActive, ...currActive].map((e) => e.dept))];
-    allDepts.forEach((d) => {
-      const before = baseActive.filter((e) => e.dept === d).length;
-      const after = currActive.filter((e) => e.dept === d).length;
-      if (before !== after) deptDelta[d] = { before, after, delta: after - before };
-    });
-    return { moved, deptDelta, baseCount: baseActive.length, currCount: currActive.length };
-  }, [diffBase, scenarios, activeEmps]);
-  const STABS = [
-    { id: "scenarios", label: "Scenarios", icon: Target },
-    { id: "planning", label: "Headcount Planning", icon: TrendingUp },
-    { id: "diff", label: "Compare / Diff", icon: ArrowRight }
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "p-6 h-full overflow-y-auto", style: { fontFamily: "'DM Sans', sans-serif" } }, /* @__PURE__ */ React.createElement("h2", { className: "text-xl font-bold text-gray-900 mb-1 flex items-center" }, "What-If Scenarios", /* @__PURE__ */ React.createElement(Help, { text: "Snapshot the current employee dataset, branch into alternates (reorg, cuts, M&A), then compare side-by-side with Compare/Diff. Editing a scenario does not touch your other scenarios.", side: "bottom" })), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1 mb-5 border-b border-gray-100 pb-2 items-center" }, STABS.map((t) => /* @__PURE__ */ React.createElement("div", { key: t.id, className: "flex items-center" }, /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      onClick: () => setScenarioTab(t.id),
-      className: `flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors ${scenarioTab === t.id ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`
-    },
-    /* @__PURE__ */ React.createElement(t.icon, { size: 12 }),
-    t.label
-  )))), scenarioTab === "scenarios" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "text-sm text-gray-500 mb-4" }, "Create alternate org structures without affecting your base data."), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 mb-3 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("input", { value: scenarioNewName, onChange: (e) => setScenarioNewName(e.target.value), placeholder: "New scenario name...", className: "text-sm border border-gray-200 rounded-lg px-3 py-2 flex-1 min-w-[200px] focus:outline-none focus:ring-2 focus:ring-blue-500" }), /* @__PURE__ */ React.createElement("button", { onClick: () => {
-    if (scenarioNewName.trim()) {
-      setScenarios((prev) => [...prev, { name: scenarioNewName.trim(), data: JSON.parse(JSON.stringify(employees)) }]);
-      setScenarioName(scenarioNewName.trim());
-      setScenarioNewName("");
-    }
-  }, className: "bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors" }, "Create"), /* @__PURE__ */ React.createElement(Help, { text: "Forks the current employee list into a named snapshot. Click any scenario in the list below to switch into it; your edits go into that snapshot." })), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 mb-5 flex-wrap items-center" }, /* @__PURE__ */ React.createElement("button", { onClick: exportScenarios, title: "Export all scenarios as JSON", className: "text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Download, { size: 12 }), "Export scenarios"), /* @__PURE__ */ React.createElement("label", { title: "Import scenarios from a previously exported JSON", className: "text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-1.5 cursor-pointer" }, /* @__PURE__ */ React.createElement(Plus, { size: 12 }), "Import scenarios", /* @__PURE__ */ React.createElement(
-    "input",
-    {
-      type: "file",
-      accept: ".json,application/json",
-      className: "hidden",
-      onChange: (e) => {
-        var _a;
-        const f = (_a = e.target.files) == null ? void 0 : _a[0];
-        if (f) importScenarios(f);
-        e.target.value = "";
-      }
-    }
-  )), /* @__PURE__ */ React.createElement(Help, { text: "Saves every scenario (including all employee snapshots) to a JSON file. Import on another browser or share with a teammate. Importing REPLACES your current scenario list." })), /* @__PURE__ */ React.createElement("div", { className: "space-y-2 mb-5" }, scenarios.map((s, i) => /* @__PURE__ */ React.createElement("div", { key: i, onClick: () => {
-    setScenarioName(s.name);
-    if (s.data) setEmployees(s.data);
-  }, className: `p-3 rounded-xl border cursor-pointer transition-all ${scenarioName === s.name ? "border-blue-500 bg-blue-50" : "border-gray-100 bg-white hover:border-gray-300"}` }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("div", { className: "font-medium text-sm text-gray-800" }, s.name), scenarioName === s.name && /* @__PURE__ */ React.createElement("span", { className: "text-xs bg-blue-600 text-white px-2 py-0.5 rounded" }, "Active")), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-gray-400 mt-1" }, s.data ? `${s.data.filter((e) => e.status === "Active").length} employees` : "Base dataset")))), undoStack.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 mb-4" }, /* @__PURE__ */ React.createElement("button", { onClick: undo, className: "text-sm bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2" }, /* @__PURE__ */ React.createElement(ChevronLeft, { size: 14 }), "Undo last change"), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-gray-400" }, undoStack.length, " change(s) in stack")), /* @__PURE__ */ React.createElement("div", { className: "bg-amber-50 border border-amber-200 rounded-xl p-4" }, /* @__PURE__ */ React.createElement("h4", { className: "text-sm font-bold text-amber-800 flex items-center gap-2 mb-2" }, /* @__PURE__ */ React.createElement(Info, { size: 14 }), "How to use scenarios"), /* @__PURE__ */ React.createElement("ul", { className: "text-xs text-amber-700 space-y-1.5" }, /* @__PURE__ */ React.createElement("li", null, "\u2022 Create a scenario to work in a sandbox copy of the org"), /* @__PURE__ */ React.createElement("li", null, "\u2022 Switch to ", /* @__PURE__ */ React.createElement("strong", null, "Org Chart"), " and drag cards to model changes"), /* @__PURE__ */ React.createElement("li", null, "\u2022 Use ", /* @__PURE__ */ React.createElement("strong", null, "Ctrl+Z"), " to undo any move"), /* @__PURE__ */ React.createElement("li", null, "\u2022 Use ", /* @__PURE__ */ React.createElement("strong", null, "Compare / Diff"), " tab to see what changed")))), scenarioTab === "planning" && (() => {
-    const summaryNetNew = planTableData.reduce((s, r) => {
-      var _a;
-      return s + ((_a = r.netNew) != null ? _a : 0);
-    }, 0);
-    const summaryAttrFill = planTableData.reduce((s, r) => {
-      var _a;
-      return s + ((_a = r.attrBackfill) != null ? _a : 0);
-    }, 0);
-    const summaryTotal = summaryNetNew + summaryAttrFill;
-    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-gray-700 mb-1" }, "Historical Hiring"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-gray-400 mb-3" }, "New employees by start year \xB7 cumulative headcount trend"), /* @__PURE__ */ React.createElement("div", { style: { height: 150 }, className: "mb-1" }, /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: "100%" }, /* @__PURE__ */ React.createElement(BarChart, { data: hcHistory, margin: { top: 4, right: 4, bottom: 0, left: 0 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "year", tick: { fontSize: 9 }, tickLine: false, axisLine: false }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fontSize: 9 }, tickLine: false, axisLine: false, width: 28 }), /* @__PURE__ */ React.createElement(Tooltip, { contentStyle: { fontSize: 11, borderRadius: 8 }, formatter: (v) => [v, "New Hires"] }), /* @__PURE__ */ React.createElement(Bar, { dataKey: "hires", fill: "#2563eb", radius: [3, 3, 0, 0] })))), /* @__PURE__ */ React.createElement("div", { style: { height: 120 }, className: "mb-5" }, /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: "100%" }, /* @__PURE__ */ React.createElement(AreaChart, { data: hcTrend, margin: { top: 4, right: 4, bottom: 0, left: 0 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "year", tick: { fontSize: 9 }, tickLine: false, axisLine: false }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fontSize: 9 }, tickLine: false, axisLine: false, width: 36 }), /* @__PURE__ */ React.createElement(Tooltip, { contentStyle: { fontSize: 11, borderRadius: 8 }, formatter: (v) => [v, "Total Headcount"] }), /* @__PURE__ */ React.createElement(Area, { dataKey: "headcount", stroke: "#059669", fill: "#d1fae5", strokeWidth: 2, dot: false })))), /* @__PURE__ */ React.createElement("div", { className: "border-t border-gray-100 mb-5" }), /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-3 gap-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex-1" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-gray-700" }, "Forward Simulation"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-gray-400" }, "10% annual attrition \xB7 set department targets below")), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 shrink-0" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-gray-500 whitespace-nowrap" }, "Total target:"), /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        type: "number",
-        min: 0,
-        value: orgTarget,
-        placeholder: "e.g. 3000",
-        onChange: (e) => setOrgTarget(e.target.value),
-        onBlur: () => {
-          const total = Number(orgTarget);
-          if (!total) return;
-          const activeTotal = depts.reduce((s, d) => s + (hcCurrent[d] || 0), 0);
-          if (!activeTotal) return;
-          const newTargets = {};
-          depts.forEach((d) => {
-            newTargets[d] = Math.round(hcCurrent[d] / activeTotal * total);
-          });
-          setHcTargets(newTargets);
-        },
-        onKeyDown: (e) => {
-          if (e.key === "Enter") e.target.blur();
-        },
-        className: "w-24 border border-gray-200 rounded-lg px-2 py-1 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
-      }
-    )), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1 shrink-0" }, [1, 2, 3, 5].map((yr) => /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        key: yr,
-        onClick: () => setPlanHorizon(yr),
-        className: `px-2.5 py-1 rounded text-xs font-medium transition-colors ${planHorizon === yr ? "bg-blue-600 text-white" : "text-gray-500 bg-gray-100 hover:bg-gray-200"}`
-      },
-      yr,
-      "yr"
-    )))), /* @__PURE__ */ React.createElement("div", { style: { height: 120 }, className: "mb-4" }, /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: "100%" }, /* @__PURE__ */ React.createElement(BarChart, { data: projection, margin: { top: 4, right: 4, bottom: 0, left: 0 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "year", tick: { fontSize: 10 }, tickLine: false, axisLine: false }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fontSize: 10 }, tickLine: false, axisLine: false, width: 36 }), /* @__PURE__ */ React.createElement(Tooltip, { contentStyle: { fontSize: 11, borderRadius: 8 }, formatter: (v) => [v, "Headcount"] }), /* @__PURE__ */ React.createElement(Bar, { dataKey: "total", fill: "#7c3aed", radius: [3, 3, 0, 0] })))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-3 mb-5" }, /* @__PURE__ */ React.createElement("div", { className: "bg-blue-50 rounded-xl p-3 border border-blue-100 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-black text-blue-700" }, summaryNetNew), /* @__PURE__ */ React.createElement("div", { className: "text-xs font-semibold text-blue-600" }, "Net New Positions")), /* @__PURE__ */ React.createElement("div", { className: "bg-amber-50 rounded-xl p-3 border border-amber-100 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-black text-amber-700" }, summaryAttrFill), /* @__PURE__ */ React.createElement("div", { className: "text-xs font-semibold text-amber-600" }, "Attrition Backfills"), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-amber-400" }, "@10%/yr \xD7 ", planHorizon, "yr")), /* @__PURE__ */ React.createElement("div", { className: "bg-violet-50 rounded-xl p-3 border border-violet-100 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-black text-violet-700" }, summaryTotal), /* @__PURE__ */ React.createElement("div", { className: "text-xs font-semibold text-violet-600" }, "Gross Hires (", planHorizon, "yr)"))), /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl border border-gray-100 overflow-hidden" }, /* @__PURE__ */ React.createElement(
-      "div",
-      {
-        className: "grid text-xs font-semibold text-gray-500 bg-gray-50 border-b border-gray-100 px-4 py-2",
-        style: { gridTemplateColumns: "1fr 50px 76px 62px 70px 62px 50px 64px" }
-      },
-      /* @__PURE__ */ React.createElement("span", null, "Department"),
-      /* @__PURE__ */ React.createElement("span", { className: "text-center" }, "Now"),
-      /* @__PURE__ */ React.createElement("span", { className: "text-center" }, "Target"),
-      /* @__PURE__ */ React.createElement("span", { className: "text-center" }, "Net New"),
-      /* @__PURE__ */ React.createElement("span", { className: "text-center" }, "Attrition"),
-      /* @__PURE__ */ React.createElement("span", { className: "text-center" }, "Total"),
-      /* @__PURE__ */ React.createElement("span", { className: "text-center" }, "/yr"),
-      /* @__PURE__ */ React.createElement("span", { className: "text-center" }, "Recruiter")
-    ), planTableData.map(({ d, cur, tgt, netNew, attrBackfill, totalHires, hiresPerYear }) => {
-      const assigned = deptRecruiters[d] || [];
-      const hasOpenReqs = netNew != null && netNew > 0;
-      return /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          key: d,
-          className: "grid items-center px-4 py-2 border-b border-gray-50 text-xs hover:bg-gray-50 transition-colors",
-          style: { gridTemplateColumns: "1fr 50px 76px 62px 70px 62px 50px 64px" }
-        },
-        /* @__PURE__ */ React.createElement("span", { className: "font-medium text-gray-800 truncate" }, d),
-        /* @__PURE__ */ React.createElement("span", { className: "text-center text-gray-500" }, cur),
-        /* @__PURE__ */ React.createElement(
-          "input",
-          {
-            type: "number",
-            min: 0,
-            value: tgt != null ? tgt : "",
-            onChange: (e) => setHcTargets((prev) => ({ ...prev, [d]: e.target.value === "" ? void 0 : Number(e.target.value) })),
-            placeholder: String(cur),
-            className: "border border-gray-200 rounded px-2 py-1 text-center text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-500"
-          }
-        ),
-        /* @__PURE__ */ React.createElement("span", { className: `text-center font-bold ${hasOpenReqs ? "text-blue-600" : "text-gray-300"}` }, hasOpenReqs ? `+${netNew}` : "\u2014"),
-        /* @__PURE__ */ React.createElement("span", { className: "text-center font-medium text-amber-600" }, attrBackfill != null ? `+${attrBackfill}` : "\u2014"),
-        /* @__PURE__ */ React.createElement("span", { className: "text-center font-bold text-violet-700" }, totalHires != null ? totalHires : "\u2014"),
-        /* @__PURE__ */ React.createElement("span", { className: "text-center text-gray-400" }, hiresPerYear != null ? hiresPerYear : "\u2014"),
-        /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-0.5 flex-wrap" }, assigned.map((r) => /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            key: r.id,
-            title: r.name,
-            className: "inline-flex items-center justify-center w-5 h-5 rounded-full text-white font-bold shrink-0",
-            style: { background: recruiterColor(r.id), fontSize: 8 }
-          },
-          r.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
-        )), assigned.length === 0 && hasOpenReqs && /* @__PURE__ */ React.createElement(AlertCircle, { size: 12, className: "text-red-300", title: "No recruiter assigned" }))
-      );
-    })), /* @__PURE__ */ React.createElement("div", { className: "mt-3 text-xs text-gray-400" }, "Attrition = hires to replace turnover at 10%/yr over ", planHorizon, "yr. Enter a target to activate a row."), /* @__PURE__ */ React.createElement("div", { className: "border-t border-gray-100 mt-6 pt-5" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-gray-700" }, "Recruiting Coverage"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-gray-400" }, "15 fills/month \xB7 15 open positions per recruiter")), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        value: newRecName,
-        onChange: (e) => setNewRecName(e.target.value),
-        onKeyDown: (e) => e.key === "Enter" && addRecruiter(),
-        placeholder: "Add recruiter\u2026",
-        className: "text-sm border border-gray-200 rounded-lg px-3 py-1.5 w-40 focus:outline-none focus:ring-2 focus:ring-blue-500"
-      }
-    ), /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        onClick: addRecruiter,
-        className: "bg-blue-600 text-white text-sm px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1"
-      },
-      /* @__PURE__ */ React.createElement(Plus, { size: 12 }),
-      "Add"
-    ))), capacityStats.totalPositions > 0 && /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-4 gap-3 mb-4" }, [
-      {
-        label: "Monthly Demand",
-        value: capacityStats.monthlyDemand.toFixed(1),
-        sub: "fills/mo needed",
-        color: "gray"
-      },
-      {
-        label: "Recommended",
-        value: capacityStats.recommended,
-        sub: `recruiter${capacityStats.recommended !== 1 ? "s" : ""} to hit plan`,
-        color: recruiters.length >= capacityStats.recommended ? "green" : "amber",
-        badge: recruiters.length < capacityStats.recommended ? `${capacityStats.recommended - recruiters.length} short` : recruiters.length > capacityStats.recommended ? `${recruiters.length - capacityStats.recommended} extra` : "staffed"
-      },
-      {
-        label: "Team Capacity",
-        value: capacityStats.currentCapacity,
-        sub: "fills/mo at full load",
-        color: capacityStats.currentCapacity >= capacityStats.monthlyDemand ? "green" : "red"
-      },
-      {
-        label: "Time to Fill",
-        value: capacityStats.monthsToFill != null ? `${capacityStats.monthsToFill} mo` : "\u2014",
-        sub: capacityStats.onTrack ? "on track \u2713" : `plan is ${planHorizon * 12} mo`,
-        color: capacityStats.monthsToFill == null ? "gray" : capacityStats.onTrack ? "green" : "red"
-      }
-    ].map(({ label, value, sub, color, badge }) => {
-      const bg = { green: "#f0fdf4", amber: "#fffbeb", red: "#fef2f2", gray: "#f8fafc" }[color];
-      const txt = { green: "#15803d", amber: "#b45309", red: "#b91c1c", gray: "#475569" }[color];
-      const bdr = { green: "#bbf7d0", amber: "#fde68a", red: "#fecaca", gray: "#e2e8f0" }[color];
-      return /* @__PURE__ */ React.createElement("div", { key: label, className: "rounded-xl p-3 border text-center", style: { background: bg, borderColor: bdr } }, /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-black", style: { color: txt } }, value), /* @__PURE__ */ React.createElement("div", { className: "text-xs font-semibold mt-0.5", style: { color: txt } }, label), /* @__PURE__ */ React.createElement("div", { className: "text-xs mt-0.5", style: { color: txt, opacity: 0.7 } }, badge != null ? badge : sub));
-    })), recruiters.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "text-center text-gray-400 text-xs py-6 border border-dashed border-gray-200 rounded-xl" }, "No recruiters yet \u2014 add one above to start tracking capacity"), /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, recruiters.map((r) => {
-      const stats = capacityStats.recStats.find((s) => s.id === r.id) || { openReqs: 0, attrMo: 0, loadPct: 0, status: "idle", moClear: 0 };
-      const color = recruiterColor(r.id);
-      const covered = recruiterCoverage[r.id] || [];
-      const loadBarPct = Math.min(200, Math.round(stats.loadPct * 100));
-      const barColor = stats.status === "overloaded" ? "#dc2626" : stats.status === "over" ? "#d97706" : stats.status === "on-target" ? "#16a34a" : stats.status === "idle" ? "#e5e7eb" : "#60a5fa";
-      const statusLabel = { overloaded: "Overloaded", over: "Over target", "on-target": "On target", under: "Under capacity", idle: "No reqs" }[stats.status];
-      const statusBg = { overloaded: "#fef2f2", over: "#fffbeb", "on-target": "#f0fdf4", under: "#eff6ff", idle: "#f8fafc" }[stats.status];
-      const statusTxt = { overloaded: "#b91c1c", over: "#b45309", "on-target": "#15803d", under: "#1d4ed8", idle: "#94a3b8" }[stats.status];
-      return /* @__PURE__ */ React.createElement("div", { key: r.id, className: "bg-white border border-gray-100 rounded-xl p-4", style: { borderLeftWidth: 3, borderLeftColor: color } }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3 mb-2" }, /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          className: "w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0",
-          style: { background: color }
-        },
-        r.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
-      ), /* @__PURE__ */ React.createElement(
-        "input",
-        {
-          value: r.name,
-          onChange: (e) => updateRecruiter(r.id, "name", e.target.value),
-          className: "font-semibold text-sm text-gray-800 flex-1 bg-transparent border-0 border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none pb-0.5"
-        }
-      ), /* @__PURE__ */ React.createElement(
-        "span",
-        {
-          className: "text-xs px-2 py-0.5 rounded-full font-medium shrink-0",
-          style: { background: statusBg, color: statusTxt }
-        },
-        statusLabel
-      ), /* @__PURE__ */ React.createElement("button", { onClick: () => removeRecruiter(r.id), className: "text-gray-300 hover:text-red-400 transition-colors" }, /* @__PURE__ */ React.createElement(X, { size: 13 }))), /* @__PURE__ */ React.createElement("div", { className: "mb-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between text-xs text-gray-400 mb-1" }, /* @__PURE__ */ React.createElement("span", null, stats.openReqs, " open req", stats.openReqs !== 1 ? "s" : "", " \xB7 ", stats.attrMo.toFixed(1), " attrition backfills/mo"), /* @__PURE__ */ React.createElement("span", null, stats.openReqs > 0 ? `clears in ${stats.moClear} mo at 15 fills/mo` : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "relative h-2 bg-gray-100 rounded-full overflow-visible" }, /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          className: "h-2 rounded-full transition-all duration-300",
-          style: { width: `${Math.min(100, loadBarPct / 2)}%`, background: barColor }
-        }
-      ), /* @__PURE__ */ React.createElement(
-        "div",
-        {
-          className: "absolute top-[-2px] bottom-[-2px] w-px bg-gray-400",
-          style: { left: "50%" },
-          title: "15-req target"
-        }
-      ), /* @__PURE__ */ React.createElement("span", { className: "absolute text-gray-400 font-medium", style: { left: "50%", top: 6, fontSize: 9, transform: "translateX(-50%)" } }, "15")), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-gray-300 mt-1", style: { fontSize: 9 } }, /* @__PURE__ */ React.createElement("span", null, "0"), /* @__PURE__ */ React.createElement("span", null, "30+"))), [
-        { label: "Depts", field: "depts", opts: depts, colorMap: DEPT_COLORS },
-        { label: "Locations", field: "locations", opts: LOCATIONS, colorMap: LOC_COLORS },
-        { label: "Levels", field: "levelGroups", opts: RECRUITER_LEVEL_GROUPS, colorMap: null },
-        { label: "Function Group", field: "fns", opts: RECRUITER_FNS, colorMap: FN_COLORS }
-      ].map(({ label, field, opts, colorMap }) => /* @__PURE__ */ React.createElement("div", { key: field, className: "flex items-start gap-2 mb-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-gray-400 w-16 shrink-0 pt-0.5" }, label), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1" }, r[field].length === 0 && /* @__PURE__ */ React.createElement("span", { className: "text-xs text-gray-300 italic" }, "All"), opts.map((opt) => {
-        const active = r[field].includes(opt);
-        const c = colorMap == null ? void 0 : colorMap[opt];
-        return /* @__PURE__ */ React.createElement(
-          "button",
-          {
-            key: opt,
-            onClick: () => toggleTag(r, field, opt),
-            className: "text-xs px-2 py-0.5 rounded-full border transition-all",
-            style: active && c ? { background: `${c}22`, borderColor: c, color: c } : active ? { background: color, borderColor: color, color: "white" } : { background: "white", borderColor: "#e5e7eb", color: "#9ca3af" }
-          },
-          opt
-        );
-      })))), covered.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "mt-2 pt-2 border-t border-gray-50 flex flex-wrap gap-1" }, covered.map((d) => {
-        var _a;
-        const row = planTableData.find((x) => x.d === d);
-        return /* @__PURE__ */ React.createElement(
-          "span",
-          {
-            key: d,
-            className: "text-xs px-2 py-0.5 rounded-full",
-            style: { background: `${DEPT_COLORS[d] || "#64748b"}18`, color: DEPT_COLORS[d] || "#64748b", border: `1px solid ${DEPT_COLORS[d] || "#64748b"}44` }
-          },
-          d,
-          " (",
-          (_a = row == null ? void 0 : row.netNew) != null ? _a : 0,
-          ")"
-        );
-      })));
-    })), recruiters.length > 0 && uncoveredDepts.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "mt-4 bg-red-50 border border-red-100 rounded-xl p-3" }, /* @__PURE__ */ React.createElement("div", { className: "text-xs font-bold text-red-700 flex items-center gap-1.5 mb-2" }, /* @__PURE__ */ React.createElement(AlertCircle, { size: 12 }), uncoveredDepts.length, " dept", uncoveredDepts.length !== 1 ? "s" : "", " with open reqs have no recruiter assigned"), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1.5" }, uncoveredDepts.map((d) => /* @__PURE__ */ React.createElement("span", { key: d, className: "text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full border border-red-200" }, d)))), recruiters.length > 0 && uncoveredDepts.length === 0 && capacityStats.totalPositions > 0 && /* @__PURE__ */ React.createElement("div", { className: "mt-4 bg-green-50 border border-green-100 rounded-xl p-3 flex items-center gap-2" }, /* @__PURE__ */ React.createElement(Check, { size: 13, className: "text-green-600 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold text-green-700" }, "Full coverage \u2014 every open req has a recruiter assigned"))));
-  })(), scenarioTab === "diff" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "text-sm text-gray-500 mb-4" }, "Compare the active scenario against a baseline to see what moved."), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 mb-5" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-gray-500" }, "Compare active (", /* @__PURE__ */ React.createElement("strong", null, scenarioName), ") against:"), /* @__PURE__ */ React.createElement(
-    "select",
-    {
-      value: diffBase != null ? diffBase : "",
-      onChange: (e) => setDiffBase(e.target.value || null),
-      className: "text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1"
-    },
-    /* @__PURE__ */ React.createElement("option", { value: "" }, "Select baseline\u2026"),
-    scenarios.filter((s) => s.name !== scenarioName).map((s) => /* @__PURE__ */ React.createElement("option", { key: s.name }, s.name))
-  )), !diffData && /* @__PURE__ */ React.createElement("div", { className: "text-sm text-gray-400 text-center py-8" }, "Select a baseline scenario above to see the diff."), diffData && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 mb-5" }, /* @__PURE__ */ React.createElement("div", { className: "flex-1 bg-gray-50 rounded-xl p-3 border border-gray-100 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-black text-gray-700" }, diffData.baseCount), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-gray-400" }, diffBase, " headcount")), /* @__PURE__ */ React.createElement("div", { className: "flex items-center text-gray-300" }, /* @__PURE__ */ React.createElement(ArrowRight, { size: 20 })), /* @__PURE__ */ React.createElement("div", { className: "flex-1 bg-blue-50 rounded-xl p-3 border border-blue-100 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "text-2xl font-black text-blue-700" }, diffData.currCount), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-blue-400" }, scenarioName, " headcount")), /* @__PURE__ */ React.createElement("div", { className: `flex-1 rounded-xl p-3 border text-center ${diffData.currCount > diffData.baseCount ? "bg-green-50 border-green-100" : "bg-red-50 border-red-100"}` }, /* @__PURE__ */ React.createElement("div", { className: `text-2xl font-black ${diffData.currCount > diffData.baseCount ? "text-green-600" : "text-red-600"}` }, diffData.currCount > diffData.baseCount ? "+" : "", diffData.currCount - diffData.baseCount), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-gray-400" }, "Net change"))), Object.keys(diffData.deptDelta).length > 0 && /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl border border-gray-100 mb-4 overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "px-4 py-2 text-xs font-bold text-gray-600 bg-gray-50 border-b border-gray-100" }, "Department Changes"), Object.entries(diffData.deptDelta).map(([d, { before, after, delta }]) => /* @__PURE__ */ React.createElement("div", { key: d, className: "flex items-center gap-3 px-4 py-2 border-b border-gray-50 text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "flex-1 font-medium text-gray-700" }, d), /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, before, " \u2192 ", after), /* @__PURE__ */ React.createElement("span", { className: `font-bold px-1.5 py-0.5 rounded ${delta > 0 ? "text-green-700 bg-green-50" : "text-red-700 bg-red-50"}` }, delta > 0 ? `+${delta}` : delta)))), diffData.moved.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl border border-gray-100 overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "px-4 py-2 text-xs font-bold text-gray-600 bg-gray-50 border-b border-gray-100" }, "Reassigned Employees (", diffData.moved.length, ")"), diffData.moved.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.id, className: "flex items-center gap-3 px-4 py-2 border-b border-gray-50 text-xs" }, /* @__PURE__ */ React.createElement("div", { className: "w-6 h-6 rounded-full text-white flex items-center justify-center font-bold shrink-0", style: { background: DEPT_COLORS[e.dept] || "#64748b", fontSize: 9 } }, e.first[0], e.last[0]), /* @__PURE__ */ React.createElement("span", { className: "flex-1 font-medium text-gray-800" }, e.first, " ", e.last), /* @__PURE__ */ React.createElement("span", { className: "text-gray-400 truncate max-w-24" }, e.oldMgr), /* @__PURE__ */ React.createElement(ArrowRight, { size: 10, className: "text-gray-300 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "text-blue-600 truncate max-w-24" }, e.newMgr)))), diffData.moved.length === 0 && Object.keys(diffData.deptDelta).length === 0 && /* @__PURE__ */ React.createElement("div", { className: "text-sm text-gray-400 text-center py-6" }, "No differences detected between these scenarios."))));
 }
 function HeadcountPlanningView() {
   var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C;
@@ -9914,8 +9477,6 @@ function OrgChartApp() {
   const [dragNode, setDragNode] = useState(null);
   const [dragOver, setDragOver] = useState(null);
   const [dragMode, setDragMode] = useState("individual");
-  const [scenarioName, setScenarioName] = useState("Base");
-  const [scenarios, setScenarios] = useState([{ name: "Base", data: null }]);
   const [undoStack, setUndoStack] = useState([]);
   const [detailPanel, setDetailPanel] = useState(null);
   const [importState, setImportState] = useState(null);
@@ -9927,7 +9488,6 @@ function OrgChartApp() {
   const [zoom, setZoom] = useState(1);
   const [timelineSpeed, setTimelineSpeed] = useState(1);
   const [growthDimension, setGrowthDimension] = useState("total");
-  const [scenarioNewName, setScenarioNewName] = useState("");
   const [insightHighlightIds, setInsightHighlightIds] = useState(/* @__PURE__ */ new Set());
   const [chainFilterId, setChainFilterId] = useState(null);
   const [showDeparted, setShowDeparted] = useState(false);
@@ -10742,7 +10302,7 @@ function OrgChartApp() {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
-      doc.text(`SemiCorp \xB7 ${scenarioName || "Base"} \xB7 ${today}`, M, H - 24);
+      doc.text(`SemiCorp \xB7 ${today}`, M, H - 24);
       doc.text(`${pageNum} / ${total}`, W - M, H - 24, { align: "right" });
     }
     function table(rows, x, y, colWidths, headers) {
@@ -10794,7 +10354,7 @@ function OrgChartApp() {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(20);
     doc.setTextColor(148, 163, 184);
-    doc.text(`Headcount & Plan Overview \xB7 ${scenarioName || "Base"} scenario`, M, 250);
+    doc.text(`Headcount & Plan Overview`, M, 250);
     doc.setFontSize(12);
     doc.text(today, M, 280);
     bigNum("Active people", activeEmployees.length, M, 360, [255, 255, 255]);
@@ -10803,7 +10363,7 @@ function OrgChartApp() {
     if (atLeast(mode, "advanced")) bigNum("Hotspots", (hotspots || []).length, M + 580, 360, [251, 191, 36]);
     drawFooter(1, TOTAL);
     doc.addPage();
-    drawHeader("Org shape", "Headcount by department, current scenario");
+    drawHeader("Org shape", "Headcount by department");
     table(
       deptRows.map(([d, n]) => [d, n, `${(n / activeEmployees.length * 100).toFixed(1)}%`]),
       M,
@@ -10837,7 +10397,7 @@ function OrgChartApp() {
     if (topHotspots.length === 0) {
       doc.setFontSize(12);
       doc.setTextColor(100, 116, 139);
-      doc.text("No hotspots detected in the current scenario.", M, M + 80);
+      doc.text("No hotspots detected in the current org.", M, M + 80);
     } else {
       const rows = topHotspots.map((h) => {
         var _a3;
@@ -10849,7 +10409,7 @@ function OrgChartApp() {
     }
     drawFooter(4, TOTAL);
     doc.addPage();
-    drawHeader("Headcount plan \xB7 top deltas", `Scenario: ${scenarioName || "Base"} \xB7 ${planYears || planHorizonQ / 4 || "\u2014"} year horizon`);
+    drawHeader("Headcount plan \xB7 top deltas", `${planYears || planHorizonQ / 4 || "\u2014"} year horizon`);
     if (planSum.length === 0) {
       doc.setFontSize(12);
       doc.setTextColor(100, 116, 139);
@@ -10885,7 +10445,7 @@ function OrgChartApp() {
     }
     drawFooter(6, TOTAL);
     doc.save(`semicorp-exec-deck-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.pdf`);
-  }, [activeEmployees, employees, tree, hotspots, flightRisks, plan, scenarioName, locations, planYears, planHorizonQ, mode]);
+  }, [activeEmployees, employees, tree, hotspots, flightRisks, plan, locations, planYears, planHorizonQ, mode]);
   const searchResults = useMemo(() => {
     if (!searchQuery || searchQuery.length < 2) return [];
     const q = searchQuery.toLowerCase();
@@ -11091,32 +10651,6 @@ function OrgChartApp() {
     };
     reader.readAsText(file);
   }
-  function exportScenarios() {
-    downloadFile(
-      `scenarios-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.json`,
-      JSON.stringify({ version: 1, exportedAt: (/* @__PURE__ */ new Date()).toISOString(), scenarios }, null, 2),
-      "application/json"
-    );
-  }
-  function importScenarios(file) {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (!Array.isArray(data == null ? void 0 : data.scenarios)) throw new Error("Missing scenarios array");
-        const cleaned = data.scenarios.filter((s) => s && typeof s.name === "string").map((s) => ({
-          name: s.name.slice(0, 80),
-          data: Array.isArray(s.data) ? s.data : null
-        }));
-        if (cleaned.length === 0) throw new Error("No valid scenarios found");
-        setScenarios(cleaned);
-        alert(`Imported ${cleaned.length} scenario${cleaned.length > 1 ? "s" : ""}.`);
-      } catch (err) {
-        alert("Could not parse scenarios JSON: " + err.message);
-      }
-    };
-    reader.readAsText(file);
-  }
   const ctxValue = {
     employees,
     setEmployees,
@@ -11156,10 +10690,6 @@ function OrgChartApp() {
     setDragOver,
     dragMode,
     setDragMode,
-    scenarioName,
-    setScenarioName,
-    scenarios,
-    setScenarios,
     undoStack,
     setUndoStack,
     detailPanel,
@@ -11180,8 +10710,6 @@ function OrgChartApp() {
     setTimelineSpeed,
     growthDimension,
     setGrowthDimension,
-    scenarioNewName,
-    setScenarioNewName,
     insightHighlightIds,
     setInsightHighlightIds,
     chainFilterId,
@@ -11303,8 +10831,6 @@ function OrgChartApp() {
     importEmployeesCSV: openImportWizard,
     exportPipelineConfig,
     importPipelineConfig,
-    exportScenarios,
-    importScenarios,
     tutorialMode,
     setTutorialMode,
     toggleTutorialMode,
@@ -11355,10 +10881,8 @@ function OrgChartApp() {
     { id: "slides", label: "Slides", icon: FileText, minMode: "simple" },
     { id: "timeline", label: "Timeline", icon: Clock, minMode: "advanced" },
     { id: "dashboards", label: "Dashboards", icon: BarChart3, minMode: "advanced" },
-    { id: "scenarios", label: "Scenarios", icon: Target, minMode: "advanced" },
     { id: "headcount", label: "Headcount", icon: Users, minMode: "advanced" },
     { id: "analytics", label: "Analytics", icon: Zap, minMode: "advanced" },
-    { id: "flight-risk", label: "Flight Risk", icon: AlertTriangle, minMode: "advanced" },
     { id: "pipeline", label: "Pipeline", icon: GitMerge, minMode: "expert" }
   ].filter((item) => atLeast(mode, item.minMode)).map((item) => /* @__PURE__ */ React.createElement("button", { key: item.id, onClick: () => setView(item.id), className: `w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs transition-colors ${view === item.id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800"}` }, /* @__PURE__ */ React.createElement(item.icon, { size: 15 }), !sidebarCollapsed && item.label))), /* @__PURE__ */ React.createElement("div", { className: "p-2 border-t border-slate-700" }, !sidebarCollapsed ? /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-500 px-1 mb-1.5 font-medium uppercase tracking-wide", style: { fontSize: 9 } }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "space-y-1" }, MODES.map((m) => {
     const meta = MODE_META[m];
@@ -11416,7 +10940,7 @@ function OrgChartApp() {
       className: "w-full flex items-center justify-center py-1 rounded transition-all"
     },
     /* @__PURE__ */ React.createElement("span", { className: `inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${tutorialMode ? "bg-blue-500 text-white" : "bg-slate-700 text-slate-400"}` }, "?")
-  ))), !sidebarCollapsed && /* @__PURE__ */ React.createElement("div", { className: "p-3 border-t border-slate-700 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "Employees"), /* @__PURE__ */ React.createElement("span", { className: "font-bold" }, activeEmployees.length)), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "Departments"), /* @__PURE__ */ React.createElement("span", { className: "font-bold" }, departments.length)), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "Locations"), /* @__PURE__ */ React.createElement("span", { className: "font-bold" }, locations.length)), atLeast(mode, "advanced") && /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "Hotspots"), /* @__PURE__ */ React.createElement("span", { className: "font-bold text-amber-400" }, hotspots.length)), atLeast(mode, "advanced") && /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-500 mt-2 pt-2 border-t border-slate-700" }, "Scenario: ", /* @__PURE__ */ React.createElement("span", { className: "text-blue-400" }, scenarioName)))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 flex flex-col min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "bg-white border-b border-gray-100 px-4 py-2 flex items-center gap-3 shrink-0 flex-wrap no-print", style: { boxShadow: "0 1px 2px rgba(0,0,0,0.03)" } }, /* @__PURE__ */ React.createElement("div", { className: "relative flex-1 max-w-md" }, /* @__PURE__ */ React.createElement(Search, { size: 14, className: "absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" }), /* @__PURE__ */ React.createElement("input", { value: searchQuery, onChange: (e) => setSearchQuery(e.target.value), placeholder: "Search by name, title, department, ID...", className: "w-full text-sm bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" }), searchResults.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto" }, searchResults.map((e) => /* @__PURE__ */ React.createElement("button", { key: e.id, onClick: () => {
+  ))), !sidebarCollapsed && /* @__PURE__ */ React.createElement("div", { className: "p-3 border-t border-slate-700 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "Employees"), /* @__PURE__ */ React.createElement("span", { className: "font-bold" }, activeEmployees.length)), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "Departments"), /* @__PURE__ */ React.createElement("span", { className: "font-bold" }, departments.length)), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "Locations"), /* @__PURE__ */ React.createElement("span", { className: "font-bold" }, locations.length)), atLeast(mode, "advanced") && /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "Hotspots"), /* @__PURE__ */ React.createElement("span", { className: "font-bold text-amber-400" }, hotspots.length)))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 flex flex-col min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "bg-white border-b border-gray-100 px-4 py-2 flex items-center gap-3 shrink-0 flex-wrap no-print", style: { boxShadow: "0 1px 2px rgba(0,0,0,0.03)" } }, /* @__PURE__ */ React.createElement("div", { className: "relative flex-1 max-w-md" }, /* @__PURE__ */ React.createElement(Search, { size: 14, className: "absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" }), /* @__PURE__ */ React.createElement("input", { value: searchQuery, onChange: (e) => setSearchQuery(e.target.value), placeholder: "Search by name, title, department, ID...", className: "w-full text-sm bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" }), searchResults.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto" }, searchResults.map((e) => /* @__PURE__ */ React.createElement("button", { key: e.id, onClick: () => {
     navigateTo(e.id);
     setView("org-chart");
   }, className: "w-full text-left px-3 py-2 hover:bg-blue-50 transition-colors flex items-center gap-2 text-xs border-b border-gray-50" }, /* @__PURE__ */ React.createElement("div", { className: "w-6 h-6 rounded-full flex items-center justify-center text-white text-xs", style: { background: DEPT_COLORS[e.dept] || "#64748b", fontSize: 8 } }, e.first[0], e.last[0]), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "font-medium text-gray-800" }, e.first, " ", e.last), /* @__PURE__ */ React.createElement("div", { className: "text-gray-400" }, e.title, " \xB7 ", e.dept)))))), view === "org-chart" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Help, { text: "Org Chart \u2014 the live reporting tree. Click a node to expand/collapse, or a person for their detail panel. Recolor nodes with the Color buttons (Dept / BU / Discipline / Location), narrow the view with these filters or search, and turn on Team Move to drag whole teams and model reorgs.", side: "bottom", width: 320 }), /* @__PURE__ */ React.createElement("select", { value: filterDept, onChange: (e) => setFilterDept(e.target.value), className: "text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600" }, /* @__PURE__ */ React.createElement("option", { value: "All" }, "All Departments"), departments.map((d) => /* @__PURE__ */ React.createElement("option", { key: d, value: d }, d))), /* @__PURE__ */ React.createElement("select", { value: filterCountry, onChange: (e) => {
@@ -11584,7 +11108,7 @@ function OrgChartApp() {
       style: { background: orgViewMode === m ? "white" : "transparent", color: orgViewMode === m ? "#1e293b" : "#64748b", fontWeight: orgViewMode === m ? 600 : 400, boxShadow: orgViewMode === m ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }
     },
     l
-  ))), orgViewMode === "tree" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: expandAll, className: "text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "Expand All"), /* @__PURE__ */ React.createElement("button", { onClick: collapseAll, className: "text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "Collapse All"), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-gray-400 ml-2" }, dragNode ? dragMode === "team" ? /* @__PURE__ */ React.createElement("span", { className: "text-violet-600 font-medium" }, "\u26D3 Chain drag \u2014 whole subtree moves with them \xB7 release Shift to switch") : /* @__PURE__ */ React.createElement("span", { className: "text-blue-600 font-medium" }, "\u{1F464} Solo drag \u2014 reports roll up to their manager \xB7 hold Shift to take the chain") : /* @__PURE__ */ React.createElement("span", null, "Drag to reassign \xB7 ", /* @__PURE__ */ React.createElement("kbd", { className: "bg-gray-100 border border-gray-300 rounded px-1 py-0.5 font-mono", style: { fontSize: 10 } }, "Shift"), "+drag = move whole chain \xB7 Click to view details")), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1 ml-auto" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom((z) => Math.max(0.05, +(z - 0.1).toFixed(2))), className: "text-xs bg-white border border-gray-200 w-7 h-7 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center font-bold text-gray-600" }, "\u2212"), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-gray-500 w-12 text-center tabular-nums" }, Math.round(zoom * 100), "%"), /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom((z) => Math.min(3, +(z + 0.1).toFixed(2))), className: "text-xs bg-white border border-gray-200 w-7 h-7 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center font-bold text-gray-600" }, "+"), atLeast(mode, "advanced") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom(1), className: "text-xs bg-white border border-gray-200 text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "100%"), /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom(0.5), className: "text-xs bg-white border border-gray-200 text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "50%"), /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom(0.25), className: "text-xs bg-white border border-gray-200 text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "25%"), /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom(0.1), className: "text-xs bg-white border border-gray-200 text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "10%"))))), orgViewMode === "tree" && chartDisplayRoot && /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-auto" }, /* @__PURE__ */ React.createElement("div", { style: { transform: `scale(${zoom})`, transformOrigin: "top left", width: "fit-content", transition: "transform 0.12s ease" } }, /* @__PURE__ */ React.createElement("div", { className: "inline-block min-w-max" }, /* @__PURE__ */ React.createElement(OrgNode, { node: chartDisplayRoot })))), orgViewMode === "treemap" && /* @__PURE__ */ React.createElement(TreemapOrgView, null), orgViewMode === "sunburst" && /* @__PURE__ */ React.createElement(SunburstOrgView, null), orgViewMode === "whiteboard" && /* @__PURE__ */ React.createElement(WhiteboardOrgView, null), orgViewMode === "galaxy" && /* @__PURE__ */ React.createElement(GalaxyOrgView, null), orgViewMode === "city" && /* @__PURE__ */ React.createElement(CityOrgView, null)), view === "slides" && /* @__PURE__ */ React.createElement(OrgSlideView, null), view === "timeline" && /* @__PURE__ */ React.createElement(TimelineView, null), view === "dashboards" && /* @__PURE__ */ React.createElement(DashboardView, null), view === "scenarios" && /* @__PURE__ */ React.createElement(ScenarioView, null), view === "headcount" && /* @__PURE__ */ React.createElement(HeadcountPlanningView, null), view === "analytics" && /* @__PURE__ */ React.createElement(AnalyticsView, null), view === "flight-risk" && /* @__PURE__ */ React.createElement(FlightRiskView, null), view === "pipeline" && /* @__PURE__ */ React.createElement(ProductPipelineView, null))), detailPanel && /* @__PURE__ */ React.createElement(DetailPanel, null), importState && /* @__PURE__ */ React.createElement(EmployeeImportWizard, { data: importState, onCancel: () => setImportState(null), onConfirm: (mapping, mode2) => applyEmployeeImport(importState, mapping, mode2) }), exitSimNode && /* @__PURE__ */ React.createElement(ExitSimModal, null))), /* @__PURE__ */ React.createElement(CommandPalette, null), /* @__PURE__ */ React.createElement(ReorgRipplePreview, null), /* @__PURE__ */ React.createElement(NaturalLanguageQuery, null));
+  ))), orgViewMode === "tree" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: expandAll, className: "text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "Expand All"), /* @__PURE__ */ React.createElement("button", { onClick: collapseAll, className: "text-xs bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "Collapse All"), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-gray-400 ml-2" }, dragNode ? dragMode === "team" ? /* @__PURE__ */ React.createElement("span", { className: "text-violet-600 font-medium" }, "\u26D3 Chain drag \u2014 whole subtree moves with them \xB7 release Shift to switch") : /* @__PURE__ */ React.createElement("span", { className: "text-blue-600 font-medium" }, "\u{1F464} Solo drag \u2014 reports roll up to their manager \xB7 hold Shift to take the chain") : /* @__PURE__ */ React.createElement("span", null, "Drag to reassign \xB7 ", /* @__PURE__ */ React.createElement("kbd", { className: "bg-gray-100 border border-gray-300 rounded px-1 py-0.5 font-mono", style: { fontSize: 10 } }, "Shift"), "+drag = move whole chain \xB7 Click to view details")), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1 ml-auto" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom((z) => Math.max(0.05, +(z - 0.1).toFixed(2))), className: "text-xs bg-white border border-gray-200 w-7 h-7 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center font-bold text-gray-600" }, "\u2212"), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-gray-500 w-12 text-center tabular-nums" }, Math.round(zoom * 100), "%"), /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom((z) => Math.min(3, +(z + 0.1).toFixed(2))), className: "text-xs bg-white border border-gray-200 w-7 h-7 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center font-bold text-gray-600" }, "+"), atLeast(mode, "advanced") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom(1), className: "text-xs bg-white border border-gray-200 text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "100%"), /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom(0.5), className: "text-xs bg-white border border-gray-200 text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "50%"), /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom(0.25), className: "text-xs bg-white border border-gray-200 text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "25%"), /* @__PURE__ */ React.createElement("button", { onClick: () => setZoom(0.1), className: "text-xs bg-white border border-gray-200 text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" }, "10%"))))), orgViewMode === "tree" && chartDisplayRoot && /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-auto" }, /* @__PURE__ */ React.createElement("div", { style: { transform: `scale(${zoom})`, transformOrigin: "top left", width: "fit-content", transition: "transform 0.12s ease" } }, /* @__PURE__ */ React.createElement("div", { className: "inline-block min-w-max" }, /* @__PURE__ */ React.createElement(OrgNode, { node: chartDisplayRoot })))), orgViewMode === "treemap" && /* @__PURE__ */ React.createElement(TreemapOrgView, null), orgViewMode === "sunburst" && /* @__PURE__ */ React.createElement(SunburstOrgView, null), orgViewMode === "whiteboard" && /* @__PURE__ */ React.createElement(WhiteboardOrgView, null), orgViewMode === "galaxy" && /* @__PURE__ */ React.createElement(GalaxyOrgView, null), orgViewMode === "city" && /* @__PURE__ */ React.createElement(CityOrgView, null)), view === "slides" && /* @__PURE__ */ React.createElement(OrgSlideView, null), view === "timeline" && /* @__PURE__ */ React.createElement(TimelineView, null), view === "dashboards" && /* @__PURE__ */ React.createElement(DashboardView, null), view === "headcount" && /* @__PURE__ */ React.createElement(HeadcountPlanningView, null), view === "analytics" && /* @__PURE__ */ React.createElement(AnalyticsView, null), view === "pipeline" && /* @__PURE__ */ React.createElement(ProductPipelineView, null))), detailPanel && /* @__PURE__ */ React.createElement(DetailPanel, null), importState && /* @__PURE__ */ React.createElement(EmployeeImportWizard, { data: importState, onCancel: () => setImportState(null), onConfirm: (mapping, mode2) => applyEmployeeImport(importState, mapping, mode2) }), exitSimNode && /* @__PURE__ */ React.createElement(ExitSimModal, null))), /* @__PURE__ */ React.createElement(CommandPalette, null), /* @__PURE__ */ React.createElement(ReorgRipplePreview, null), /* @__PURE__ */ React.createElement(NaturalLanguageQuery, null));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(OrgChartApp));
 

@@ -1485,6 +1485,7 @@ function OrgOverview({ insights, score, breakdown, employees, tree }) {
 function AnalyticsView() {
   const { employees, tree, goToInsight } = useContext(AppCtx);
 
+  const [tab, setTab] = useState("insights"); // "insights" | "flight-risk"
   const [filters, setFilters] = useState({ location: "All", bg: "All", fn: "All", dept: "All", snapshotDate: null });
   const [activeInsight, setActiveInsight] = useState(null);
   const [catFilter, setCatFilter] = useState("all");
@@ -1539,6 +1540,19 @@ function AnalyticsView() {
   return (
     <div className="h-full flex flex-col overflow-hidden" style={{ fontFamily: "'DM Sans', sans-serif" }}>
 
+      {/* ── Analytics sub-tabs: Insights · Flight Risk ── */}
+      <div className="bg-white border-b border-gray-100 px-4 pt-2 flex gap-1 shrink-0">
+        {[["insights", "Insights", Zap], ["flight-risk", "Flight Risk", AlertTriangle]].map(([id, label, Icon]) => (
+          <button key={id} onClick={() => setTab(id)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors ${tab === id ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}>
+            <Icon size={13}/>{label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "flight-risk" && <div className="flex-1 overflow-hidden"><FlightRiskView/></div>}
+
+      {tab === "insights" && <>
       {/* ── Top bar: health score + filters ── */}
       <div className="bg-white border-b border-gray-100 px-6 py-3 flex items-center gap-6 shrink-0 flex-wrap" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         {/* Score */}
@@ -1695,6 +1709,7 @@ function AnalyticsView() {
           }
         </div>
       </div>
+      </>}
     </div>
   );
 }
@@ -2053,8 +2068,8 @@ const MODES = ["simple", "advanced", "expert"];
 const MODE_LEVEL = { simple: 0, advanced: 1, expert: 2 };
 function atLeast(current, required) { return MODE_LEVEL[current] >= MODE_LEVEL[required]; }
 // Minimum mode required to display each view — used to redirect on mode downgrade
-const VIEW_MIN_MODE = { "org-chart": "simple", "slides": "simple", "timeline": "advanced", "dashboards": "advanced", "scenarios": "advanced", "headcount": "advanced", "analytics": "advanced", "flight-risk": "advanced", "pipeline": "expert" };
-const VIEW_LABEL = { "org-chart": "Org Chart", "timeline": "Timeline", "dashboards": "Dashboards", "scenarios": "Scenarios", "headcount": "Headcount Plan", "analytics": "Analytics", "flight-risk": "Flight Risk", "pipeline": "Product Pipeline" };
+const VIEW_MIN_MODE = { "org-chart": "simple", "slides": "simple", "timeline": "advanced", "dashboards": "advanced", "headcount": "advanced", "analytics": "advanced", "pipeline": "expert" };
+const VIEW_LABEL = { "org-chart": "Org Chart", "timeline": "Timeline", "dashboards": "Dashboards", "headcount": "Headcount Plan", "analytics": "Analytics", "pipeline": "Product Pipeline" };
 
 const MODE_META = {
   simple:   { label: "Simple",   color: "#2563eb", desc: "Org chart & people search" },
@@ -3347,7 +3362,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
 
 // The Slide Builder view.
 function OrgSlideView() {
-  const { tree, activeEmployees, focusRoot, scenarioName } = useContext(AppCtx);
+  const { tree, activeEmployees, focusRoot } = useContext(AppCtx);
   const svgRef = useRef(null);
 
   // People who can head a slide (anyone in the tree). Default to the focused subtree
@@ -3379,8 +3394,8 @@ function OrgSlideView() {
 
   const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "’" : "’s"} organization` : "Org chart";
   const title = titleText.trim() || autoTitle;
-  const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  ·  ${(rootNode._totalReports || 0)} people in org  ·  ${scenarioName || "Base"} scenario` : "";
-  const footer = `${scenarioName || "Base"} scenario  ·  ${new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}`;
+  const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  ·  ${(rootNode._totalReports || 0)} people in org` : "";
+  const footer = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -4796,7 +4811,7 @@ function DashboardView() {
               { label: "Active Headcount", value: activeEmployees.length, icon: Users, color: "#2563eb", action: () => setDashTab("semi") },
               { label: "Avg Tenure (yrs)", value: avgTenure, icon: Clock, color: "#059669", action: () => { setView("timeline"); } },
               { label: "Hires (90 days)", value: `+${last90Hires}`, icon: TrendingUp, color: "#16a34a", action: () => { setView("timeline"); } },
-              { label: "Departures (90d)", value: last90Departures, icon: AlertCircle, color: "#ef4444", action: () => { setView("flight-risk"); } },
+              { label: "Departures (90d)", value: last90Departures, icon: AlertCircle, color: "#ef4444", action: () => { setView("analytics"); } },
             ].map((kpi, i) => (
               <div key={i} onClick={kpi.action} className="bg-white rounded-xl p-4 border border-gray-100 cursor-pointer hover:shadow-md transition-all hover:-translate-y-0.5" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
                 <div className="flex items-center gap-2 mb-2">
@@ -5076,716 +5091,6 @@ function DashboardView() {
   );
 }
 
-// ─── SCENARIO VIEW ───
-function ScenarioView() {
-  const { employees, setEmployees, scenarios, setScenarios, scenarioName, setScenarioName,
-          undoStack, undo, scenarioNewName, setScenarioNewName,
-          exportScenarios, importScenarios } = useContext(AppCtx);
-
-  const [scenarioTab, setScenarioTab] = useState("scenarios"); // "scenarios" | "planning" | "diff"
-  const [hcTargets, setHcTargets]     = useState({});  // dept → target headcount
-  const [planHorizon, setPlanHorizon] = useState(2);    // years to project forward
-  const [orgTarget, setOrgTarget]     = useState("");
-  const [diffBase, setDiffBase]       = useState(null); // scenario name to diff against
-  const [recruiters, setRecruiters]   = useState([]);   // recruiter roster
-  const [newRecName, setNewRecName]   = useState("");
-
-  const addRecruiter    = () => { if (!newRecName.trim()) return; setRecruiters(p => [...p, { id: `REC-${Date.now()}`, name: newRecName.trim(), depts: [], locations: [], levelGroups: [], fns: [] }]); setNewRecName(""); };
-  const updateRecruiter = (id, field, value) => setRecruiters(p => p.map(r => r.id === id ? { ...r, [field]: value } : r));
-  const removeRecruiter = (id) => setRecruiters(p => p.filter(r => r.id !== id));
-  const toggleTag       = (r, field, tag) => updateRecruiter(r.id, field, r[field].includes(tag) ? r[field].filter(x => x !== tag) : [...r[field], tag]);
-
-  const activeEmps = useMemo(() => employees.filter(e => e.status === "Active"), [employees]);
-  const depts = useMemo(() => [...new Set(activeEmps.map(e => e.dept))].sort(), [activeEmps]);
-
-  const ATTRITION_RATE = 0.10;
-
-  // Current headcount by dept
-  const hcCurrent = useMemo(() => {
-    const m = {};
-    depts.forEach(d => { m[d] = activeEmps.filter(e => e.dept === d).length; });
-    return m;
-  }, [activeEmps, depts]);
-
-  // Historical: new hires per calendar year (derived from startDate)
-  const hcHistory = useMemo(() => {
-    const byYear = {};
-    employees.forEach(e => {
-      const yr = new Date(e.startDate).getFullYear();
-      byYear[yr] = (byYear[yr] || 0) + 1;
-    });
-    return Object.keys(byYear).map(Number).sort()
-      .map(yr => ({ year: String(yr), hires: byYear[yr] || 0 }));
-  }, [employees]);
-
-  // Total active headcount at start of each year (for trend line)
-  const hcTrend = useMemo(() => {
-    const years = hcHistory.map(r => Number(r.year));
-    const minYr = years[0] || 2018;
-    const maxYr = 2025;
-    return Array.from({ length: maxYr - minYr + 1 }, (_, i) => {
-      const yr = minYr + i;
-      // Count employees active at the start of year yr (started ≤ yr AND not yet terminated)
-      const count = employees.filter(e => {
-        const sy = new Date(e.startDate).getFullYear();
-        if (sy > yr) return false;
-        if (!e.endDate) return true;
-        return new Date(e.endDate).getFullYear() >= yr;
-      }).length;
-      return { year: String(yr), headcount: count };
-    });
-  }, [employees, hcHistory]);
-
-  // Forward projection: total headcount by year assuming 10% attrition is always backfilled
-  const projection = useMemo(() => {
-    const baseTotal = depts.reduce((s, d) => s + (hcCurrent[d] || 0), 0);
-    const rows = [{ year: "Now", total: baseTotal }];
-    const cur = { ...hcCurrent };
-    for (let y = 1; y <= planHorizon; y++) {
-      let total = 0;
-      depts.forEach(d => {
-        const prev = cur[d] || 0;
-        const tgt  = hcTargets[d] != null ? Number(hcTargets[d]) : prev;
-        // Attrition is backfilled → headcount only grows by net-new hires this year
-        const growthThisYear = Math.ceil(Math.max(0, tgt - prev) / (planHorizon - y + 1));
-        cur[d] = prev + growthThisYear;
-        total += cur[d];
-      });
-      rows.push({ year: String(2025 + y), total });
-    }
-    return rows;
-  }, [depts, hcCurrent, hcTargets, planHorizon]);
-
-  // Per-dept planning table data
-  const planTableData = useMemo(() => depts.map(d => {
-    const cur          = hcCurrent[d] || 0;
-    const tgt          = hcTargets[d] != null ? Number(hcTargets[d]) : null;
-    const netNew       = tgt != null ? Math.max(0, tgt - cur) : null;
-    const attrBackfill = tgt != null ? Math.round(cur * ATTRITION_RATE * planHorizon) : null;
-    const totalHires   = netNew != null ? netNew + (attrBackfill || 0) : null;
-    const hiresPerYear = totalHires != null ? (totalHires / planHorizon).toFixed(1) : null;
-    return { d, cur, tgt, netNew, attrBackfill, totalHires, hiresPerYear };
-  }), [depts, hcCurrent, hcTargets, planHorizon]);
-
-  // Dept → primary function (first employee's fn for that dept)
-  const deptFnMap = useMemo(() => {
-    const m = {};
-    activeEmps.forEach(e => { if (!m[e.dept]) m[e.dept] = e.bucket; });
-    return m;
-  }, [activeEmps]);
-
-  // Which open-req depts each recruiter is responsible for
-  // Coverage: dept filter AND function filter must match (empty = all)
-  // Locations and level groups are specialty tags — displayed but don't narrow coverage
-  const recruiterCoverage = useMemo(() => {
-    const result = {};
-    recruiters.forEach(r => {
-      result[r.id] = planTableData
-        .filter(row => row.netNew != null && row.netNew > 0)
-        .filter(row => {
-          if (r.depts.length > 0 && !r.depts.includes(row.d)) return false;
-          if (r.fns.length > 0 && !r.fns.includes(deptFnMap[row.d])) return false;
-          return true;
-        })
-        .map(row => row.d);
-    });
-    return result;
-  }, [recruiters, planTableData, deptFnMap]);
-
-  // Depts with open reqs but no recruiter
-  const uncoveredDepts = useMemo(() => {
-    const covered = new Set(Object.values(recruiterCoverage).flat());
-    return planTableData
-      .filter(row => row.netNew != null && row.netNew > 0 && !covered.has(row.d))
-      .map(row => row.d);
-  }, [recruiterCoverage, planTableData]);
-
-  // Dept → list of recruiters who cover it (for inline table column)
-  const deptRecruiters = useMemo(() => {
-    const m = {};
-    recruiters.forEach(r => {
-      (recruiterCoverage[r.id] || []).forEach(d => { if (!m[d]) m[d] = []; m[d].push(r); });
-    });
-    return m;
-  }, [recruiters, recruiterCoverage]);
-
-  // Capacity model: each recruiter fills 15/month, targets 15 open positions
-  const REC_FILLS_MO   = 15;
-  const REC_TARGET_LOAD = 15;
-  const capacityStats = useMemo(() => {
-    const totalNetNew     = planTableData.reduce((s, r) => s + (r.netNew ?? 0), 0);
-    const totalAttr       = planTableData.reduce((s, r) => s + (r.attrBackfill ?? 0), 0);
-    const totalPositions  = totalNetNew + totalAttr;
-    const horizonMonths   = planHorizon * 12;
-    const monthlyDemand   = horizonMonths > 0 ? totalPositions / horizonMonths : 0;
-    const recommended     = Math.ceil(monthlyDemand / REC_FILLS_MO);
-    const currentCapacity = recruiters.length * REC_FILLS_MO;
-    const monthsToFill    = currentCapacity > 0 ? Math.ceil(totalPositions / currentCapacity) : null;
-    const onTrack         = monthsToFill != null && monthsToFill <= horizonMonths;
-
-    const recStats = recruiters.map(r => {
-      const covered   = recruiterCoverage[r.id] || [];
-      const openReqs  = covered.reduce((s, d) => s + (planTableData.find(x => x.d === d)?.netNew ?? 0), 0);
-      const attrMo    = covered.reduce((s, d) => {
-        const row = planTableData.find(x => x.d === d);
-        return s + (row?.attrBackfill != null ? row.attrBackfill / horizonMonths : 0);
-      }, 0);
-      const loadPct   = openReqs / REC_TARGET_LOAD;
-      const status    = openReqs === 0     ? "idle"
-                      : loadPct > 1.33     ? "overloaded"
-                      : loadPct > 1.0      ? "over"
-                      : loadPct >= 0.8     ? "on-target"
-                      :                      "under";
-      const moClear   = Math.ceil(openReqs / REC_FILLS_MO);
-      return { id: r.id, openReqs, attrMo, loadPct, status, moClear };
-    });
-
-    return { totalNetNew, totalAttr, totalPositions, monthlyDemand, recommended, currentCapacity, monthsToFill, onTrack, recStats };
-  }, [recruiters, recruiterCoverage, planTableData, planHorizon]);
-
-  // Diff computation
-  const diffData = useMemo(() => {
-    if (!diffBase) return null;
-    const base = scenarios.find(s => s.name === diffBase);
-    if (!base?.data) return null;
-    const baseActive = base.data.filter(e => e.status === "Active");
-    const currActive = activeEmps;
-
-    // Moved employees (same ID, different managerId)
-    const moved = currActive.filter(c => {
-      const b = base.data.find(e => e.id === c.id);
-      return b && b.managerId !== c.managerId;
-    }).map(c => {
-      const b = base.data.find(e => e.id === c.id);
-      const oldMgr = base.data.find(e => e.id === b.managerId);
-      const newMgr = currActive.find(e => e.id === c.managerId);
-      return { ...c, oldMgr: oldMgr ? `${oldMgr.first} ${oldMgr.last}` : "—", newMgr: newMgr ? `${newMgr.first} ${newMgr.last}` : "—" };
-    });
-
-    // Dept deltas
-    const deptDelta = {};
-    const allDepts = [...new Set([...baseActive, ...currActive].map(e => e.dept))];
-    allDepts.forEach(d => {
-      const before = baseActive.filter(e => e.dept === d).length;
-      const after  = currActive.filter(e => e.dept === d).length;
-      if (before !== after) deptDelta[d] = { before, after, delta: after - before };
-    });
-
-    return { moved, deptDelta, baseCount: baseActive.length, currCount: currActive.length };
-  }, [diffBase, scenarios, activeEmps]);
-
-  const STABS = [
-    { id: "scenarios", label: "Scenarios", icon: Target },
-    { id: "planning",  label: "Headcount Planning", icon: TrendingUp },
-    { id: "diff",      label: "Compare / Diff", icon: ArrowRight },
-  ];
-
-  return (
-    <div className="p-6 h-full overflow-y-auto" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-      <h2 className="text-xl font-bold text-gray-900 mb-1 flex items-center">
-        What-If Scenarios
-        <Help text="Snapshot the current employee dataset, branch into alternates (reorg, cuts, M&A), then compare side-by-side with Compare/Diff. Editing a scenario does not touch your other scenarios." side="bottom" />
-      </h2>
-      <div className="flex gap-1 mb-5 border-b border-gray-100 pb-2 items-center">
-        {STABS.map(t => (
-          <div key={t.id} className="flex items-center">
-            <button onClick={() => setScenarioTab(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t text-xs font-medium transition-colors ${scenarioTab === t.id ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50"}`}>
-              <t.icon size={12}/>{t.label}
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Scenarios tab ── */}
-      {scenarioTab === "scenarios" && (
-        <>
-          <p className="text-sm text-gray-500 mb-4">Create alternate org structures without affecting your base data.</p>
-          <div className="flex gap-2 mb-3 flex-wrap items-center">
-            <input value={scenarioNewName} onChange={e => setScenarioNewName(e.target.value)} placeholder="New scenario name..." className="text-sm border border-gray-200 rounded-lg px-3 py-2 flex-1 min-w-[200px] focus:outline-none focus:ring-2 focus:ring-blue-500"/>
-            <button onClick={() => {
-              if (scenarioNewName.trim()) {
-                setScenarios(prev => [...prev, { name: scenarioNewName.trim(), data: JSON.parse(JSON.stringify(employees)) }]);
-                setScenarioName(scenarioNewName.trim());
-                setScenarioNewName("");
-              }
-            }} className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">Create</button>
-            <Help text="Forks the current employee list into a named snapshot. Click any scenario in the list below to switch into it; your edits go into that snapshot." />
-          </div>
-          <div className="flex gap-2 mb-5 flex-wrap items-center">
-            <button onClick={exportScenarios} title="Export all scenarios as JSON" className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1.5">
-              <Download size={12}/>Export scenarios
-            </button>
-            <label title="Import scenarios from a previously exported JSON" className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-1.5 cursor-pointer">
-              <Plus size={12}/>Import scenarios
-              <input type="file" accept=".json,application/json" className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) importScenarios(f); e.target.value = ""; }}/>
-            </label>
-            <Help text="Saves every scenario (including all employee snapshots) to a JSON file. Import on another browser or share with a teammate. Importing REPLACES your current scenario list." />
-          </div>
-          <div className="space-y-2 mb-5">
-            {scenarios.map((s, i) => (
-              <div key={i} onClick={() => { setScenarioName(s.name); if (s.data) setEmployees(s.data); }} className={`p-3 rounded-xl border cursor-pointer transition-all ${scenarioName === s.name ? "border-blue-500 bg-blue-50" : "border-gray-100 bg-white hover:border-gray-300"}`}>
-                <div className="flex items-center justify-between">
-                  <div className="font-medium text-sm text-gray-800">{s.name}</div>
-                  {scenarioName === s.name && <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">Active</span>}
-                </div>
-                <div className="text-xs text-gray-400 mt-1">{s.data ? `${s.data.filter(e => e.status === "Active").length} employees` : "Base dataset"}</div>
-              </div>
-            ))}
-          </div>
-          {undoStack.length > 0 && (
-            <div className="flex items-center gap-2 mb-4">
-              <button onClick={undo} className="text-sm bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"><ChevronLeft size={14}/>Undo last change</button>
-              <span className="text-xs text-gray-400">{undoStack.length} change(s) in stack</span>
-            </div>
-          )}
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-            <h4 className="text-sm font-bold text-amber-800 flex items-center gap-2 mb-2"><Info size={14}/>How to use scenarios</h4>
-            <ul className="text-xs text-amber-700 space-y-1.5">
-              <li>• Create a scenario to work in a sandbox copy of the org</li>
-              <li>• Switch to <strong>Org Chart</strong> and drag cards to model changes</li>
-              <li>• Use <strong>Ctrl+Z</strong> to undo any move</li>
-              <li>• Use <strong>Compare / Diff</strong> tab to see what changed</li>
-            </ul>
-          </div>
-        </>
-      )}
-
-      {/* ── Headcount Planning tab ── */}
-      {scenarioTab === "planning" && (() => {
-        const summaryNetNew   = planTableData.reduce((s, r) => s + (r.netNew ?? 0), 0);
-        const summaryAttrFill = planTableData.reduce((s, r) => s + (r.attrBackfill ?? 0), 0);
-        const summaryTotal    = summaryNetNew + summaryAttrFill;
-        return (
-          <>
-            {/* ── Past: Historical Hiring ── */}
-            <h3 className="text-sm font-bold text-gray-700 mb-1">Historical Hiring</h3>
-            <p className="text-xs text-gray-400 mb-3">New employees by start year · cumulative headcount trend</p>
-            <div style={{ height: 150 }} className="mb-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={hcHistory} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                  <XAxis dataKey="year" tick={{ fontSize: 9 }} tickLine={false} axisLine={false}/>
-                  <YAxis tick={{ fontSize: 9 }} tickLine={false} axisLine={false} width={28}/>
-                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={v => [v, "New Hires"]}/>
-                  <Bar dataKey="hires" fill="#2563eb" radius={[3,3,0,0]}/>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div style={{ height: 120 }} className="mb-5">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={hcTrend} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                  <XAxis dataKey="year" tick={{ fontSize: 9 }} tickLine={false} axisLine={false}/>
-                  <YAxis tick={{ fontSize: 9 }} tickLine={false} axisLine={false} width={36}/>
-                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={v => [v, "Total Headcount"]}/>
-                  <Area dataKey="headcount" stroke="#059669" fill="#d1fae5" strokeWidth={2} dot={false}/>
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="border-t border-gray-100 mb-5"/>
-
-            {/* ── Future: Simulation ── */}
-            <div className="flex items-center justify-between mb-3 gap-4">
-              <div className="flex-1">
-                <h3 className="text-sm font-bold text-gray-700">Forward Simulation</h3>
-                <p className="text-xs text-gray-400">10% annual attrition · set department targets below</p>
-              </div>
-              {/* Org-wide target — distributes proportionally across depts */}
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs text-gray-500 whitespace-nowrap">Total target:</span>
-                <input
-                  type="number" min={0} value={orgTarget} placeholder="e.g. 3000"
-                  onChange={e => setOrgTarget(e.target.value)}
-                  onBlur={() => {
-                    const total = Number(orgTarget);
-                    if (!total) return;
-                    const activeTotal = depts.reduce((s, d) => s + (hcCurrent[d] || 0), 0);
-                    if (!activeTotal) return;
-                    const newTargets = {};
-                    depts.forEach(d => { newTargets[d] = Math.round((hcCurrent[d] / activeTotal) * total); });
-                    setHcTargets(newTargets);
-                  }}
-                  onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
-                  className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div className="flex gap-1 shrink-0">
-                {[1, 2, 3, 5].map(yr => (
-                  <button key={yr} onClick={() => setPlanHorizon(yr)}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${planHorizon === yr ? "bg-blue-600 text-white" : "text-gray-500 bg-gray-100 hover:bg-gray-200"}`}>
-                    {yr}yr
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Projected headcount trajectory */}
-            <div style={{ height: 120 }} className="mb-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={projection} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                  <XAxis dataKey="year" tick={{ fontSize: 10 }} tickLine={false} axisLine={false}/>
-                  <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={36}/>
-                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={v => [v, "Headcount"]}/>
-                  <Bar dataKey="total" fill="#7c3aed" radius={[3,3,0,0]}/>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Summary cards */}
-            <div className="grid grid-cols-3 gap-3 mb-5">
-              <div className="bg-blue-50 rounded-xl p-3 border border-blue-100 text-center">
-                <div className="text-2xl font-black text-blue-700">{summaryNetNew}</div>
-                <div className="text-xs font-semibold text-blue-600">Net New Positions</div>
-              </div>
-              <div className="bg-amber-50 rounded-xl p-3 border border-amber-100 text-center">
-                <div className="text-2xl font-black text-amber-700">{summaryAttrFill}</div>
-                <div className="text-xs font-semibold text-amber-600">Attrition Backfills</div>
-                <div className="text-xs text-amber-400">@10%/yr × {planHorizon}yr</div>
-              </div>
-              <div className="bg-violet-50 rounded-xl p-3 border border-violet-100 text-center">
-                <div className="text-2xl font-black text-violet-700">{summaryTotal}</div>
-                <div className="text-xs font-semibold text-violet-600">Gross Hires ({planHorizon}yr)</div>
-              </div>
-            </div>
-
-            {/* Per-dept table */}
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="grid text-xs font-semibold text-gray-500 bg-gray-50 border-b border-gray-100 px-4 py-2"
-                style={{ gridTemplateColumns: "1fr 50px 76px 62px 70px 62px 50px 64px" }}>
-                <span>Department</span>
-                <span className="text-center">Now</span>
-                <span className="text-center">Target</span>
-                <span className="text-center">Net New</span>
-                <span className="text-center">Attrition</span>
-                <span className="text-center">Total</span>
-                <span className="text-center">/yr</span>
-                <span className="text-center">Recruiter</span>
-              </div>
-              {planTableData.map(({ d, cur, tgt, netNew, attrBackfill, totalHires, hiresPerYear }) => {
-                const assigned = deptRecruiters[d] || [];
-                const hasOpenReqs = netNew != null && netNew > 0;
-                return (
-                  <div key={d} className="grid items-center px-4 py-2 border-b border-gray-50 text-xs hover:bg-gray-50 transition-colors"
-                    style={{ gridTemplateColumns: "1fr 50px 76px 62px 70px 62px 50px 64px" }}>
-                    <span className="font-medium text-gray-800 truncate">{d}</span>
-                    <span className="text-center text-gray-500">{cur}</span>
-                    <input
-                      type="number" min={0} value={tgt ?? ""}
-                      onChange={e => setHcTargets(prev => ({ ...prev, [d]: e.target.value === "" ? undefined : Number(e.target.value) }))}
-                      placeholder={String(cur)}
-                      className="border border-gray-200 rounded px-2 py-1 text-center text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    <span className={`text-center font-bold ${hasOpenReqs ? "text-blue-600" : "text-gray-300"}`}>
-                      {hasOpenReqs ? `+${netNew}` : "—"}
-                    </span>
-                    <span className="text-center font-medium text-amber-600">
-                      {attrBackfill != null ? `+${attrBackfill}` : "—"}
-                    </span>
-                    <span className="text-center font-bold text-violet-700">
-                      {totalHires != null ? totalHires : "—"}
-                    </span>
-                    <span className="text-center text-gray-400">
-                      {hiresPerYear != null ? hiresPerYear : "—"}
-                    </span>
-                    <div className="flex items-center justify-center gap-0.5 flex-wrap">
-                      {assigned.map(r => (
-                        <span key={r.id} title={r.name}
-                          className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white font-bold shrink-0"
-                          style={{ background: recruiterColor(r.id), fontSize: 8 }}>
-                          {r.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
-                        </span>
-                      ))}
-                      {assigned.length === 0 && hasOpenReqs && (
-                        <AlertCircle size={12} className="text-red-300" title="No recruiter assigned"/>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-3 text-xs text-gray-400">
-              Attrition = hires to replace turnover at 10%/yr over {planHorizon}yr. Enter a target to activate a row.
-            </div>
-
-            {/* ── Recruiting Coverage ── */}
-            <div className="border-t border-gray-100 mt-6 pt-5">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className="text-sm font-bold text-gray-700">Recruiting Coverage</h3>
-                  <p className="text-xs text-gray-400">15 fills/month · 15 open positions per recruiter</p>
-                </div>
-                <div className="flex gap-2">
-                  <input value={newRecName} onChange={e => setNewRecName(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && addRecruiter()}
-                    placeholder="Add recruiter…"
-                    className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 w-40 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
-                  <button onClick={addRecruiter}
-                    className="bg-blue-600 text-white text-sm px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1">
-                    <Plus size={12}/>Add
-                  </button>
-                </div>
-              </div>
-
-              {/* ── Capacity summary (only when targets are set) ── */}
-              {capacityStats.totalPositions > 0 && (
-                <div className="grid grid-cols-4 gap-3 mb-4">
-                  {[
-                    {
-                      label: "Monthly Demand",
-                      value: capacityStats.monthlyDemand.toFixed(1),
-                      sub: "fills/mo needed",
-                      color: "gray",
-                    },
-                    {
-                      label: "Recommended",
-                      value: capacityStats.recommended,
-                      sub: `recruiter${capacityStats.recommended !== 1 ? "s" : ""} to hit plan`,
-                      color: recruiters.length >= capacityStats.recommended ? "green" : "amber",
-                      badge: recruiters.length < capacityStats.recommended
-                        ? `${capacityStats.recommended - recruiters.length} short`
-                        : recruiters.length > capacityStats.recommended
-                        ? `${recruiters.length - capacityStats.recommended} extra`
-                        : "staffed",
-                    },
-                    {
-                      label: "Team Capacity",
-                      value: capacityStats.currentCapacity,
-                      sub: "fills/mo at full load",
-                      color: capacityStats.currentCapacity >= capacityStats.monthlyDemand ? "green" : "red",
-                    },
-                    {
-                      label: "Time to Fill",
-                      value: capacityStats.monthsToFill != null ? `${capacityStats.monthsToFill} mo` : "—",
-                      sub: capacityStats.onTrack ? "on track ✓" : `plan is ${planHorizon * 12} mo`,
-                      color: capacityStats.monthsToFill == null ? "gray"
-                           : capacityStats.onTrack ? "green" : "red",
-                    },
-                  ].map(({ label, value, sub, color, badge }) => {
-                    const bg   = { green: "#f0fdf4", amber: "#fffbeb", red: "#fef2f2", gray: "#f8fafc" }[color];
-                    const txt  = { green: "#15803d", amber: "#b45309", red: "#b91c1c", gray: "#475569" }[color];
-                    const bdr  = { green: "#bbf7d0", amber: "#fde68a", red: "#fecaca", gray: "#e2e8f0" }[color];
-                    return (
-                      <div key={label} className="rounded-xl p-3 border text-center" style={{ background: bg, borderColor: bdr }}>
-                        <div className="text-2xl font-black" style={{ color: txt }}>{value}</div>
-                        <div className="text-xs font-semibold mt-0.5" style={{ color: txt }}>{label}</div>
-                        <div className="text-xs mt-0.5" style={{ color: txt, opacity: 0.7 }}>{badge ?? sub}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Empty state */}
-              {recruiters.length === 0 && (
-                <div className="text-center text-gray-400 text-xs py-6 border border-dashed border-gray-200 rounded-xl">
-                  No recruiters yet — add one above to start tracking capacity
-                </div>
-              )}
-
-              {/* Recruiter cards */}
-              <div className="space-y-3">
-                {recruiters.map(r => {
-                  const stats  = capacityStats.recStats.find(s => s.id === r.id) || { openReqs: 0, attrMo: 0, loadPct: 0, status: "idle", moClear: 0 };
-                  const color  = recruiterColor(r.id);
-                  const covered = recruiterCoverage[r.id] || [];
-
-                  const loadBarPct  = Math.min(200, Math.round(stats.loadPct * 100));
-                  const barColor    = stats.status === "overloaded" ? "#dc2626"
-                                    : stats.status === "over"       ? "#d97706"
-                                    : stats.status === "on-target"  ? "#16a34a"
-                                    : stats.status === "idle"       ? "#e5e7eb"
-                                    :                                  "#60a5fa";
-                  const statusLabel = { overloaded: "Overloaded", over: "Over target", "on-target": "On target", under: "Under capacity", idle: "No reqs" }[stats.status];
-                  const statusBg    = { overloaded: "#fef2f2", over: "#fffbeb", "on-target": "#f0fdf4", under: "#eff6ff", idle: "#f8fafc" }[stats.status];
-                  const statusTxt   = { overloaded: "#b91c1c", over: "#b45309", "on-target": "#15803d", under: "#1d4ed8", idle: "#94a3b8" }[stats.status];
-
-                  return (
-                    <div key={r.id} className="bg-white border border-gray-100 rounded-xl p-4" style={{ borderLeftWidth: 3, borderLeftColor: color }}>
-                      {/* Name + status row */}
-                      <div className="flex items-center gap-3 mb-2">
-                        <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-                          style={{ background: color }}>
-                          {r.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
-                        </div>
-                        <input value={r.name} onChange={e => updateRecruiter(r.id, "name", e.target.value)}
-                          className="font-semibold text-sm text-gray-800 flex-1 bg-transparent border-0 border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none pb-0.5"/>
-                        <span className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0"
-                          style={{ background: statusBg, color: statusTxt }}>{statusLabel}</span>
-                        <button onClick={() => removeRecruiter(r.id)} className="text-gray-300 hover:text-red-400 transition-colors">
-                          <X size={13}/>
-                        </button>
-                      </div>
-
-                      {/* Load bar */}
-                      <div className="mb-3">
-                        <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
-                          <span>{stats.openReqs} open req{stats.openReqs !== 1 ? "s" : ""} · {stats.attrMo.toFixed(1)} attrition backfills/mo</span>
-                          <span>{stats.openReqs > 0 ? `clears in ${stats.moClear} mo at 15 fills/mo` : "—"}</span>
-                        </div>
-                        {/* Bar track with target marker */}
-                        <div className="relative h-2 bg-gray-100 rounded-full overflow-visible">
-                          <div className="h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${Math.min(100, loadBarPct / 2)}%`, background: barColor }}/>
-                          {/* Target line at 15 (= 50% of max display range of 30) */}
-                          <div className="absolute top-[-2px] bottom-[-2px] w-px bg-gray-400"
-                            style={{ left: "50%" }} title="15-req target"/>
-                          <span className="absolute text-gray-400 font-medium" style={{ left: "50%", top: 6, fontSize: 9, transform: "translateX(-50%)" }}>15</span>
-                        </div>
-                        <div className="flex justify-between text-gray-300 mt-1" style={{ fontSize: 9 }}>
-                          <span>0</span><span>30+</span>
-                        </div>
-                      </div>
-
-                      {/* Tag selector rows */}
-                      {[
-                        { label: "Depts",     field: "depts",       opts: depts,                 colorMap: DEPT_COLORS },
-                        { label: "Locations", field: "locations",   opts: LOCATIONS,              colorMap: LOC_COLORS  },
-                        { label: "Levels",    field: "levelGroups", opts: RECRUITER_LEVEL_GROUPS, colorMap: null        },
-                        { label: "Function Group", field: "fns",    opts: RECRUITER_FNS,          colorMap: FN_COLORS   },
-                      ].map(({ label, field, opts, colorMap }) => (
-                        <div key={field} className="flex items-start gap-2 mb-1.5">
-                          <span className="text-xs text-gray-400 w-16 shrink-0 pt-0.5">{label}</span>
-                          <div className="flex flex-wrap gap-1">
-                            {r[field].length === 0 && <span className="text-xs text-gray-300 italic">All</span>}
-                            {opts.map(opt => {
-                              const active = r[field].includes(opt);
-                              const c = colorMap?.[opt];
-                              return (
-                                <button key={opt} onClick={() => toggleTag(r, field, opt)}
-                                  className="text-xs px-2 py-0.5 rounded-full border transition-all"
-                                  style={active && c
-                                    ? { background: `${c}22`, borderColor: c, color: c }
-                                    : active
-                                    ? { background: color, borderColor: color, color: "white" }
-                                    : { background: "white", borderColor: "#e5e7eb", color: "#9ca3af" }}>
-                                  {opt}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-
-                      {/* Covered depts summary */}
-                      {covered.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-gray-50 flex flex-wrap gap-1">
-                          {covered.map(d => {
-                            const row = planTableData.find(x => x.d === d);
-                            return (
-                              <span key={d} className="text-xs px-2 py-0.5 rounded-full"
-                                style={{ background: `${DEPT_COLORS[d] || "#64748b"}18`, color: DEPT_COLORS[d] || "#64748b", border: `1px solid ${DEPT_COLORS[d] || "#64748b"}44` }}>
-                                {d} ({row?.netNew ?? 0})
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Coverage gap / full-coverage banner */}
-              {recruiters.length > 0 && uncoveredDepts.length > 0 && (
-                <div className="mt-4 bg-red-50 border border-red-100 rounded-xl p-3">
-                  <div className="text-xs font-bold text-red-700 flex items-center gap-1.5 mb-2">
-                    <AlertCircle size={12}/>
-                    {uncoveredDepts.length} dept{uncoveredDepts.length !== 1 ? "s" : ""} with open reqs have no recruiter assigned
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {uncoveredDepts.map(d => (
-                      <span key={d} className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full border border-red-200">{d}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {recruiters.length > 0 && uncoveredDepts.length === 0 && capacityStats.totalPositions > 0 && (
-                <div className="mt-4 bg-green-50 border border-green-100 rounded-xl p-3 flex items-center gap-2">
-                  <Check size={13} className="text-green-600 shrink-0"/>
-                  <span className="text-xs font-bold text-green-700">Full coverage — every open req has a recruiter assigned</span>
-                </div>
-              )}
-            </div>
-          </>
-        );
-      })()}
-
-      {/* ── Diff tab ── */}
-      {scenarioTab === "diff" && (
-        <>
-          <p className="text-sm text-gray-500 mb-4">Compare the active scenario against a baseline to see what moved.</p>
-          <div className="flex items-center gap-2 mb-5">
-            <span className="text-xs text-gray-500">Compare active (<strong>{scenarioName}</strong>) against:</span>
-            <select value={diffBase ?? ""} onChange={e => setDiffBase(e.target.value || null)}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1">
-              <option value="">Select baseline…</option>
-              {scenarios.filter(s => s.name !== scenarioName).map(s => <option key={s.name}>{s.name}</option>)}
-            </select>
-          </div>
-          {!diffData && <div className="text-sm text-gray-400 text-center py-8">Select a baseline scenario above to see the diff.</div>}
-          {diffData && (
-            <>
-              {/* Headcount change */}
-              <div className="flex gap-3 mb-5">
-                <div className="flex-1 bg-gray-50 rounded-xl p-3 border border-gray-100 text-center">
-                  <div className="text-2xl font-black text-gray-700">{diffData.baseCount}</div>
-                  <div className="text-xs text-gray-400">{diffBase} headcount</div>
-                </div>
-                <div className="flex items-center text-gray-300"><ArrowRight size={20}/></div>
-                <div className="flex-1 bg-blue-50 rounded-xl p-3 border border-blue-100 text-center">
-                  <div className="text-2xl font-black text-blue-700">{diffData.currCount}</div>
-                  <div className="text-xs text-blue-400">{scenarioName} headcount</div>
-                </div>
-                <div className={`flex-1 rounded-xl p-3 border text-center ${diffData.currCount > diffData.baseCount ? "bg-green-50 border-green-100" : "bg-red-50 border-red-100"}`}>
-                  <div className={`text-2xl font-black ${diffData.currCount > diffData.baseCount ? "text-green-600" : "text-red-600"}`}>
-                    {diffData.currCount > diffData.baseCount ? "+" : ""}{diffData.currCount - diffData.baseCount}
-                  </div>
-                  <div className="text-xs text-gray-400">Net change</div>
-                </div>
-              </div>
-
-              {/* Dept deltas */}
-              {Object.keys(diffData.deptDelta).length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 mb-4 overflow-hidden">
-                  <div className="px-4 py-2 text-xs font-bold text-gray-600 bg-gray-50 border-b border-gray-100">Department Changes</div>
-                  {Object.entries(diffData.deptDelta).map(([d, { before, after, delta }]) => (
-                    <div key={d} className="flex items-center gap-3 px-4 py-2 border-b border-gray-50 text-xs">
-                      <span className="flex-1 font-medium text-gray-700">{d}</span>
-                      <span className="text-gray-400">{before} → {after}</span>
-                      <span className={`font-bold px-1.5 py-0.5 rounded ${delta > 0 ? "text-green-700 bg-green-50" : "text-red-700 bg-red-50"}`}>
-                        {delta > 0 ? `+${delta}` : delta}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Moved employees */}
-              {diffData.moved.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  <div className="px-4 py-2 text-xs font-bold text-gray-600 bg-gray-50 border-b border-gray-100">Reassigned Employees ({diffData.moved.length})</div>
-                  {diffData.moved.map(e => (
-                    <div key={e.id} className="flex items-center gap-3 px-4 py-2 border-b border-gray-50 text-xs">
-                      <div className="w-6 h-6 rounded-full text-white flex items-center justify-center font-bold shrink-0" style={{ background: DEPT_COLORS[e.dept]||"#64748b", fontSize: 9 }}>{e.first[0]}{e.last[0]}</div>
-                      <span className="flex-1 font-medium text-gray-800">{e.first} {e.last}</span>
-                      <span className="text-gray-400 truncate max-w-24">{e.oldMgr}</span>
-                      <ArrowRight size={10} className="text-gray-300 shrink-0"/>
-                      <span className="text-blue-600 truncate max-w-24">{e.newMgr}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {diffData.moved.length === 0 && Object.keys(diffData.deptDelta).length === 0 && (
-                <div className="text-sm text-gray-400 text-center py-6">No differences detected between these scenarios.</div>
-              )}
-            </>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
 
 // ─── HEADCOUNT PLANNING VIEW ───
 // Tabs: Mix · Pyramid · Timeline · Early-Career Program. Plan state is lifted
@@ -10405,8 +9710,6 @@ function OrgChartApp() {
   const [dragNode, setDragNode] = useState(null);
   const [dragOver, setDragOver] = useState(null);
   const [dragMode, setDragMode] = useState("individual");
-  const [scenarioName, setScenarioName] = useState("Base");
-  const [scenarios, setScenarios] = useState([{ name: "Base", data: null }]);
   const [undoStack, setUndoStack] = useState([]);
   const [detailPanel, setDetailPanel] = useState(null);
   const [importState, setImportState] = useState(null); // open employee-import wizard payload
@@ -10418,7 +9721,6 @@ function OrgChartApp() {
   const [zoom, setZoom] = useState(1);
   const [timelineSpeed, setTimelineSpeed] = useState(1);       // 1 = 1 sec/year default
   const [growthDimension, setGrowthDimension] = useState("total");
-  const [scenarioNewName, setScenarioNewName] = useState("");
   const [insightHighlightIds, setInsightHighlightIds] = useState(new Set());
   const [chainFilterId, setChainFilterId] = useState(null);
   const [showDeparted, setShowDeparted] = useState(false);
@@ -11243,7 +10545,7 @@ function OrgChartApp() {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
-      doc.text(`SemiCorp · ${scenarioName || "Base"} · ${today}`, M, H - 24);
+      doc.text(`SemiCorp · ${today}`, M, H - 24);
       doc.text(`${pageNum} / ${total}`, W - M, H - 24, { align: "right" });
     }
     function table(rows, x, y, colWidths, headers) {
@@ -11298,7 +10600,7 @@ function OrgChartApp() {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(20);
     doc.setTextColor(148, 163, 184);
-    doc.text(`Headcount & Plan Overview · ${scenarioName || "Base"} scenario`, M, 250);
+    doc.text(`Headcount & Plan Overview`, M, 250);
     doc.setFontSize(12);
     doc.text(today, M, 280);
     bigNum("Active people",   activeEmployees.length, M,           360, [255, 255, 255]);
@@ -11309,7 +10611,7 @@ function OrgChartApp() {
 
     // ─── Slide 2: Org shape (departments) ──────────────────────────────────
     doc.addPage();
-    drawHeader("Org shape", "Headcount by department, current scenario");
+    drawHeader("Org shape", "Headcount by department");
     table(deptRows.map(([d, n]) => [d, n, `${(n / activeEmployees.length * 100).toFixed(1)}%`]),
       M, M + 70, [220, 100, 80], ["Department", "Headcount", "Share"]);
     drawFooter(2, TOTAL);
@@ -11343,7 +10645,7 @@ function OrgChartApp() {
     if (topHotspots.length === 0) {
       doc.setFontSize(12);
       doc.setTextColor(100, 116, 139);
-      doc.text("No hotspots detected in the current scenario.", M, M + 80);
+      doc.text("No hotspots detected in the current org.", M, M + 80);
     } else {
       const rows = topHotspots.map(h => {
         const node = tree.map[h.nodeId];
@@ -11356,7 +10658,7 @@ function OrgChartApp() {
 
     // ─── Slide 5: Headcount plan ────────────────────────────────────────────
     doc.addPage();
-    drawHeader("Headcount plan · top deltas", `Scenario: ${scenarioName || "Base"} · ${planYears || planHorizonQ / 4 || "—"} year horizon`);
+    drawHeader("Headcount plan · top deltas", `${planYears || planHorizonQ / 4 || "—"} year horizon`);
     if (planSum.length === 0) {
       doc.setFontSize(12);
       doc.setTextColor(100, 116, 139);
@@ -11387,7 +10689,7 @@ function OrgChartApp() {
     drawFooter(6, TOTAL);
 
     doc.save(`semicorp-exec-deck-${new Date().toISOString().slice(0, 10)}.pdf`);
-  }, [activeEmployees, employees, tree, hotspots, flightRisks, plan, scenarioName, locations, planYears, planHorizonQ, mode]);
+  }, [activeEmployees, employees, tree, hotspots, flightRisks, plan, locations, planYears, planHorizonQ, mode]);
 
   const searchResults = useMemo(() => {
     if (!searchQuery || searchQuery.length < 2) return [];
@@ -11566,32 +10868,6 @@ function OrgChartApp() {
     reader.readAsText(file);
   }
 
-  // Scenarios — export+import the full snapshot list so users can save off what-if scenarios
-  // and reload them later (or share with a teammate).
-  function exportScenarios() {
-    downloadFile(`scenarios-${new Date().toISOString().slice(0,10)}.json`,
-      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), scenarios }, null, 2),
-      "application/json");
-  }
-  function importScenarios(file) {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (!Array.isArray(data?.scenarios)) throw new Error("Missing scenarios array");
-        const cleaned = data.scenarios
-          .filter(s => s && typeof s.name === "string")
-          .map(s => ({
-            name: s.name.slice(0, 80),
-            data: Array.isArray(s.data) ? s.data : null,
-          }));
-        if (cleaned.length === 0) throw new Error("No valid scenarios found");
-        setScenarios(cleaned);
-        alert(`Imported ${cleaned.length} scenario${cleaned.length>1?"s":""}.`);
-      } catch (err) { alert("Could not parse scenarios JSON: " + err.message); }
-    };
-    reader.readAsText(file);
-  }
 
   // Build context value — new object each render is fine; components re-render but don't remount
   const ctxValue = {
@@ -11603,13 +10879,11 @@ function OrgChartApp() {
     filterCountry, setFilterCountry, filterEmpType, setFilterEmpType,
     filterBG, setFilterBG, showHotspots, setShowHotspots,
     dragNode, setDragNode, dragOver, setDragOver, dragMode, setDragMode,
-    scenarioName, setScenarioName, scenarios, setScenarios,
     undoStack, setUndoStack, detailPanel, setDetailPanel,
     focusRoot, setFocusRoot, sidebarCollapsed, setSidebarCollapsed,
     timelineMonth, setTimelineMonth, timelinePlaying, setTimelinePlaying,
     dashTab, setDashTab, zoom, setZoom,
     timelineSpeed, setTimelineSpeed, growthDimension, setGrowthDimension,
-    scenarioNewName, setScenarioNewName,
     insightHighlightIds, setInsightHighlightIds,
     chainFilterId, setChainFilterId,
     showDeparted, setShowDeparted, fullTree, chartDisplayRoot,
@@ -11652,7 +10926,7 @@ function OrgChartApp() {
     searchResults, displayRoot,
     toggleExpand, expandAll, collapseAll, navigateTo, goToInsight, navigateToDept, focusChain, focusSubtree, handleDrop, undo,
     saveAnnotation, removeAnnotation, getNodeColor, getTenureColor, isFiltered, getTimelineMonths,
-    importEmployeesCSV: openImportWizard, exportPipelineConfig, importPipelineConfig, exportScenarios, importScenarios,
+    importEmployeesCSV: openImportWizard, exportPipelineConfig, importPipelineConfig,
     tutorialMode, setTutorialMode, toggleTutorialMode,
     cmdkOpen, setCmdkOpen,
     nlOpen, setNlOpen,
@@ -11718,10 +10992,8 @@ function OrgChartApp() {
               { id: "slides",       label: "Slides",      icon: FileText,      minMode: "simple"   },
               { id: "timeline",     label: "Timeline",    icon: Clock,         minMode: "advanced" },
               { id: "dashboards",   label: "Dashboards",  icon: BarChart3,     minMode: "advanced" },
-              { id: "scenarios",    label: "Scenarios",   icon: Target,        minMode: "advanced" },
               { id: "headcount",    label: "Headcount",   icon: Users,         minMode: "advanced" },
               { id: "analytics",    label: "Analytics",   icon: Zap,           minMode: "advanced" },
-              { id: "flight-risk",  label: "Flight Risk", icon: AlertTriangle, minMode: "advanced" },
               { id: "pipeline",     label: "Pipeline",    icon: GitMerge,      minMode: "expert"   },
             ].filter(item => atLeast(mode, item.minMode)).map(item => (
               <button key={item.id} onClick={() => setView(item.id)} className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs transition-colors ${view === item.id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800"}`}>
@@ -11802,11 +11074,6 @@ function OrgChartApp() {
               <div className="flex justify-between text-xs"><span className="text-slate-400">Departments</span><span className="font-bold">{departments.length}</span></div>
               <div className="flex justify-between text-xs"><span className="text-slate-400">Locations</span><span className="font-bold">{locations.length}</span></div>
               {atLeast(mode, "advanced") && <div className="flex justify-between text-xs"><span className="text-slate-400">Hotspots</span><span className="font-bold text-amber-400">{hotspots.length}</span></div>}
-              {atLeast(mode, "advanced") && (
-                <div className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-700">
-                  Scenario: <span className="text-blue-400">{scenarioName}</span>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -12097,10 +11364,8 @@ function OrgChartApp() {
             {view === "slides"      && <OrgSlideView/>}
             {view === "timeline"    && <TimelineView/>}
             {view === "dashboards"  && <DashboardView/>}
-            {view === "scenarios"   && <ScenarioView/>}
             {view === "headcount"   && <HeadcountPlanningView/>}
             {view === "analytics"   && <AnalyticsView/>}
-            {view === "flight-risk" && <FlightRiskView/>}
             {view === "pipeline"    && <ProductPipelineView/>}
           </div>
         </div>
