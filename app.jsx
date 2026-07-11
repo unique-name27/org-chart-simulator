@@ -3074,45 +3074,102 @@ function slideNodeColor(node, dim) {
   return "#2563eb";
 }
 
+// Density presets — the "compress the chart" control. Smaller cards, gaps and
+// fonts pack more people into less space so a chart fits a smaller slide (or a
+// corner of one) while staying legible. `lines` caps how many text rows a card
+// shows so tight cards don't overflow.
+const SLIDE_DENSITY = {
+  comfortable: { key: "comfortable", label: "Comfortable", cardW: 188, cardH: 66, hGap: 22, vGap: 52, nameSz: 14, subSz: 11, metaSz: 10, lines: 3 },
+  compact:     { key: "compact",     label: "Compact",     cardW: 150, cardH: 50, hGap: 14, vGap: 40, nameSz: 12, subSz: 9,  metaSz: 8.5, lines: 3 },
+  tight:       { key: "tight",       label: "Tight",       cardW: 118, cardH: 38, hGap: 10, vGap: 30, nameSz: 10, subSz: 8,  metaSz: 7.5, lines: 2 },
+  micro:       { key: "micro",       label: "Micro",       cardW: 92,  cardH: 26, hGap: 7,  vGap: 24, nameSz: 8.5, subSz: 7, metaSz: 6.5, lines: 1 },
+};
+
 // Tidy top-down tree layout. Shows the root plus `maxDepth` generations of reports.
-// Returns cards (each with px x/y/w/h), parent→child links, and overall bounds.
-// `nodeCap` stops expansion once the slide would get unreadably dense.
-function computeSlideLayout(root, { maxDepth, cardW = 188, cardH = 66, hGap = 22, vGap = 52, nodeCap = 80 }) {
+// Two compression levers:
+//   • `dens` — card/gap sizing (see SLIDE_DENSITY).
+//   • `wrap` — when a manager's reports are all leaves, pack them into a grid of
+//     `wrapCols` columns (auto by default) instead of one very wide row, and draw
+//     a light "team box" behind them with a single bracket connector. This is what
+//     turns an unreadable 18-wide strip into a tidy block that scales up big.
+// Returns cards (px x/y/w/h), links (polyline point lists), group rects, and bounds.
+function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, wrap = false, wrapCols = "auto", nodeCap = 200 }) {
+  const { cardW, cardH, hGap, vGap } = dens;
+  const rowGap = Math.max(8, Math.round(vGap * 0.32)); // tighter vertical gap between wrapped grid rows
   const cards = [];
+  const links = [];   // each: { pts: [[x,y], …] }
+  const groups = [];  // each: { x, y, w, h } — team-box behind a wrapped grid
   let cursorX = 0;
   let truncated = false;
 
+  const shown = (node, d) => (d < maxDepth && node.children) ? node.children : [];
+  // A child at depth d+1 will itself show children (is a "branch") when:
+  const childBranches = (k, d) => (d + 1 < maxDepth) && k.children && k.children.length > 0;
+
   function place(node, d) {
+    if (cards.length >= nodeCap) { truncated = true; return null; }
     const card = { node, depth: d, w: cardW, h: cardH, x: 0, y: d * (cardH + vGap), kids: [] };
     cards.push(card);
-    const canDescend = d < maxDepth && node.children && node.children.length > 0 && cards.length < nodeCap;
-    if (!canDescend) {
-      if (d < maxDepth && node.children && node.children.length > 0) truncated = true;
-      card.x = cursorX;
-      cursorX += cardW + hGap;
+    const kids = shown(node, d);
+    if (kids.length === 0) {
+      if (d >= maxDepth && node.children && node.children.length > 0) truncated = true;
+      card.x = cursorX; cursorX += cardW + hGap; return card;
+    }
+
+    const allLeaves = kids.every(k => !childBranches(k, d));
+    // Grid-wrap only when it helps: wrapping on, every child a leaf, and enough of
+    // them that a single row would be wide.
+    if (wrap && allLeaves && kids.length > 3) {
+      const n = kids.length;
+      const cols = wrapCols === "auto"
+        ? Math.max(2, Math.min(n, Math.round(Math.sqrt(n) * 1.6)))
+        : Math.max(1, Math.min(n, wrapCols));
+      const rows = Math.ceil(n / cols);
+      const blockW = cols * cardW + (cols - 1) * hGap;
+      const spanW = Math.max(blockW, cardW);
+      const originX = cursorX;
+      const bX = originX + (spanW - blockW) / 2;
+      const childBaseY = (d + 1) * (cardH + vGap);
+      kids.forEach((k, i) => {
+        if (cards.length >= nodeCap) { truncated = true; return; }
+        const cc = { node: k, depth: d + 1, w: cardW, h: cardH, kids: [],
+          x: bX + (i % cols) * (cardW + hGap),
+          y: childBaseY + Math.floor(i / cols) * (cardH + rowGap) };
+        cards.push(cc); card.kids.push(cc);
+      });
+      card.x = originX + (spanW - cardW) / 2;
+      cursorX = originX + spanW + hGap;
+      const gh = rows * cardH + (rows - 1) * rowGap;
+      groups.push({ x: bX - 9, y: childBaseY - 9, w: blockW + 18, h: gh + 18 });
+      // bracket: parent bottom → down → across → down to top-center of the team box
+      const busY = card.y + cardH + vGap * 0.45;
+      links.push({ pts: [[card.x + cardW / 2, card.y + cardH], [card.x + cardW / 2, busY],
+        [bX + blockW / 2, busY], [bX + blockW / 2, childBaseY - 9]] });
       return card;
     }
-    node.children.forEach(k => {
-      if (cards.length >= nodeCap) { truncated = true; return; }
-      card.kids.push(place(k, d + 1));
-    });
+
+    // Normal tidy layout — recurse each child; children may themselves wrap.
+    kids.forEach(k => { const cc = place(k, d + 1); if (cc) card.kids.push(cc); });
     if (card.kids.length === 0) { card.x = cursorX; cursorX += cardW + hGap; }
     else card.x = (card.kids[0].x + card.kids[card.kids.length - 1].x) / 2;
+    const midY = card.y + cardH + vGap / 2;
+    card.kids.forEach(c => links.push({ pts: [
+      [card.x + cardW / 2, card.y + cardH], [card.x + cardW / 2, midY],
+      [c.x + cardW / 2, midY], [c.x + cardW / 2, c.y]] }));
     return card;
   }
   place(root, 0);
 
-  const minX = Math.min(...cards.map(c => c.x));
-  if (minX !== 0) cards.forEach(c => (c.x -= minX));
-  const width  = Math.max(...cards.map(c => c.x + c.w));
-  const height = Math.max(...cards.map(c => c.y + c.h));
+  const minX = Math.min(...cards.map(c => c.x), ...groups.map(g => g.x));
+  if (minX !== 0) {
+    cards.forEach(c => (c.x -= minX));
+    groups.forEach(g => (g.x -= minX));
+    links.forEach(l => l.pts.forEach(p => (p[0] -= minX)));
+  }
+  const width  = Math.max(...cards.map(c => c.x + c.w), ...groups.map(g => g.x + g.w));
+  const height = Math.max(...cards.map(c => c.y + c.h), ...groups.map(g => g.y + g.h));
 
-  const links = [];
-  cards.forEach(p => p.kids.forEach(c => {
-    links.push({ px: p.x + p.w / 2, py: p.y + p.h, cx: c.x + c.w / 2, cy: c.y, midY: p.y + p.h + vGap / 2 });
-  }));
-
-  return { cards, links, width, height, count: cards.length, truncated };
+  return { cards, links, groups, width, height, count: cards.length, truncated };
 }
 
 function slideCardLines(node, fields) {
@@ -3132,13 +3189,25 @@ function truncateToWidth(s, px, fontPx) {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
+// Card text as vertically-centered lines, capped by the density's `lines` budget.
+function slideCardTextLines(node, fields, dens) {
+  const L = slideCardLines(node, fields);
+  const lines = [{ text: L.name, size: dens.nameSz, weight: 700, fill: "#0f172a" }];
+  if (L.title) lines.push({ text: L.title, size: dens.subSz, weight: 400, fill: "#475569" });
+  if (L.meta)  lines.push({ text: L.meta,  size: dens.metaSz, weight: 400, fill: "#94a3b8" });
+  return lines.slice(0, dens.lines);
+}
+
 // ─── The slide as an <svg>. Also the exact thing the PNG exporter serializes. ───
-function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef }) {
+function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable }) {
   const PAD = 28, TITLE_H = title ? 74 : 24;
-  const W = Math.max(960, layout.width + PAD * 2);
+  const W = Math.max(760, layout.width + PAD * 2);
   const H = layout.height + PAD * 2 + TITLE_H;
   const ox = (W - layout.width) / 2;
   const oy = PAD + TITLE_H;
+  const stripe = Math.max(4, Math.round(dens.cardW * 0.032));
+  const padL = Math.max(stripe + 4, Math.round(dens.cardW * 0.07));
+  const rx = Math.min(9, Math.round(dens.cardH * 0.18));
 
   return (
     <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width={W} height={H} xmlns="http://www.w3.org/2000/svg"
@@ -3149,26 +3218,35 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef }) {
         <text x={PAD} y="46" fontSize="26" fontWeight="700" fill="#0f172a">{truncateToWidth(title, W - PAD * 2, 26)}</text>
         {subtitle && <text x={PAD} y="66" fontSize="13" fill="#64748b">{truncateToWidth(subtitle, W - PAD * 2, 13)}</text>}
       </>}
+      {/* team boxes behind wrapped grids */}
+      {layout.groups.map((g, i) => (
+        <rect key={i} x={ox + g.x} y={oy + g.y} width={g.w} height={g.h} rx="12" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1" />
+      ))}
       {/* connectors */}
       <g stroke="#cbd5e1" strokeWidth="1.5" fill="none">
         {layout.links.map((l, i) => (
-          <path key={i} d={`M ${ox + l.px} ${oy + l.py} L ${ox + l.px} ${oy + l.midY} L ${ox + l.cx} ${oy + l.midY} L ${ox + l.cx} ${oy + l.cy}`} />
+          <path key={i} d={"M " + l.pts.map(p => `${ox + p[0]} ${oy + p[1]}`).join(" L ")} />
         ))}
       </g>
       {/* cards */}
       {layout.cards.map((c, i) => {
         const color = slideNodeColor(c.node, colorDim);
         const x = ox + c.x, y = oy + c.y;
-        const L = slideCardLines(c.node, fields);
-        const innerW = c.w - 20;
+        const tls = slideCardTextLines(c.node, fields, dens);
+        const innerW = c.w - padL - 6;
+        const totalH = tls.reduce((s, ln) => s + ln.size, 0) + (tls.length - 1) * 3;
+        let ty = y + (c.h - totalH) / 2;
         return (
           <g key={i}>
-            <rect x={x} y={y} width={c.w} height={c.h} rx="9" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
-            <rect x={x} y={y} width="6" height={c.h} rx="3" fill={color} />
-            <rect x={x} y={y} width="6" height={c.h * 0.5} fill={color} />
-            <text x={x + 16} y={y + 22} fontSize="14" fontWeight="700" fill="#0f172a">{truncateToWidth(L.name, innerW, 14)}</text>
-            {L.title && <text x={x + 16} y={y + 39} fontSize="11" fill="#475569">{truncateToWidth(L.title, innerW, 11)}</text>}
-            {L.meta && <text x={x + 16} y={y + (L.title ? 56 : 42)} fontSize="10" fill="#94a3b8">{truncateToWidth(L.meta, innerW, 10)}</text>}
+            <rect x={x} y={y} width={c.w} height={c.h} rx={rx} fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
+            <rect x={x} y={y} width={stripe} height={c.h} rx={Math.min(3, stripe / 2)} fill={color} />
+            <rect x={x} y={y} width={stripe} height={c.h * 0.5} fill={color} />
+            {tls.map((ln, j) => {
+              ty += ln.size;
+              const el = <text key={j} x={x + padL} y={ty} fontSize={ln.size} fontWeight={ln.weight} fill={ln.fill}>{truncateToWidth(ln.text, innerW, ln.size)}</text>;
+              ty += 3;
+              return el;
+            })}
           </g>
         );
       })}
@@ -3213,7 +3291,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
   const hex = c => (c || "#64748b").replace("#", "");
 
   slideModels.forEach(model => {
-    const { layout, fields, colorDim, title, subtitle } = model;
+    const { layout, fields, colorDim, title, subtitle, dens = SLIDE_DENSITY.comfortable } = model;
     const slide = pptx.addSlide();
     slide.background = { color: "FFFFFF" };
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: SW, h: 0.09, fill: { color: "2563EB" } });
@@ -3226,32 +3304,39 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
     const oy = topPad;
     const X = px => ox + px * scale;
     const Y = px => oy + px * scale;
+    const pt = px => Math.max(5, Math.min(22, +(px * scale * 72).toFixed(1))); // px height → font points
+    const stripe = Math.max(4, Math.round(dens.cardW * 0.032));
+    const padL = Math.max(stripe + 4, Math.round(dens.cardW * 0.07));
 
-    // connectors first (behind cards)
+    // team boxes behind wrapped grids
+    layout.groups.forEach(g => slide.addShape(pptx.ShapeType.roundRect, {
+      x: X(g.x), y: Y(g.y), w: g.w * scale, h: g.h * scale, rectRadius: 0.08,
+      fill: { color: "F8FAFC" }, line: { color: "E2E8F0", width: 0.75 },
+    }));
+
+    // connectors (behind cards) — each link is a polyline of orthogonal segments
     layout.links.forEach(l => {
-      const seg = (x1, y1, x2, y2) => slide.addShape(pptx.ShapeType.line, {
-        x: X(Math.min(x1, x2)), y: Y(Math.min(y1, y2)), w: X(Math.max(x1, x2)) - X(Math.min(x1, x2)), h: Y(Math.max(y1, y2)) - Y(Math.min(y1, y2)),
-        line: { color: "CBD5E1", width: 1 },
-      });
-      seg(l.px, l.py, l.px, l.midY);
-      seg(l.px, l.midY, l.cx, l.midY);
-      seg(l.cx, l.midY, l.cx, l.cy);
+      for (let i = 0; i < l.pts.length - 1; i++) {
+        const [x1, y1] = l.pts[i], [x2, y2] = l.pts[i + 1];
+        slide.addShape(pptx.ShapeType.line, {
+          x: X(Math.min(x1, x2)), y: Y(Math.min(y1, y2)),
+          w: Math.abs(x2 - x1) * scale, h: Math.abs(y2 - y1) * scale,
+          line: { color: "CBD5E1", width: 1 },
+        });
+      }
     });
 
     layout.cards.forEach(c => {
       const color = hex(slideNodeColor(c.node, colorDim));
-      const L = slideCardLines(c.node, fields);
+      const tls = slideCardTextLines(c.node, fields, dens);
       const x = X(c.x), y = Y(c.y), w = c.w * scale, h = c.h * scale;
-      const nameSz = Math.max(8, Math.min(15, Math.round(h * 72 * 0.24)));
-      const runs = [{ text: L.name, options: { bold: true, fontSize: nameSz, color: "0F172A", breakLine: true } }];
-      if (L.title) runs.push({ text: L.title, options: { fontSize: Math.max(7, nameSz - 3), color: "475569", breakLine: true } });
-      if (L.meta)  runs.push({ text: L.meta,  options: { fontSize: Math.max(6, nameSz - 4), color: "94A3B8", breakLine: true } });
+      const runs = tls.map(ln => ({ text: ln.text, options: { bold: ln.weight >= 700, fontSize: pt(ln.size), color: hex(ln.fill), breakLine: true } }));
       slide.addText(runs, {
-        shape: pptx.ShapeType.roundRect, rectRadius: 0.05,
+        shape: pptx.ShapeType.roundRect, rectRadius: Math.min(0.06, h * 0.16),
         x, y, w, h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", width: 1 },
-        align: "left", valign: "top", margin: [3, 5, 3, 11], fontFace: "Arial",
+        align: "left", valign: "middle", margin: [1, 3, 1, Math.max(4, padL * scale * 72)], fontFace: "Arial",
       });
-      slide.addShape(pptx.ShapeType.rect, { x, y, w: 0.06, h, fill: { color } });
+      slide.addShape(pptx.ShapeType.rect, { x, y, w: stripe * scale, h, fill: { color } });
     });
 
     if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: "94A3B8", fontFace: "Arial" });
@@ -3279,13 +3364,18 @@ function OrgSlideView() {
   const [perTeam, setPerTeam]   = useState(false);
   const [search, setSearch]     = useState("");
   const [titleText, setTitleText] = useState("");
+  const [density, setDensity]   = useState("comfortable");
+  const [wrap, setWrap]         = useState(true);
+  const [wrapCols, setWrapCols] = useState("auto");
 
   useEffect(() => {
     if (!tree.map[rootId]) setRootId(tree.root ? tree.root.id : (people[0] && people[0].id));
   }, [tree]);
 
+  const dens = SLIDE_DENSITY[density] || SLIDE_DENSITY.comfortable;
+  const wrapColsVal = wrapCols === "auto" ? "auto" : parseInt(wrapCols, 10);
   const rootNode = tree.map[rootId] || tree.root;
-  const layout = useMemo(() => rootNode ? computeSlideLayout(rootNode, { maxDepth }) : null, [rootNode, maxDepth]);
+  const layout = useMemo(() => rootNode ? computeSlideLayout(rootNode, { maxDepth, dens, wrap, wrapCols: wrapColsVal }) : null, [rootNode, maxDepth, dens, wrap, wrapColsVal]);
 
   const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "’" : "’s"} organization` : "Org chart";
   const title = titleText.trim() || autoTitle;
@@ -3301,8 +3391,8 @@ function OrgSlideView() {
   // Build the list of slide models for a multi-slide (.pptx) export.
   function buildDeckModels() {
     const mk = (node, mDepth, ttl, sub) => ({
-      layout: computeSlideLayout(node, { maxDepth: mDepth }),
-      fields, colorDim, title: ttl, subtitle: sub,
+      layout: computeSlideLayout(node, { maxDepth: mDepth, dens, wrap, wrapCols: wrapColsVal }),
+      fields, colorDim, dens, title: ttl, subtitle: sub,
     });
     if (!perTeam || !rootNode.children || rootNode.children.length === 0) {
       return [mk(rootNode, maxDepth, title, subtitle)];
@@ -3347,6 +3437,35 @@ function OrgSlideView() {
           <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Levels deep: {maxDepth}</label>
           <input type="range" min="1" max="4" value={maxDepth} onChange={e => setMaxDepth(parseInt(e.target.value, 10))} className="w-full" />
           <div className="flex justify-between text-[10px] text-gray-400"><span>Direct reports</span><span>4 levels</span></div>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-2.5">
+          <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide">Compress to fit</label>
+          <div>
+            <div className="text-[10px] text-gray-400 mb-1">Card density</div>
+            <div className="grid grid-cols-4 gap-1">
+              {Object.values(SLIDE_DENSITY).map(d => (
+                <button key={d.key} onClick={() => setDensity(d.key)} title={d.label}
+                  className={`text-[10px] py-1 rounded border transition-colors ${density === d.key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="flex items-start gap-2 text-xs text-gray-700">
+            <input type="checkbox" checked={wrap} onChange={e => setWrap(e.target.checked)} className="mt-0.5" />
+            <span><span className="font-medium">Wrap wide teams into a grid</span><br/><span className="text-gray-400">Packs a long row of reports into a compact block.</span></span>
+          </label>
+          {wrap && (
+            <div className="flex items-center gap-2 text-xs pl-6">
+              <span className="text-gray-500">Columns</span>
+              <select value={wrapCols} onChange={e => setWrapCols(e.target.value)} className="flex-1 text-xs border border-gray-200 rounded-md px-2 py-1 bg-white">
+                <option value="auto">Auto</option>
+                {[3, 4, 5, 6, 8, 10].map(n => <option key={n} value={n}>{n} per row</option>)}
+              </select>
+            </div>
+          )}
+          <div className="text-[10px] text-gray-400">Chart is {Math.round(layout.width)}×{Math.round(layout.height)} px · aspect {(layout.width / layout.height).toFixed(1)}:1</div>
         </div>
 
         <div>
@@ -3403,7 +3522,7 @@ function OrgSlideView() {
           </div>
         )}
         <div className="mx-auto bg-white rounded-lg shadow-xl overflow-hidden" style={{ maxWidth: 1100 }}>
-          <OrgSlideSVG layout={layout} fields={fields} colorDim={colorDim} title={title} subtitle={subtitle} svgRef={svgRef} />
+          <OrgSlideSVG layout={layout} fields={fields} colorDim={colorDim} title={title} subtitle={subtitle} svgRef={svgRef} dens={dens} />
         </div>
         <p className="text-center text-[11px] text-gray-400 mt-2">Live preview · {layout.count} {layout.count === 1 ? "person" : "people"} shown</p>
       </div>
