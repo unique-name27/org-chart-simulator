@@ -3108,7 +3108,7 @@ const SLIDE_DENSITY = {
 //     a light "team box" behind them with a single bracket connector. This is what
 //     turns an unreadable 18-wide strip into a tidy block that scales up big.
 // Returns cards (px x/y/w/h), links (polyline point lists), group rects, and bounds.
-function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, wrap = false, wrapCols = "auto", nodeCap = 200 }) {
+function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, wrap = false, wrapCols = "auto", nodeCap = 200, openByManager = {} }) {
   const { cardW, cardH, hGap, vGap } = dens;
   const rowGap = Math.max(8, Math.round(vGap * 0.32)); // tighter vertical gap between wrapped grid rows
   const cards = [];
@@ -3117,7 +3117,14 @@ function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, 
   let cursorX = 0;
   let truncated = false;
 
-  const shown = (node, d) => (d < maxDepth && node.children) ? node.children : [];
+  // Shown children = real reports + any user-added "open position" ghost cards for
+  // this manager. Open cards are synthetic leaves (children: []).
+  const shown = (node, d) => {
+    if (d >= maxDepth) return [];
+    const real = node.children || [];
+    const opens = openByManager[node.id] || [];
+    return opens.length ? [...real, ...opens] : real;
+  };
   // A child at depth d+1 will itself show children (is a "branch") when:
   const childBranches = (k, d) => (d + 1 < maxDepth) && k.children && k.children.length > 0;
 
@@ -3207,7 +3214,7 @@ function truncateToWidth(s, px, fontPx) {
 // Card text as vertically-centered lines, capped by the density's `lines` budget.
 function slideCardTextLines(node, fields, dens) {
   const L = slideCardLines(node, fields);
-  const lines = [{ text: L.name, size: dens.nameSz, weight: 700, fill: "#0f172a" }];
+  const lines = [{ text: L.name, size: dens.nameSz, weight: 700, fill: node.__open ? "#475569" : "#0f172a" }];
   if (L.title) lines.push({ text: L.title, size: dens.subSz, weight: 400, fill: "#475569" });
   if (L.meta)  lines.push({ text: L.meta,  size: dens.metaSz, weight: 400, fill: "#94a3b8" });
   return lines.slice(0, dens.lines);
@@ -3245,17 +3252,28 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
       </g>
       {/* cards */}
       {layout.cards.map((c, i) => {
+        const open = c.node.__open;
         const color = slideNodeColor(c.node, colorDim);
         const x = ox + c.x, y = oy + c.y;
         const tls = slideCardTextLines(c.node, fields, dens);
-        const innerW = c.w - padL - 6;
+        const showPill = open && dens.lines >= 2 && c.w >= 104;
+        const pillW = Math.min(34, c.w * 0.3);
+        const innerW = c.w - padL - 6 - (showPill ? pillW + 4 : 0);
         const totalH = tls.reduce((s, ln) => s + ln.size, 0) + (tls.length - 1) * 3;
         let ty = y + (c.h - totalH) / 2;
         return (
           <g key={i}>
-            <rect x={x} y={y} width={c.w} height={c.h} rx={rx} fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
-            <rect x={x} y={y} width={stripe} height={c.h} rx={Math.min(3, stripe / 2)} fill={color} />
-            <rect x={x} y={y} width={stripe} height={c.h * 0.5} fill={color} />
+            <rect x={x} y={y} width={c.w} height={c.h} rx={rx} fill="#ffffff"
+              stroke={open ? color : "#e2e8f0"} strokeWidth="1.5"
+              strokeDasharray={open ? "5 3" : undefined} strokeOpacity={open ? 0.9 : 1} />
+            {!open && <>
+              <rect x={x} y={y} width={stripe} height={c.h} rx={Math.min(3, stripe / 2)} fill={color} />
+              <rect x={x} y={y} width={stripe} height={c.h * 0.5} fill={color} />
+            </>}
+            {showPill && <>
+              <rect x={x + c.w - pillW - 6} y={y + 5} width={pillW} height="13" rx="6" fill="#ecfdf5" stroke="#6ee7b7" strokeWidth="0.75" />
+              <text x={x + c.w - 6 - pillW / 2} y={y + 14.5} fontSize="8" fontWeight="700" fill="#059669" textAnchor="middle">OPEN</text>
+            </>}
             {tls.map((ln, j) => {
               ty += ln.size;
               const el = <text key={j} x={x + padL} y={ty} fontSize={ln.size} fontWeight={ln.weight} fill={ln.fill}>{truncateToWidth(ln.text, innerW, ln.size)}</text>;
@@ -3342,16 +3360,27 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
     });
 
     layout.cards.forEach(c => {
+      const open = c.node.__open;
       const color = hex(slideNodeColor(c.node, colorDim));
       const tls = slideCardTextLines(c.node, fields, dens);
       const x = X(c.x), y = Y(c.y), w = c.w * scale, h = c.h * scale;
       const runs = tls.map(ln => ({ text: ln.text, options: { bold: ln.weight >= 700, fontSize: pt(ln.size), color: hex(ln.fill), breakLine: true } }));
       slide.addText(runs, {
         shape: pptx.ShapeType.roundRect, rectRadius: Math.min(0.06, h * 0.16),
-        x, y, w, h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", width: 1 },
+        x, y, w, h, fill: { color: "FFFFFF" },
+        line: open ? { color, width: 1.25, dashType: "dash" } : { color: "E2E8F0", width: 1 },
         align: "left", valign: "middle", margin: [1, 3, 1, Math.max(4, padL * scale * 72)], fontFace: "Arial",
       });
-      slide.addShape(pptx.ShapeType.rect, { x, y, w: stripe * scale, h, fill: { color } });
+      if (open) {
+        // "OPEN" chip top-right; a real editable text box in the deck
+        if (dens.lines >= 2 && w >= 1.2) slide.addText("OPEN", {
+          x: x + w - 0.6, y: y + 0.04, w: 0.55, h: 0.18, rectRadius: 0.03, shape: pptx.ShapeType.roundRect,
+          fill: { color: "ECFDF5" }, line: { color: "6EE7B7", width: 0.5 },
+          fontSize: 7, bold: true, color: "059669", align: "center", valign: "middle", fontFace: "Arial",
+        });
+      } else {
+        slide.addShape(pptx.ShapeType.rect, { x, y, w: stripe * scale, h, fill: { color } });
+      }
     });
 
     if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: "94A3B8", fontFace: "Arial" });
@@ -3382,6 +3411,9 @@ function OrgSlideView() {
   const [density, setDensity]   = useState("comfortable");
   const [wrap, setWrap]         = useState(true);
   const [wrapCols, setWrapCols] = useState("auto");
+  // User-added "open position" ghost cards: [{ id, managerId, title, level, dept }]
+  const [openRoles, setOpenRoles] = useState([]);
+  const [newRole, setNewRole]   = useState({ managerId: "", title: "", level: "L4", count: 1 });
 
   useEffect(() => {
     if (!tree.map[rootId]) setRootId(tree.root ? tree.root.id : (people[0] && people[0].id));
@@ -3390,7 +3422,37 @@ function OrgSlideView() {
   const dens = SLIDE_DENSITY[density] || SLIDE_DENSITY.comfortable;
   const wrapColsVal = wrapCols === "auto" ? "auto" : parseInt(wrapCols, 10);
   const rootNode = tree.map[rootId] || tree.root;
-  const layout = useMemo(() => rootNode ? computeSlideLayout(rootNode, { maxDepth, dens, wrap, wrapCols: wrapColsVal }) : null, [rootNode, maxDepth, dens, wrap, wrapColsVal]);
+
+  // Group open roles into synthetic leaf nodes keyed by their manager id.
+  const openByManager = useMemo(() => {
+    const m = {};
+    openRoles.forEach(r => {
+      const node = { id: r.id, __open: true, first: r.title || "Open role", last: "", title: "",
+        dept: r.dept || "", level: r.level || "", children: [], _totalReports: 0 };
+      (m[r.managerId] = m[r.managerId] || []).push(node);
+    });
+    return m;
+  }, [openRoles]);
+
+  const layout = useMemo(() => rootNode ? computeSlideLayout(rootNode, { maxDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }) : null, [rootNode, maxDepth, dens, wrap, wrapColsVal, openByManager]);
+  const openCount = layout ? layout.cards.filter(c => c.node.__open).length : 0;
+
+  // Managers you can attach an open role to = the real (non-open) cards currently on the slide.
+  const attachOptions = useMemo(() => layout ? layout.cards.filter(c => !c.node.__open).map(c => c.node) : [], [layout]);
+
+  function addOpenRole() {
+    const mgrId = newRole.managerId || rootId;
+    const mgr = tree.map[mgrId];
+    if (!mgr) return;
+    const dept = mgr.dept || "";
+    const title = (newRole.title || "").trim() || "Open role";
+    const count = Math.max(1, Math.min(20, parseInt(newRole.count, 10) || 1));
+    const stamp = Date.now();
+    const additions = [];
+    for (let i = 0; i < count; i++) additions.push({ id: `open_${stamp}_${Math.round(Math.random() * 1e6)}_${i}`, managerId: mgrId, title, level: newRole.level, dept });
+    setOpenRoles(prev => [...prev, ...additions]);
+    setNewRole(r => ({ ...r, title: "" }));
+  }
 
   const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "’" : "’s"} organization` : "Org chart";
   const title = titleText.trim() || autoTitle;
@@ -3406,7 +3468,7 @@ function OrgSlideView() {
   // Build the list of slide models for a multi-slide (.pptx) export.
   function buildDeckModels() {
     const mk = (node, mDepth, ttl, sub) => ({
-      layout: computeSlideLayout(node, { maxDepth: mDepth, dens, wrap, wrapCols: wrapColsVal }),
+      layout: computeSlideLayout(node, { maxDepth: mDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }),
       fields, colorDim, dens, title: ttl, subtitle: sub,
     });
     if (!perTeam || !rootNode.children || rootNode.children.length === 0) {
@@ -3505,6 +3567,52 @@ function OrgSlideView() {
           </div>
         </div>
 
+        <div className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide">Open positions</label>
+            {openRoles.length > 0 && <button onClick={() => setOpenRoles([])} className="text-[10px] text-gray-400 hover:text-red-500">Clear all</button>}
+          </div>
+          <p className="text-[10px] text-gray-400 -mt-1">Add to-be-hired boxes under any manager. They show as dashed “OPEN” cards and export to PNG + PowerPoint.</p>
+          <select value={newRole.managerId || rootId} onChange={e => setNewRole(r => ({ ...r, managerId: e.target.value }))}
+            className="w-full text-xs border border-gray-200 rounded-md px-2 py-1 bg-white" title="Reports to">
+            {attachOptions.map(n => (
+              <option key={n.id} value={n.id}>Under: {n.first} {n.last} — {n.title || displayLevel(n.level)}</option>
+            ))}
+          </select>
+          <input value={newRole.title} onChange={e => setNewRole(r => ({ ...r, title: e.target.value }))}
+            onKeyDown={e => { if (e.key === "Enter") addOpenRole(); }}
+            placeholder="Role title (e.g. Senior RTL Engineer)"
+            className="w-full text-xs border border-gray-200 rounded-md px-2 py-1 bg-white" />
+          <div className="flex items-center gap-1.5">
+            <select value={newRole.level} onChange={e => setNewRole(r => ({ ...r, level: e.target.value }))}
+              className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white" title="Level">
+              {ALL_DISPLAY_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+            <input type="number" min="1" max="20" value={newRole.count} onChange={e => setNewRole(r => ({ ...r, count: e.target.value }))}
+              className="w-12 text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white" title="How many" />
+            <button onClick={addOpenRole} className="flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-600 text-white px-2 py-1 rounded-md font-medium hover:bg-emerald-700">
+              <Plus size={12}/>Add
+            </button>
+          </div>
+          {openRoles.length > 0 && (
+            <div className="space-y-1 max-h-32 overflow-y-auto pt-1 border-t border-gray-100">
+              {openRoles.map(r => {
+                const mgr = tree.map[r.managerId];
+                return (
+                  <div key={r.id} className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full border border-emerald-500 shrink-0" style={{ borderStyle: "dashed" }}/>
+                    <span className="flex-1 min-w-0 truncate">{r.title} <span className="text-gray-400">· {r.level} · under {mgr ? `${mgr.first} ${mgr.last}` : "—"}</span></span>
+                    <button onClick={() => setOpenRoles(prev => prev.filter(x => x.id !== r.id))} className="text-gray-300 hover:text-red-500 shrink-0"><X size={11}/></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {openRoles.some(r => !attachOptions.some(n => n.id === r.managerId)) && (
+            <p className="text-[10px] text-amber-600">Some open roles sit under a manager not shown at this depth — increase “Levels deep” or change the root to see them.</p>
+          )}
+        </div>
+
         <div>
           <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Slide title</label>
           <input value={titleText} onChange={e => setTitleText(e.target.value)} placeholder={autoTitle}
@@ -3539,7 +3647,7 @@ function OrgSlideView() {
         <div className="mx-auto bg-white rounded-lg shadow-xl overflow-hidden" style={{ maxWidth: 1100 }}>
           <OrgSlideSVG layout={layout} fields={fields} colorDim={colorDim} title={title} subtitle={subtitle} svgRef={svgRef} dens={dens} />
         </div>
-        <p className="text-center text-[11px] text-gray-400 mt-2">Live preview · {layout.count} {layout.count === 1 ? "person" : "people"} shown</p>
+        <p className="text-center text-[11px] text-gray-400 mt-2">Live preview · {layout.count - openCount} {(layout.count - openCount) === 1 ? "person" : "people"} shown{openCount > 0 ? ` · ${openCount} open position${openCount === 1 ? "" : "s"}` : ""}</p>
       </div>
     </div>
   );

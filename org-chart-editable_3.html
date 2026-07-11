@@ -2851,7 +2851,7 @@ const SLIDE_DENSITY = {
   tight: { key: "tight", label: "Tight", cardW: 118, cardH: 38, hGap: 10, vGap: 30, nameSz: 10, subSz: 8, metaSz: 7.5, lines: 2 },
   micro: { key: "micro", label: "Micro", cardW: 92, cardH: 26, hGap: 7, vGap: 24, nameSz: 8.5, subSz: 7, metaSz: 6.5, lines: 1 }
 };
-function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, wrap = false, wrapCols = "auto", nodeCap = 200 }) {
+function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, wrap = false, wrapCols = "auto", nodeCap = 200, openByManager = {} }) {
   const { cardW, cardH, hGap, vGap } = dens;
   const rowGap = Math.max(8, Math.round(vGap * 0.32));
   const cards = [];
@@ -2859,7 +2859,12 @@ function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, 
   const groups = [];
   let cursorX = 0;
   let truncated = false;
-  const shown = (node, d) => d < maxDepth && node.children ? node.children : [];
+  const shown = (node, d) => {
+    if (d >= maxDepth) return [];
+    const real = node.children || [];
+    const opens = openByManager[node.id] || [];
+    return opens.length ? [...real, ...opens] : real;
+  };
   const childBranches = (k, d) => d + 1 < maxDepth && k.children && k.children.length > 0;
   function place(node, d) {
     if (cards.length >= nodeCap) {
@@ -2960,7 +2965,7 @@ function truncateToWidth(s, px, fontPx) {
 }
 function slideCardTextLines(node, fields, dens) {
   const L = slideCardLines(node, fields);
-  const lines = [{ text: L.name, size: dens.nameSz, weight: 700, fill: "#0f172a" }];
+  const lines = [{ text: L.name, size: dens.nameSz, weight: 700, fill: node.__open ? "#475569" : "#0f172a" }];
   if (L.title) lines.push({ text: L.title, size: dens.subSz, weight: 400, fill: "#475569" });
   if (L.meta) lines.push({ text: L.meta, size: dens.metaSz, weight: 400, fill: "#94a3b8" });
   return lines.slice(0, dens.lines);
@@ -2989,13 +2994,30 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
     layout.groups.map((g, i) => /* @__PURE__ */ React.createElement("rect", { key: i, x: ox + g.x, y: oy + g.y, width: g.w, height: g.h, rx: "12", fill: "#f8fafc", stroke: "#e2e8f0", strokeWidth: "1" })),
     /* @__PURE__ */ React.createElement("g", { stroke: "#cbd5e1", strokeWidth: "1.5", fill: "none" }, layout.links.map((l, i) => /* @__PURE__ */ React.createElement("path", { key: i, d: "M " + l.pts.map((p) => `${ox + p[0]} ${oy + p[1]}`).join(" L ") }))),
     layout.cards.map((c, i) => {
+      const open = c.node.__open;
       const color = slideNodeColor(c.node, colorDim);
       const x = ox + c.x, y = oy + c.y;
       const tls = slideCardTextLines(c.node, fields, dens);
-      const innerW = c.w - padL - 6;
+      const showPill = open && dens.lines >= 2 && c.w >= 104;
+      const pillW = Math.min(34, c.w * 0.3);
+      const innerW = c.w - padL - 6 - (showPill ? pillW + 4 : 0);
       const totalH = tls.reduce((s, ln) => s + ln.size, 0) + (tls.length - 1) * 3;
       let ty = y + (c.h - totalH) / 2;
-      return /* @__PURE__ */ React.createElement("g", { key: i }, /* @__PURE__ */ React.createElement("rect", { x, y, width: c.w, height: c.h, rx, fill: "#ffffff", stroke: "#e2e8f0", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x, y, width: stripe, height: c.h, rx: Math.min(3, stripe / 2), fill: color }), /* @__PURE__ */ React.createElement("rect", { x, y, width: stripe, height: c.h * 0.5, fill: color }), tls.map((ln, j) => {
+      return /* @__PURE__ */ React.createElement("g", { key: i }, /* @__PURE__ */ React.createElement(
+        "rect",
+        {
+          x,
+          y,
+          width: c.w,
+          height: c.h,
+          rx,
+          fill: "#ffffff",
+          stroke: open ? color : "#e2e8f0",
+          strokeWidth: "1.5",
+          strokeDasharray: open ? "5 3" : void 0,
+          strokeOpacity: open ? 0.9 : 1
+        }
+      ), !open && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("rect", { x, y, width: stripe, height: c.h, rx: Math.min(3, stripe / 2), fill: color }), /* @__PURE__ */ React.createElement("rect", { x, y, width: stripe, height: c.h * 0.5, fill: color })), showPill && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("rect", { x: x + c.w - pillW - 6, y: y + 5, width: pillW, height: "13", rx: "6", fill: "#ecfdf5", stroke: "#6ee7b7", strokeWidth: "0.75" }), /* @__PURE__ */ React.createElement("text", { x: x + c.w - 6 - pillW / 2, y: y + 14.5, fontSize: "8", fontWeight: "700", fill: "#059669", textAnchor: "middle" }, "OPEN")), tls.map((ln, j) => {
         ty += ln.size;
         const el = /* @__PURE__ */ React.createElement("text", { key: j, x: x + padL, y: ty, fontSize: ln.size, fontWeight: ln.weight, fill: ln.fill }, truncateToWidth(ln.text, innerW, ln.size));
         ty += 3;
@@ -3086,6 +3108,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
       }
     });
     layout.cards.forEach((c) => {
+      const open = c.node.__open;
       const color = hex(slideNodeColor(c.node, colorDim));
       const tls = slideCardTextLines(c.node, fields, dens);
       const x = X2(c.x), y = Y(c.y), w = c.w * scale, h = c.h * scale;
@@ -3098,13 +3121,32 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
         w,
         h,
         fill: { color: "FFFFFF" },
-        line: { color: "E2E8F0", width: 1 },
+        line: open ? { color, width: 1.25, dashType: "dash" } : { color: "E2E8F0", width: 1 },
         align: "left",
         valign: "middle",
         margin: [1, 3, 1, Math.max(4, padL * scale * 72)],
         fontFace: "Arial"
       });
-      slide.addShape(pptx.ShapeType.rect, { x, y, w: stripe * scale, h, fill: { color } });
+      if (open) {
+        if (dens.lines >= 2 && w >= 1.2) slide.addText("OPEN", {
+          x: x + w - 0.6,
+          y: y + 0.04,
+          w: 0.55,
+          h: 0.18,
+          rectRadius: 0.03,
+          shape: pptx.ShapeType.roundRect,
+          fill: { color: "ECFDF5" },
+          line: { color: "6EE7B7", width: 0.5 },
+          fontSize: 7,
+          bold: true,
+          color: "059669",
+          align: "center",
+          valign: "middle",
+          fontFace: "Arial"
+        });
+      } else {
+        slide.addShape(pptx.ShapeType.rect, { x, y, w: stripe * scale, h, fill: { color } });
+      }
     });
     if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: "94A3B8", fontFace: "Arial" });
   });
@@ -3127,13 +3169,48 @@ function OrgSlideView() {
   const [density, setDensity] = useState("comfortable");
   const [wrap, setWrap] = useState(true);
   const [wrapCols, setWrapCols] = useState("auto");
+  const [openRoles, setOpenRoles] = useState([]);
+  const [newRole, setNewRole] = useState({ managerId: "", title: "", level: "L4", count: 1 });
   useEffect(() => {
     if (!tree.map[rootId]) setRootId(tree.root ? tree.root.id : people[0] && people[0].id);
   }, [tree]);
   const dens = SLIDE_DENSITY[density] || SLIDE_DENSITY.comfortable;
   const wrapColsVal = wrapCols === "auto" ? "auto" : parseInt(wrapCols, 10);
   const rootNode = tree.map[rootId] || tree.root;
-  const layout = useMemo(() => rootNode ? computeSlideLayout(rootNode, { maxDepth, dens, wrap, wrapCols: wrapColsVal }) : null, [rootNode, maxDepth, dens, wrap, wrapColsVal]);
+  const openByManager = useMemo(() => {
+    const m = {};
+    openRoles.forEach((r) => {
+      const node = {
+        id: r.id,
+        __open: true,
+        first: r.title || "Open role",
+        last: "",
+        title: "",
+        dept: r.dept || "",
+        level: r.level || "",
+        children: [],
+        _totalReports: 0
+      };
+      (m[r.managerId] = m[r.managerId] || []).push(node);
+    });
+    return m;
+  }, [openRoles]);
+  const layout = useMemo(() => rootNode ? computeSlideLayout(rootNode, { maxDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }) : null, [rootNode, maxDepth, dens, wrap, wrapColsVal, openByManager]);
+  const openCount = layout ? layout.cards.filter((c) => c.node.__open).length : 0;
+  const attachOptions = useMemo(() => layout ? layout.cards.filter((c) => !c.node.__open).map((c) => c.node) : [], [layout]);
+  function addOpenRole() {
+    const mgrId = newRole.managerId || rootId;
+    const mgr = tree.map[mgrId];
+    if (!mgr) return;
+    const dept = mgr.dept || "";
+    const title2 = (newRole.title || "").trim() || "Open role";
+    const count = Math.max(1, Math.min(20, parseInt(newRole.count, 10) || 1));
+    const stamp = Date.now();
+    const additions = [];
+    for (let i = 0; i < count; i++) additions.push({ id: `open_${stamp}_${Math.round(Math.random() * 1e6)}_${i}`, managerId: mgrId, title: title2, level: newRole.level, dept });
+    setOpenRoles((prev) => [...prev, ...additions]);
+    setNewRole((r) => ({ ...r, title: "" }));
+  }
   const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "\u2019" : "\u2019s"} organization` : "Org chart";
   const title = titleText.trim() || autoTitle;
   const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  \xB7  ${rootNode._totalReports || 0} people in org` : "";
@@ -3145,7 +3222,7 @@ function OrgSlideView() {
   }, [people, search]);
   function buildDeckModels() {
     const mk = (node, mDepth, ttl, sub) => ({
-      layout: computeSlideLayout(node, { maxDepth: mDepth, dens, wrap, wrapCols: wrapColsVal }),
+      layout: computeSlideLayout(node, { maxDepth: mDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }),
       fields,
       colorDim,
       dens,
@@ -3195,7 +3272,50 @@ function OrgSlideView() {
       className: `text-[10px] py-1 rounded border transition-colors ${density === d.key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`
     },
     d.label
-  )))), /* @__PURE__ */ React.createElement("label", { className: "flex items-start gap-2 text-xs text-gray-700" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: wrap, onChange: (e) => setWrap(e.target.checked), className: "mt-0.5" }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "font-medium" }, "Wrap wide teams into a grid"), /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, "Packs a long row of reports into a compact block."))), wrap && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 text-xs pl-6" }, /* @__PURE__ */ React.createElement("span", { className: "text-gray-500" }, "Columns"), /* @__PURE__ */ React.createElement("select", { value: wrapCols, onChange: (e) => setWrapCols(e.target.value), className: "flex-1 text-xs border border-gray-200 rounded-md px-2 py-1 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "auto" }, "Auto"), [3, 4, 5, 6, 8, 10].map((n) => /* @__PURE__ */ React.createElement("option", { key: n, value: n }, n, " per row")))), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-gray-400" }, "Chart is ", Math.round(layout.width), "\xD7", Math.round(layout.height), " px \xB7 aspect ", (layout.width / layout.height).toFixed(1), ":1")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Color cards by"), /* @__PURE__ */ React.createElement("select", { value: colorDim, onChange: (e) => setColorDim(e.target.value), className: "w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "department" }, "Department"), /* @__PURE__ */ React.createElement("option", { value: "business_group" }, "Business Unit"), /* @__PURE__ */ React.createElement("option", { value: "discipline" }, "Discipline"), /* @__PURE__ */ React.createElement("option", { value: "location" }, "Location"), /* @__PURE__ */ React.createElement("option", { value: "level" }, "Level"))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1.5" }, "Show on each card"), /* @__PURE__ */ React.createElement("div", { className: "space-y-1" }, [["title", "Job title"], ["dept", "Department"], ["level", "Level"], ["size", "Team size"]].map(([k, l]) => /* @__PURE__ */ React.createElement("label", { key: k, className: "flex items-center gap-2 text-xs text-gray-700" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: fields[k], onChange: (e) => setFields((f) => ({ ...f, [k]: e.target.checked })) }), l)))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Slide title"), /* @__PURE__ */ React.createElement(
+  )))), /* @__PURE__ */ React.createElement("label", { className: "flex items-start gap-2 text-xs text-gray-700" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: wrap, onChange: (e) => setWrap(e.target.checked), className: "mt-0.5" }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "font-medium" }, "Wrap wide teams into a grid"), /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, "Packs a long row of reports into a compact block."))), wrap && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 text-xs pl-6" }, /* @__PURE__ */ React.createElement("span", { className: "text-gray-500" }, "Columns"), /* @__PURE__ */ React.createElement("select", { value: wrapCols, onChange: (e) => setWrapCols(e.target.value), className: "flex-1 text-xs border border-gray-200 rounded-md px-2 py-1 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "auto" }, "Auto"), [3, 4, 5, 6, 8, 10].map((n) => /* @__PURE__ */ React.createElement("option", { key: n, value: n }, n, " per row")))), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-gray-400" }, "Chart is ", Math.round(layout.width), "\xD7", Math.round(layout.height), " px \xB7 aspect ", (layout.width / layout.height).toFixed(1), ":1")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Color cards by"), /* @__PURE__ */ React.createElement("select", { value: colorDim, onChange: (e) => setColorDim(e.target.value), className: "w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "department" }, "Department"), /* @__PURE__ */ React.createElement("option", { value: "business_group" }, "Business Unit"), /* @__PURE__ */ React.createElement("option", { value: "discipline" }, "Discipline"), /* @__PURE__ */ React.createElement("option", { value: "location" }, "Location"), /* @__PURE__ */ React.createElement("option", { value: "level" }, "Level"))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1.5" }, "Show on each card"), /* @__PURE__ */ React.createElement("div", { className: "space-y-1" }, [["title", "Job title"], ["dept", "Department"], ["level", "Level"], ["size", "Team size"]].map(([k, l]) => /* @__PURE__ */ React.createElement("label", { key: k, className: "flex items-center gap-2 text-xs text-gray-700" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: fields[k], onChange: (e) => setFields((f) => ({ ...f, [k]: e.target.checked })) }), l)))), /* @__PURE__ */ React.createElement("div", { className: "bg-white border border-gray-200 rounded-lg p-2.5 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide" }, "Open positions"), openRoles.length > 0 && /* @__PURE__ */ React.createElement("button", { onClick: () => setOpenRoles([]), className: "text-[10px] text-gray-400 hover:text-red-500" }, "Clear all")), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 -mt-1" }, "Add to-be-hired boxes under any manager. They show as dashed \u201COPEN\u201D cards and export to PNG + PowerPoint."), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: newRole.managerId || rootId,
+      onChange: (e) => setNewRole((r) => ({ ...r, managerId: e.target.value })),
+      className: "w-full text-xs border border-gray-200 rounded-md px-2 py-1 bg-white",
+      title: "Reports to"
+    },
+    attachOptions.map((n) => /* @__PURE__ */ React.createElement("option", { key: n.id, value: n.id }, "Under: ", n.first, " ", n.last, " \u2014 ", n.title || displayLevel(n.level)))
+  ), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      value: newRole.title,
+      onChange: (e) => setNewRole((r) => ({ ...r, title: e.target.value })),
+      onKeyDown: (e) => {
+        if (e.key === "Enter") addOpenRole();
+      },
+      placeholder: "Role title (e.g. Senior RTL Engineer)",
+      className: "w-full text-xs border border-gray-200 rounded-md px-2 py-1 bg-white"
+    }
+  ), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: newRole.level,
+      onChange: (e) => setNewRole((r) => ({ ...r, level: e.target.value })),
+      className: "text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white",
+      title: "Level"
+    },
+    ALL_DISPLAY_LEVELS.map((l) => /* @__PURE__ */ React.createElement("option", { key: l, value: l }, l))
+  ), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "number",
+      min: "1",
+      max: "20",
+      value: newRole.count,
+      onChange: (e) => setNewRole((r) => ({ ...r, count: e.target.value })),
+      className: "w-12 text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white",
+      title: "How many"
+    }
+  ), /* @__PURE__ */ React.createElement("button", { onClick: addOpenRole, className: "flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-600 text-white px-2 py-1 rounded-md font-medium hover:bg-emerald-700" }, /* @__PURE__ */ React.createElement(Plus, { size: 12 }), "Add")), openRoles.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "space-y-1 max-h-32 overflow-y-auto pt-1 border-t border-gray-100" }, openRoles.map((r) => {
+    const mgr = tree.map[r.managerId];
+    return /* @__PURE__ */ React.createElement("div", { key: r.id, className: "flex items-center gap-1.5 text-[11px] text-gray-600" }, /* @__PURE__ */ React.createElement("span", { className: "inline-block w-1.5 h-1.5 rounded-full border border-emerald-500 shrink-0", style: { borderStyle: "dashed" } }), /* @__PURE__ */ React.createElement("span", { className: "flex-1 min-w-0 truncate" }, r.title, " ", /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, "\xB7 ", r.level, " \xB7 under ", mgr ? `${mgr.first} ${mgr.last}` : "\u2014")), /* @__PURE__ */ React.createElement("button", { onClick: () => setOpenRoles((prev) => prev.filter((x) => x.id !== r.id)), className: "text-gray-300 hover:text-red-500 shrink-0" }, /* @__PURE__ */ React.createElement(X, { size: 11 })));
+  })), openRoles.some((r) => !attachOptions.some((n) => n.id === r.managerId)) && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-amber-600" }, "Some open roles sit under a manager not shown at this depth \u2014 increase \u201CLevels deep\u201D or change the root to see them.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Slide title"), /* @__PURE__ */ React.createElement(
     "input",
     {
       value: titleText,
@@ -3220,7 +3340,7 @@ function OrgSlideView() {
     /* @__PURE__ */ React.createElement(FileText, { size: 13 }),
     "Download PowerPoint",
     perTeam && rootNode.children && rootNode.children.length ? ` (${rootNode.children.length + 1} slides)` : ""
-  ), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 text-center" }, "PNG = paste into any deck \xB7 PPTX = fully editable shapes"))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-auto bg-slate-100 p-6" }, layout.truncated && /* @__PURE__ */ React.createElement("div", { className: "mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" }, "This slice is large (", layout.count, "+ boxes). Reduce \u201CLevels deep\u201D, pick a lower manager as the top of the box, or use \u201Cone slide per team\u201D to keep each slide readable."), /* @__PURE__ */ React.createElement("div", { className: "mx-auto bg-white rounded-lg shadow-xl overflow-hidden", style: { maxWidth: 1100 } }, /* @__PURE__ */ React.createElement(OrgSlideSVG, { layout, fields, colorDim, title, subtitle, svgRef, dens })), /* @__PURE__ */ React.createElement("p", { className: "text-center text-[11px] text-gray-400 mt-2" }, "Live preview \xB7 ", layout.count, " ", layout.count === 1 ? "person" : "people", " shown")));
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 text-center" }, "PNG = paste into any deck \xB7 PPTX = fully editable shapes"))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-auto bg-slate-100 p-6" }, layout.truncated && /* @__PURE__ */ React.createElement("div", { className: "mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" }, "This slice is large (", layout.count, "+ boxes). Reduce \u201CLevels deep\u201D, pick a lower manager as the top of the box, or use \u201Cone slide per team\u201D to keep each slide readable."), /* @__PURE__ */ React.createElement("div", { className: "mx-auto bg-white rounded-lg shadow-xl overflow-hidden", style: { maxWidth: 1100 } }, /* @__PURE__ */ React.createElement(OrgSlideSVG, { layout, fields, colorDim, title, subtitle, svgRef, dens })), /* @__PURE__ */ React.createElement("p", { className: "text-center text-[11px] text-gray-400 mt-2" }, "Live preview \xB7 ", layout.count - openCount, " ", layout.count - openCount === 1 ? "person" : "people", " shown", openCount > 0 ? ` \xB7 ${openCount} open position${openCount === 1 ? "" : "s"}` : "")));
 }
 function largestRemainderAlloc(total, weights) {
   const sumW = weights.reduce((s, w) => s + w, 0);
