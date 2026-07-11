@@ -2053,7 +2053,7 @@ const MODES = ["simple", "advanced", "expert"];
 const MODE_LEVEL = { simple: 0, advanced: 1, expert: 2 };
 function atLeast(current, required) { return MODE_LEVEL[current] >= MODE_LEVEL[required]; }
 // Minimum mode required to display each view — used to redirect on mode downgrade
-const VIEW_MIN_MODE = { "org-chart": "simple", "timeline": "advanced", "dashboards": "advanced", "scenarios": "advanced", "headcount": "advanced", "analytics": "advanced", "flight-risk": "advanced", "pipeline": "expert" };
+const VIEW_MIN_MODE = { "org-chart": "simple", "slides": "simple", "timeline": "advanced", "dashboards": "advanced", "scenarios": "advanced", "headcount": "advanced", "analytics": "advanced", "flight-risk": "advanced", "pipeline": "expert" };
 const VIEW_LABEL = { "org-chart": "Org Chart", "timeline": "Timeline", "dashboards": "Dashboards", "scenarios": "Scenarios", "headcount": "Headcount Plan", "analytics": "Analytics", "flight-risk": "Flight Risk", "pipeline": "Product Pipeline" };
 
 const MODE_META = {
@@ -3047,6 +3047,365 @@ function EmployeeImportWizard({ data, onCancel, onConfirm }) {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ─── SLIDE BUILDER — turn a chunk of the org into a presentation slide ───────
+// HRBPs import headcount (Excel/CSV), pick a person as the top of the box, choose
+// how many levels down to show, and export a clean org-chart slide as a PNG (paste
+// into any deck) or a native, editable PowerPoint (.pptx). All layout is computed
+// once (in px) and reused by the on-screen SVG preview, the PNG rasterizer, and the
+// PptxGenJS shape generator so the three always match.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SLIDE_LEVEL_COLORS = {
+  IC1: "#94a3b8", IC2: "#94a3b8", IC3: "#64748b", IC4: "#475569", IC5: "#334155", IC6: "#1e293b",
+  Manager: "#0891b2", Director: "#2563eb", VP: "#7c3aed", SVP: "#9333ea", "C-Suite": "#c026d3",
+};
+function slideNodeColor(node, dim) {
+  if (dim === "department")     return DEPT_COLORS[node.dept]  || "#64748b";
+  if (dim === "business_group") return BG_COLORS[node.bg]      || "#64748b";
+  if (dim === "discipline")     return FN_COLORS[node.fn]      || "#64748b";
+  if (dim === "location")       return LOC_COLORS[node.location] || "#64748b";
+  if (dim === "level")          return SLIDE_LEVEL_COLORS[node.level] || "#64748b";
+  return "#2563eb";
+}
+
+// Tidy top-down tree layout. Shows the root plus `maxDepth` generations of reports.
+// Returns cards (each with px x/y/w/h), parent→child links, and overall bounds.
+// `nodeCap` stops expansion once the slide would get unreadably dense.
+function computeSlideLayout(root, { maxDepth, cardW = 188, cardH = 66, hGap = 22, vGap = 52, nodeCap = 80 }) {
+  const cards = [];
+  let cursorX = 0;
+  let truncated = false;
+
+  function place(node, d) {
+    const card = { node, depth: d, w: cardW, h: cardH, x: 0, y: d * (cardH + vGap), kids: [] };
+    cards.push(card);
+    const canDescend = d < maxDepth && node.children && node.children.length > 0 && cards.length < nodeCap;
+    if (!canDescend) {
+      if (d < maxDepth && node.children && node.children.length > 0) truncated = true;
+      card.x = cursorX;
+      cursorX += cardW + hGap;
+      return card;
+    }
+    node.children.forEach(k => {
+      if (cards.length >= nodeCap) { truncated = true; return; }
+      card.kids.push(place(k, d + 1));
+    });
+    if (card.kids.length === 0) { card.x = cursorX; cursorX += cardW + hGap; }
+    else card.x = (card.kids[0].x + card.kids[card.kids.length - 1].x) / 2;
+    return card;
+  }
+  place(root, 0);
+
+  const minX = Math.min(...cards.map(c => c.x));
+  if (minX !== 0) cards.forEach(c => (c.x -= minX));
+  const width  = Math.max(...cards.map(c => c.x + c.w));
+  const height = Math.max(...cards.map(c => c.y + c.h));
+
+  const links = [];
+  cards.forEach(p => p.kids.forEach(c => {
+    links.push({ px: p.x + p.w / 2, py: p.y + p.h, cx: c.x + c.w / 2, cy: c.y, midY: p.y + p.h + vGap / 2 });
+  }));
+
+  return { cards, links, width, height, count: cards.length, truncated };
+}
+
+function slideCardLines(node, fields) {
+  const meta = [];
+  if (fields.dept  && node.dept)  meta.push(node.dept);
+  if (fields.level && node.level) meta.push(displayLevel(node.level));
+  if (fields.size  && (node._totalReports || 0) > 0) meta.push(`${node._totalReports} in org`);
+  return {
+    name: `${node.first || ""} ${node.last || ""}`.trim() || node.id || "—",
+    title: fields.title ? (node.title || "") : "",
+    meta: meta.join(" · "),
+  };
+}
+
+function truncateToWidth(s, px, fontPx) {
+  const max = Math.max(3, Math.floor(px / (fontPx * 0.56)));
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+// ─── The slide as an <svg>. Also the exact thing the PNG exporter serializes. ───
+function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef }) {
+  const PAD = 28, TITLE_H = title ? 74 : 24;
+  const W = Math.max(960, layout.width + PAD * 2);
+  const H = layout.height + PAD * 2 + TITLE_H;
+  const ox = (W - layout.width) / 2;
+  const oy = PAD + TITLE_H;
+
+  return (
+    <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width={W} height={H} xmlns="http://www.w3.org/2000/svg"
+      style={{ width: "100%", height: "auto", background: "#ffffff", fontFamily: "'DM Sans', Arial, sans-serif" }}>
+      <rect x="0" y="0" width={W} height={H} fill="#ffffff" />
+      {title && <>
+        <rect x="0" y="0" width={W} height="6" fill="#2563eb" />
+        <text x={PAD} y="46" fontSize="26" fontWeight="700" fill="#0f172a">{truncateToWidth(title, W - PAD * 2, 26)}</text>
+        {subtitle && <text x={PAD} y="66" fontSize="13" fill="#64748b">{truncateToWidth(subtitle, W - PAD * 2, 13)}</text>}
+      </>}
+      {/* connectors */}
+      <g stroke="#cbd5e1" strokeWidth="1.5" fill="none">
+        {layout.links.map((l, i) => (
+          <path key={i} d={`M ${ox + l.px} ${oy + l.py} L ${ox + l.px} ${oy + l.midY} L ${ox + l.cx} ${oy + l.midY} L ${ox + l.cx} ${oy + l.cy}`} />
+        ))}
+      </g>
+      {/* cards */}
+      {layout.cards.map((c, i) => {
+        const color = slideNodeColor(c.node, colorDim);
+        const x = ox + c.x, y = oy + c.y;
+        const L = slideCardLines(c.node, fields);
+        const innerW = c.w - 20;
+        return (
+          <g key={i}>
+            <rect x={x} y={y} width={c.w} height={c.h} rx="9" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1.5" />
+            <rect x={x} y={y} width="6" height={c.h} rx="3" fill={color} />
+            <rect x={x} y={y} width="6" height={c.h * 0.5} fill={color} />
+            <text x={x + 16} y={y + 22} fontSize="14" fontWeight="700" fill="#0f172a">{truncateToWidth(L.name, innerW, 14)}</text>
+            {L.title && <text x={x + 16} y={y + 39} fontSize="11" fill="#475569">{truncateToWidth(L.title, innerW, 11)}</text>}
+            {L.meta && <text x={x + 16} y={y + (L.title ? 56 : 42)} fontSize="10" fill="#94a3b8">{truncateToWidth(L.meta, innerW, 10)}</text>}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// Serialize the live SVG node to a high-res PNG blob and download it.
+function exportSlidePNG(svgEl, filename, scale = 2) {
+  if (!svgEl) { alert("Nothing to export yet."); return; }
+  const w = parseFloat(svgEl.getAttribute("width")) || svgEl.viewBox.baseVal.width;
+  const h = parseFloat(svgEl.getAttribute("height")) || svgEl.viewBox.baseVal.height;
+  const xml = new XMLSerializer().serializeToString(svgEl);
+  const svg64 = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (!blob) { alert("Could not render PNG."); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, "image/png");
+  };
+  img.onerror = () => alert("Could not rasterize the slide.");
+  img.src = svg64;
+}
+
+// Build a native, editable .pptx from one or more slide models via PptxGenJS.
+// Each card becomes a real rounded-rectangle text box and each connector a real
+// line, so HRBPs can nudge, recolor, or retype anything in PowerPoint afterward.
+function exportSlidePPTX(slideModels, { deckName, footer }) {
+  const Ctor = window.PptxGenJS;
+  if (!Ctor) { alert("PowerPoint library not loaded — reload the page and try again."); return; }
+  const pptx = new Ctor();
+  pptx.layout = "LAYOUT_WIDE"; // 13.333 × 7.5 in
+  const SW = 13.333, SH = 7.5;
+  const hex = c => (c || "#64748b").replace("#", "");
+
+  slideModels.forEach(model => {
+    const { layout, fields, colorDim, title, subtitle } = model;
+    const slide = pptx.addSlide();
+    slide.background = { color: "FFFFFF" };
+    slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: SW, h: 0.09, fill: { color: "2563EB" } });
+    if (title)    slide.addText(title,    { x: 0.45, y: 0.28, w: SW - 0.9, h: 0.5,  fontSize: 24, bold: true, color: "0F172A", fontFace: "Arial" });
+    if (subtitle) slide.addText(subtitle, { x: 0.45, y: 0.78, w: SW - 0.9, h: 0.3,  fontSize: 12, color: "64748B", fontFace: "Arial" });
+
+    const topPad = title ? 1.25 : 0.5, botPad = footer ? 0.55 : 0.35, sidePad = 0.45;
+    const scale = Math.min((SW - sidePad * 2) / layout.width, (SH - topPad - botPad) / layout.height);
+    const ox = (SW - layout.width * scale) / 2;
+    const oy = topPad;
+    const X = px => ox + px * scale;
+    const Y = px => oy + px * scale;
+
+    // connectors first (behind cards)
+    layout.links.forEach(l => {
+      const seg = (x1, y1, x2, y2) => slide.addShape(pptx.ShapeType.line, {
+        x: X(Math.min(x1, x2)), y: Y(Math.min(y1, y2)), w: X(Math.max(x1, x2)) - X(Math.min(x1, x2)), h: Y(Math.max(y1, y2)) - Y(Math.min(y1, y2)),
+        line: { color: "CBD5E1", width: 1 },
+      });
+      seg(l.px, l.py, l.px, l.midY);
+      seg(l.px, l.midY, l.cx, l.midY);
+      seg(l.cx, l.midY, l.cx, l.cy);
+    });
+
+    layout.cards.forEach(c => {
+      const color = hex(slideNodeColor(c.node, colorDim));
+      const L = slideCardLines(c.node, fields);
+      const x = X(c.x), y = Y(c.y), w = c.w * scale, h = c.h * scale;
+      const nameSz = Math.max(8, Math.min(15, Math.round(h * 72 * 0.24)));
+      const runs = [{ text: L.name, options: { bold: true, fontSize: nameSz, color: "0F172A", breakLine: true } }];
+      if (L.title) runs.push({ text: L.title, options: { fontSize: Math.max(7, nameSz - 3), color: "475569", breakLine: true } });
+      if (L.meta)  runs.push({ text: L.meta,  options: { fontSize: Math.max(6, nameSz - 4), color: "94A3B8", breakLine: true } });
+      slide.addText(runs, {
+        shape: pptx.ShapeType.roundRect, rectRadius: 0.05,
+        x, y, w, h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", width: 1 },
+        align: "left", valign: "top", margin: [3, 5, 3, 11], fontFace: "Arial",
+      });
+      slide.addShape(pptx.ShapeType.rect, { x, y, w: 0.06, h, fill: { color } });
+    });
+
+    if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: "94A3B8", fontFace: "Arial" });
+  });
+
+  pptx.writeFile({ fileName: deckName }).catch(err => alert("Could not write PowerPoint: " + (err?.message || err)));
+}
+
+// The Slide Builder view.
+function OrgSlideView() {
+  const { tree, activeEmployees, focusRoot, scenarioName } = useContext(AppCtx);
+  const svgRef = useRef(null);
+
+  // People who can head a slide (anyone in the tree). Default to the focused subtree
+  // root, else the org root. Managers first so the useful anchors are easy to find.
+  const people = useMemo(() => {
+    const list = Object.values(tree.map || {});
+    return list.sort((a, b) => (b._totalReports || 0) - (a._totalReports || 0) || `${a.first} ${a.last}`.localeCompare(`${b.first} ${b.last}`));
+  }, [tree]);
+
+  const [rootId, setRootId]   = useState(() => focusRoot && tree.map[focusRoot] ? focusRoot : (tree.root ? tree.root.id : (people[0] && people[0].id)));
+  const [maxDepth, setMaxDepth] = useState(2);
+  const [colorDim, setColorDim] = useState("department");
+  const [fields, setFields]     = useState({ title: true, dept: true, level: true, size: true });
+  const [perTeam, setPerTeam]   = useState(false);
+  const [search, setSearch]     = useState("");
+  const [titleText, setTitleText] = useState("");
+
+  useEffect(() => {
+    if (!tree.map[rootId]) setRootId(tree.root ? tree.root.id : (people[0] && people[0].id));
+  }, [tree]);
+
+  const rootNode = tree.map[rootId] || tree.root;
+  const layout = useMemo(() => rootNode ? computeSlideLayout(rootNode, { maxDepth }) : null, [rootNode, maxDepth]);
+
+  const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "’" : "’s"} organization` : "Org chart";
+  const title = titleText.trim() || autoTitle;
+  const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  ·  ${(rootNode._totalReports || 0)} people in org  ·  ${scenarioName || "Base"} scenario` : "";
+  const footer = `${scenarioName || "Base"} scenario  ·  ${new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}`;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const base = q ? people.filter(p => `${p.first} ${p.last} ${p.title} ${p.dept}`.toLowerCase().includes(q)) : people;
+    return base.slice(0, 200);
+  }, [people, search]);
+
+  // Build the list of slide models for a multi-slide (.pptx) export.
+  function buildDeckModels() {
+    const mk = (node, mDepth, ttl, sub) => ({
+      layout: computeSlideLayout(node, { maxDepth: mDepth }),
+      fields, colorDim, title: ttl, subtitle: sub,
+    });
+    if (!perTeam || !rootNode.children || rootNode.children.length === 0) {
+      return [mk(rootNode, maxDepth, title, subtitle)];
+    }
+    // Overview slide (root + direct reports) then one slide per report that manages people.
+    const models = [mk(rootNode, 1, title, `Leadership overview  ·  ${rootNode.children.length} direct reports`)];
+    rootNode.children.forEach(child => {
+      const heads = (child.children && child.children.length > 0);
+      models.push(mk(child, heads ? maxDepth : 1,
+        `${child.first} ${child.last}${/s$/i.test(child.last || "") ? "’" : "’s"} team`,
+        `${child.title || displayLevel(child.level)}  ·  ${(child._totalReports || 0)} in org`));
+    });
+    return models;
+  }
+
+  const safeName = (title || "org-slide").replace(/[^\w\- ]+/g, "").replace(/\s+/g, "-").slice(0, 60) || "org-slide";
+
+  if (!rootNode || !layout) return <div className="p-8 text-gray-500">No org data loaded yet. Import a headcount file to begin.</div>;
+
+  return (
+    <div className="h-full flex overflow-hidden" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+      {/* Controls */}
+      <div className="w-72 shrink-0 border-r border-gray-100 bg-gray-50 overflow-y-auto p-4 space-y-4">
+        <div>
+          <h2 className="text-sm font-bold text-gray-900">Slide builder</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Turn any slice of the org into a clean slide. Export a PNG to paste anywhere, or an editable PowerPoint.</p>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Top of the box</label>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search person…"
+            className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 mb-1 bg-white" />
+          <select value={rootId} onChange={e => setRootId(e.target.value)} size="8"
+            className="w-full text-xs border border-gray-200 rounded-lg px-1 py-1 bg-white">
+            {filtered.map(p => (
+              <option key={p.id} value={p.id}>{p.first} {p.last} — {p.title || displayLevel(p.level)} ({p._totalReports || 0})</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Levels deep: {maxDepth}</label>
+          <input type="range" min="1" max="4" value={maxDepth} onChange={e => setMaxDepth(parseInt(e.target.value, 10))} className="w-full" />
+          <div className="flex justify-between text-[10px] text-gray-400"><span>Direct reports</span><span>4 levels</span></div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Color cards by</label>
+          <select value={colorDim} onChange={e => setColorDim(e.target.value)} className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+            <option value="department">Department</option>
+            <option value="business_group">Business Unit</option>
+            <option value="discipline">Discipline</option>
+            <option value="location">Location</option>
+            <option value="level">Level</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1.5">Show on each card</label>
+          <div className="space-y-1">
+            {[["title", "Job title"], ["dept", "Department"], ["level", "Level"], ["size", "Team size"]].map(([k, l]) => (
+              <label key={k} className="flex items-center gap-2 text-xs text-gray-700">
+                <input type="checkbox" checked={fields[k]} onChange={e => setFields(f => ({ ...f, [k]: e.target.checked }))} />{l}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Slide title</label>
+          <input value={titleText} onChange={e => setTitleText(e.target.value)} placeholder={autoTitle}
+            className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white" />
+        </div>
+
+        <label className="flex items-start gap-2 text-xs text-gray-700 bg-white border border-gray-200 rounded-lg p-2">
+          <input type="checkbox" checked={perTeam} onChange={e => setPerTeam(e.target.checked)} className="mt-0.5" />
+          <span><span className="font-medium">Break into one slide per team</span><br/><span className="text-gray-400">Overview slide + a slide for each direct report’s org (multi-slide .pptx).</span></span>
+        </label>
+
+        <div className="pt-2 border-t border-gray-200 space-y-2">
+          <button onClick={() => exportSlidePNG(svgRef.current, `${safeName}.png`)}
+            className="w-full flex items-center justify-center gap-1.5 text-xs bg-blue-600 text-white px-3 py-2 rounded-lg font-medium hover:bg-blue-700">
+            <Download size={13}/>Download PNG
+          </button>
+          <button onClick={() => exportSlidePPTX(buildDeckModels(), { deckName: `${safeName}.pptx`, footer })}
+            className="w-full flex items-center justify-center gap-1.5 text-xs bg-amber-500 text-white px-3 py-2 rounded-lg font-medium hover:bg-amber-600">
+            <FileText size={13}/>Download PowerPoint{perTeam && rootNode.children && rootNode.children.length ? ` (${rootNode.children.length + 1} slides)` : ""}
+          </button>
+          <p className="text-[10px] text-gray-400 text-center">PNG = paste into any deck · PPTX = fully editable shapes</p>
+        </div>
+      </div>
+
+      {/* Preview */}
+      <div className="flex-1 overflow-auto bg-slate-100 p-6">
+        {layout.truncated && (
+          <div className="mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            This slice is large ({layout.count}+ boxes). Reduce “Levels deep”, pick a lower manager as the top of the box, or use “one slide per team” to keep each slide readable.
+          </div>
+        )}
+        <div className="mx-auto bg-white rounded-lg shadow-xl overflow-hidden" style={{ maxWidth: 1100 }}>
+          <OrgSlideSVG layout={layout} fields={fields} colorDim={colorDim} title={title} subtitle={subtitle} svgRef={svgRef} />
+        </div>
+        <p className="text-center text-[11px] text-gray-400 mt-2">Live preview · {layout.count} {layout.count === 1 ? "person" : "people"} shown</p>
       </div>
     </div>
   );
@@ -10931,9 +11290,36 @@ function OrgChartApp() {
   // export → tweak in Excel → re-import. Required columns: id, first, last, level, dept, managerId.
   // Unknown manager refs are reset to root and reporting cycles are broken so the org always
   // forms a valid forest. Replaces the current employees array (push to undo stack first).
-  // Read a CSV and open the guided import dialog (column mapping + replace/append + preview).
+  // Read a CSV or Excel (.xlsx/.xls) file and open the guided import dialog
+  // (column mapping + replace/append + preview). Excel is parsed with SheetJS
+  // (window.XLSX, loaded via CDN); its first worksheet is flattened to the same
+  // rows-of-strings shape parseCSV produces, so everything downstream is shared.
   function openImportWizard(file) {
+    const name = (file.name || "").toLowerCase();
+    const isExcel = /\.(xlsx|xlsm|xlsb|xls)$/.test(name);
     const reader = new FileReader();
+
+    if (isExcel) {
+      reader.onload = ev => {
+        try {
+          const XLSX = window.XLSX;
+          if (!XLSX) throw new Error("Excel library not loaded — reload the page and try again.");
+          const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
+          const firstSheet = wb.SheetNames[0];
+          if (!firstSheet) throw new Error("The workbook has no sheets");
+          // header:1 → array-of-arrays; defval:"" keeps blank cells; raw:false → formatted strings (dates, etc.)
+          const aoa = XLSX.utils.sheet_to_json(wb.Sheets[firstSheet], { header: 1, defval: "", raw: false, blankrows: false });
+          const rows = aoa.map(r => r.map(c => (c == null ? "" : String(c)))).filter(r => r.some(c => c.trim() !== ""));
+          if (rows.length < 2) throw new Error("The first sheet has no data rows");
+          const header = rows[0].map(c => (c || "").trim());
+          const sheetNote = wb.SheetNames.length > 1 ? ` (sheet “${firstSheet}” of ${wb.SheetNames.length})` : "";
+          setImportState({ fileName: (file.name || "import.xlsx") + sheetNote, header, rows: rows.slice(1) });
+        } catch (err) { alert("Could not read Excel file: " + err.message); }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+
     reader.onload = ev => {
       try {
         const rows = parseCSV(String(ev.target.result || ""));
@@ -11210,6 +11596,7 @@ function OrgChartApp() {
           <nav className="flex-1 p-2 space-y-1">
             {[
               { id: "org-chart",    label: "Org Chart",   icon: Layers,        minMode: "simple"   },
+              { id: "slides",       label: "Slides",      icon: FileText,      minMode: "simple"   },
               { id: "timeline",     label: "Timeline",    icon: Clock,         minMode: "advanced" },
               { id: "dashboards",   label: "Dashboards",  icon: BarChart3,     minMode: "advanced" },
               { id: "scenarios",    label: "Scenarios",   icon: Target,        minMode: "advanced" },
@@ -11418,10 +11805,10 @@ function OrgChartApp() {
                 className="flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors"
               ><Download size={12}/>CSV</button>
               <label
-                title="Import employees from a CSV. Opens a guided dialog: auto-detects your columns (and lets you remap any), choose replace or append, download a starter template, and preview before importing. Ctrl+Z to undo."
+                title="Import employees from Excel (.xlsx) or CSV. Opens a guided dialog: auto-detects your columns (and lets you remap any), choose replace or append, download a starter template, and preview before importing. Ctrl+Z to undo."
                 className="flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors cursor-pointer">
                 <Plus size={12}/>Import
-                <input type="file" accept=".csv,text/csv" className="hidden"
+                <input type="file" accept=".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) openImportWizard(f); e.target.value = ""; }}/>
               </label>
               {atLeast(mode, "advanced") && <button
@@ -11588,6 +11975,7 @@ function OrgChartApp() {
                 {orgViewMode === "city" && <CityOrgView/>}
               </div>
             )}
+            {view === "slides"      && <OrgSlideView/>}
             {view === "timeline"    && <TimelineView/>}
             {view === "dashboards"  && <DashboardView/>}
             {view === "scenarios"   && <ScenarioView/>}
