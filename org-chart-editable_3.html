@@ -2851,6 +2851,43 @@ const SLIDE_DENSITY = {
   tight: { key: "tight", label: "Tight", cardW: 118, cardH: 38, hGap: 10, vGap: 30, nameSz: 10, subSz: 8, metaSz: 7.5, lines: 2 },
   micro: { key: "micro", label: "Micro", cardW: 92, cardH: 26, hGap: 7, vGap: 24, nameSz: 8.5, subSz: 7, metaSz: 6.5, lines: 1 }
 };
+const STICKY_NOTE_COLORS = {
+  yellow: { bg: "#fef9c3", border: "#facc15", text: "#713f12" },
+  blue: { bg: "#dbeafe", border: "#60a5fa", text: "#1e3a8a" },
+  green: { bg: "#dcfce7", border: "#4ade80", text: "#14532d" },
+  pink: { bg: "#fce7f3", border: "#f472b6", text: "#831843" }
+};
+const NOTE_W = 172, NOTE_FONT = 13, NOTE_LINE = 16, NOTE_PAD = 11;
+function wrapNoteText(text, maxChars) {
+  const out = [];
+  (text || "").split(/\n/).forEach((para) => {
+    let cur = "";
+    para.split(/\s+/).forEach((w) => {
+      while (w.length > maxChars) {
+        if (cur) {
+          out.push(cur);
+          cur = "";
+        }
+        out.push(w.slice(0, maxChars));
+        w = w.slice(maxChars);
+      }
+      if (!cur) cur = w;
+      else if ((cur + " " + w).length <= maxChars) cur += " " + w;
+      else {
+        out.push(cur);
+        cur = w;
+      }
+    });
+    out.push(cur);
+  });
+  return out.length ? out : [""];
+}
+function noteLines(text) {
+  return wrapNoteText(text, Math.floor((NOTE_W - NOTE_PAD * 2) / (NOTE_FONT * 0.52)));
+}
+function noteHeight(text) {
+  return NOTE_PAD * 2 + noteLines(text).length * NOTE_LINE;
+}
 function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, wrap = false, wrapCols = "auto", nodeCap = 200, openByManager = {} }) {
   const { cardW, cardH, hGap, vGap } = dens;
   const rowGap = Math.max(8, Math.round(vGap * 0.32));
@@ -2970,7 +3007,7 @@ function slideCardTextLines(node, fields, dens) {
   if (L.meta) lines.push({ text: L.meta, size: dens.metaSz, weight: 400, fill: "#94a3b8" });
   return lines.slice(0, dens.lines);
 }
-function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable }) {
+function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable, notes = [], onMoveNote, onSelectNote, selectedNoteId }) {
   const PAD = 28, TITLE_H = title ? 74 : 24;
   const W = Math.max(760, layout.width + PAD * 2);
   const H = layout.height + PAD * 2 + TITLE_H;
@@ -2979,6 +3016,34 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
   const stripe = Math.max(4, Math.round(dens.cardW * 0.032));
   const padL = Math.max(stripe + 4, Math.round(dens.cardW * 0.07));
   const rx = Math.min(9, Math.round(dens.cardH * 0.18));
+  const dragRef = useRef(null);
+  const clientToSvg = (cx, cy) => {
+    const svg = svgRef.current;
+    if (!svg || !svg.getScreenCTM) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint();
+    pt.x = cx;
+    pt.y = cy;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return { x: p.x, y: p.y };
+  };
+  const onNoteDown = (e, note) => {
+    var _a, _b;
+    e.stopPropagation();
+    const p = clientToSvg(e.clientX, e.clientY);
+    dragRef.current = { id: note.id, dx: p.x - note.fx * W, dy: p.y - note.fy * H };
+    (_b = (_a = e.currentTarget).setPointerCapture) == null ? void 0 : _b.call(_a, e.pointerId);
+    onSelectNote && onSelectNote(note.id);
+  };
+  const onNoteMove = (e) => {
+    if (!dragRef.current || !onMoveNote) return;
+    const p = clientToSvg(e.clientX, e.clientY);
+    const fx = Math.max(0, Math.min(0.985, (p.x - dragRef.current.dx) / W));
+    const fy = Math.max(0, Math.min(0.985, (p.y - dragRef.current.dy) / H));
+    onMoveNote(dragRef.current.id, fx, fy);
+  };
+  const onNoteUp = () => {
+    dragRef.current = null;
+  };
   return /* @__PURE__ */ React.createElement(
     "svg",
     {
@@ -3023,6 +3088,25 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
         ty += 3;
         return el;
       }));
+    }),
+    notes.map((n) => {
+      const pal = STICKY_NOTE_COLORS[n.color] || STICKY_NOTE_COLORS.yellow;
+      const lines = noteLines(n.text);
+      const h = NOTE_PAD * 2 + lines.length * NOTE_LINE;
+      const nx = n.fx * W, ny = n.fy * H;
+      return /* @__PURE__ */ React.createElement(
+        "g",
+        {
+          key: n.id,
+          onPointerDown: (e) => onNoteDown(e, n),
+          onPointerMove: onNoteMove,
+          onPointerUp: onNoteUp,
+          style: { cursor: "move" }
+        },
+        /* @__PURE__ */ React.createElement("rect", { x: nx + 2, y: ny + 3, width: NOTE_W, height: h, rx: "4", fill: "#000000", opacity: "0.06" }),
+        /* @__PURE__ */ React.createElement("rect", { x: nx, y: ny, width: NOTE_W, height: h, rx: "4", fill: pal.bg, stroke: pal.border, strokeWidth: "1" }),
+        lines.map((ln, i) => /* @__PURE__ */ React.createElement("text", { key: i, x: nx + NOTE_PAD, y: ny + NOTE_PAD + (i + 1) * NOTE_LINE - 4, fontSize: NOTE_FONT, fill: pal.text, style: { fontFamily: "'Caveat', 'DM Sans', cursive" }, fontWeight: "600" }, ln))
+      );
     })
   );
 }
@@ -3071,7 +3155,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
   const SW = 13.333, SH = 7.5;
   const hex = (c) => (c || "#64748b").replace("#", "");
   slideModels.forEach((model) => {
-    const { layout, fields, colorDim, title, subtitle, dens = SLIDE_DENSITY.comfortable } = model;
+    const { layout, fields, colorDim, title, subtitle, dens = SLIDE_DENSITY.comfortable, notes = [] } = model;
     const slide = pptx.addSlide();
     slide.background = { color: "FFFFFF" };
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: SW, h: 0.09, fill: { color: "2563EB" } });
@@ -3148,18 +3232,41 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
         slide.addShape(pptx.ShapeType.rect, { x, y, w: stripe * scale, h, fill: { color } });
       }
     });
+    const NOTE_W_IN = 2;
+    notes.forEach((n) => {
+      const pal = STICKY_NOTE_COLORS[n.color] || STICKY_NOTE_COLORS.yellow;
+      const hIn = Math.max(0.45, noteLines(n.text).length * 0.24 + 0.2);
+      const nx = Math.max(0.1, Math.min(SW - NOTE_W_IN - 0.1, n.fx * SW));
+      const ny = Math.max(0.1, Math.min(SH - hIn - 0.1, n.fy * SH));
+      slide.addText(n.text || "", {
+        x: nx,
+        y: ny,
+        w: NOTE_W_IN,
+        h: hIn,
+        shape: pptx.ShapeType.roundRect,
+        rectRadius: 0.04,
+        fill: { color: hex(pal.bg) },
+        line: { color: hex(pal.border), width: 1 },
+        fontSize: 12,
+        color: hex(pal.text),
+        align: "left",
+        valign: "top",
+        margin: 6,
+        fontFace: "Arial"
+      });
+    });
     if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: "94A3B8", fontFace: "Arial" });
   });
   pptx.writeFile({ fileName: deckName }).catch((err) => alert("Could not write PowerPoint: " + ((err == null ? void 0 : err.message) || err)));
 }
 function OrgSlideView() {
-  const { tree, activeEmployees, focusRoot, importEmployeesCSV } = useContext(AppCtx);
+  const { tree, activeEmployees, focusRoot, importEmployeesCSV, slideSeedId, setSlideSeedId } = useContext(AppCtx);
   const svgRef = useRef(null);
   const people = useMemo(() => {
     const list = Object.values(tree.map || {});
     return list.sort((a, b) => (b._totalReports || 0) - (a._totalReports || 0) || `${a.first} ${a.last}`.localeCompare(`${b.first} ${b.last}`));
   }, [tree]);
-  const [rootId, setRootId] = useState(() => focusRoot && tree.map[focusRoot] ? focusRoot : tree.root ? tree.root.id : people[0] && people[0].id);
+  const [rootId, setRootId] = useState(() => slideSeedId && tree.map[slideSeedId] && slideSeedId || (focusRoot && tree.map[focusRoot] ? focusRoot : tree.root ? tree.root.id : people[0] && people[0].id));
   const [maxDepth, setMaxDepth] = useState(2);
   const [colorDim, setColorDim] = useState("department");
   const [fields, setFields] = useState({ title: true, dept: true, level: true, size: true });
@@ -3171,9 +3278,18 @@ function OrgSlideView() {
   const [wrapCols, setWrapCols] = useState("auto");
   const [openRoles, setOpenRoles] = useState([]);
   const [newRole, setNewRole] = useState({ managerId: "", title: "", level: "L4", count: 1 });
+  const [stickyNotes, setStickyNotes] = useState([]);
+  const [selectedNoteId, setSelectedNoteId] = useState(null);
   useEffect(() => {
     if (!tree.map[rootId]) setRootId(tree.root ? tree.root.id : people[0] && people[0].id);
   }, [tree]);
+  useEffect(() => {
+    if (slideSeedId && tree.map[slideSeedId]) {
+      setRootId(slideSeedId);
+      setSearch("");
+      setSlideSeedId(null);
+    }
+  }, [slideSeedId]);
   const dens = SLIDE_DENSITY[density] || SLIDE_DENSITY.comfortable;
   const wrapColsVal = wrapCols === "auto" ? "auto" : parseInt(wrapCols, 10);
   const rootNode = tree.map[rootId] || tree.root;
@@ -3307,6 +3423,15 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
     };
     reader.readAsText(file);
   }
+  function addNote() {
+    const n = stickyNotes.length;
+    const id = `note_${Date.now()}_${Math.round(Math.random() * 1e6)}`;
+    setStickyNotes((prev) => [...prev, { id, text: "New note", color: "yellow", fx: Math.min(0.72, 0.62 + n % 3 * 0.02), fy: Math.min(0.78, 0.12 + n % 6 * 0.05) }]);
+    setSelectedNoteId(id);
+  }
+  const updateNote = (id, patch) => setStickyNotes((prev) => prev.map((n) => n.id === id ? { ...n, ...patch } : n));
+  const moveNote = (id, fx, fy) => setStickyNotes((prev) => prev.map((n) => n.id === id ? { ...n, fx, fy } : n));
+  const removeNote = (id) => setStickyNotes((prev) => prev.filter((n) => n.id !== id));
   function downloadOpeningsTemplate() {
     const mgrs = attachOptions.slice(0, 3);
     const roleEx = ["Senior Engineer", "Product Manager", "Program Manager"];
@@ -3332,25 +3457,27 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
     return base.slice(0, 200);
   }, [people, search]);
   function buildDeckModels() {
-    const mk = (node, mDepth, ttl, sub) => ({
+    const mk = (node, mDepth, ttl, sub, withNotes) => ({
       layout: computeSlideLayout(node, { maxDepth: mDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }),
       fields,
       colorDim,
       dens,
       title: ttl,
-      subtitle: sub
+      subtitle: sub,
+      notes: withNotes ? stickyNotes : []
     });
     if (!perTeam || !rootNode.children || rootNode.children.length === 0) {
-      return [mk(rootNode, maxDepth, title, subtitle)];
+      return [mk(rootNode, maxDepth, title, subtitle, true)];
     }
-    const models = [mk(rootNode, 1, title, `Leadership overview  \xB7  ${rootNode.children.length} direct reports`)];
+    const models = [mk(rootNode, 1, title, `Leadership overview  \xB7  ${rootNode.children.length} direct reports`, true)];
     rootNode.children.forEach((child) => {
       const heads = child.children && child.children.length > 0;
       models.push(mk(
         child,
         heads ? maxDepth : 1,
         `${child.first} ${child.last}${/s$/i.test(child.last || "") ? "\u2019" : "\u2019s"} team`,
-        `${child.title || displayLevel(child.level)}  \xB7  ${child._totalReports || 0} in org`
+        `${child.title || displayLevel(child.level)}  \xB7  ${child._totalReports || 0} in org`,
+        false
       ));
     });
     return models;
@@ -3470,7 +3597,26 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
   ), /* @__PURE__ */ React.createElement("button", { onClick: downloadOpeningsTemplate, className: "text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-1", title: "Download a starter CSV pre-filled with managers from this org" }, /* @__PURE__ */ React.createElement(Download, { size: 11 }), "Template")), openRoles.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "space-y-1 max-h-32 overflow-y-auto pt-1 border-t border-gray-100" }, openRoles.map((r) => {
     const mgr = tree.map[r.managerId];
     return /* @__PURE__ */ React.createElement("div", { key: r.id, className: "flex items-center gap-1.5 text-[11px] text-gray-600" }, /* @__PURE__ */ React.createElement("span", { className: "inline-block w-1.5 h-1.5 rounded-full border border-emerald-500 shrink-0", style: { borderStyle: "dashed" } }), /* @__PURE__ */ React.createElement("span", { className: "flex-1 min-w-0 truncate" }, r.title, " ", /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, "\xB7 ", r.level, " \xB7 under ", mgr ? `${mgr.first} ${mgr.last}` : "\u2014")), /* @__PURE__ */ React.createElement("button", { onClick: () => setOpenRoles((prev) => prev.filter((x) => x.id !== r.id)), className: "text-gray-300 hover:text-red-500 shrink-0" }, /* @__PURE__ */ React.createElement(X, { size: 11 })));
-  })), openRoles.some((r) => !attachOptions.some((n) => n.id === r.managerId)) && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-amber-600" }, "Some open roles sit under a manager not shown at this depth \u2014 increase \u201CLevels deep\u201D or change the root to see them.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Slide title"), /* @__PURE__ */ React.createElement(
+  })), openRoles.some((r) => !attachOptions.some((n) => n.id === r.managerId)) && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-amber-600" }, "Some open roles sit under a manager not shown at this depth \u2014 increase \u201CLevels deep\u201D or change the root to see them.")), /* @__PURE__ */ React.createElement("div", { className: "bg-white border border-gray-200 rounded-lg p-2.5 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide" }, "Sticky notes"), /* @__PURE__ */ React.createElement("button", { onClick: addNote, className: "flex items-center gap-1 text-[11px] text-amber-700 hover:text-amber-900" }, /* @__PURE__ */ React.createElement(Plus, { size: 11 }), "Add note")), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 -mt-1" }, "Callouts on the slide. ", /* @__PURE__ */ React.createElement("b", null, "Drag them on the preview"), " to place. They export to PNG + PowerPoint."), stickyNotes.length === 0 && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-300" }, "No notes yet."), stickyNotes.map((n) => /* @__PURE__ */ React.createElement("div", { key: n.id, className: `rounded-md p-1.5 border ${selectedNoteId === n.id ? "border-blue-300 bg-blue-50/40" : "border-gray-100"}`, onClick: () => setSelectedNoteId(n.id) }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1.5 mb-1" }, Object.keys(STICKY_NOTE_COLORS).map((c) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: c,
+      onClick: () => updateNote(n.id, { color: c }),
+      title: c,
+      className: `w-4 h-4 rounded-full border ${n.color === c ? "ring-2 ring-offset-1 ring-gray-400" : ""}`,
+      style: { background: STICKY_NOTE_COLORS[c].bg, borderColor: STICKY_NOTE_COLORS[c].border }
+    }
+  )), /* @__PURE__ */ React.createElement("button", { onClick: () => removeNote(n.id), className: "ml-auto text-gray-300 hover:text-red-500" }, /* @__PURE__ */ React.createElement(X, { size: 12 }))), /* @__PURE__ */ React.createElement(
+    "textarea",
+    {
+      value: n.text,
+      onChange: (e) => updateNote(n.id, { text: e.target.value }),
+      rows: 2,
+      onFocus: () => setSelectedNoteId(n.id),
+      className: "w-full text-xs border border-gray-200 rounded px-1.5 py-1 bg-white resize-none",
+      placeholder: "Note text\u2026"
+    }
+  )))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Slide title"), /* @__PURE__ */ React.createElement(
     "input",
     {
       value: titleText,
@@ -3495,7 +3641,22 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
     /* @__PURE__ */ React.createElement(FileText, { size: 13 }),
     "Download PowerPoint",
     perTeam && rootNode.children && rootNode.children.length ? ` (${rootNode.children.length + 1} slides)` : ""
-  ), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 text-center" }, "PNG = paste into any deck \xB7 PPTX = fully editable shapes"))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-auto bg-slate-100 p-6" }, layout.truncated && /* @__PURE__ */ React.createElement("div", { className: "mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" }, "This slice is large (", layout.count, "+ boxes). Reduce \u201CLevels deep\u201D, pick a lower manager as the top of the box, or use \u201Cone slide per team\u201D to keep each slide readable."), /* @__PURE__ */ React.createElement("div", { className: "mx-auto bg-white rounded-lg shadow-xl overflow-hidden", style: { maxWidth: 1100 } }, /* @__PURE__ */ React.createElement(OrgSlideSVG, { layout, fields, colorDim, title, subtitle, svgRef, dens })), /* @__PURE__ */ React.createElement("p", { className: "text-center text-[11px] text-gray-400 mt-2" }, "Live preview \xB7 ", layout.count - openCount, " ", layout.count - openCount === 1 ? "person" : "people", " shown", openCount > 0 ? ` \xB7 ${openCount} open position${openCount === 1 ? "" : "s"}` : "")));
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 text-center" }, "PNG = paste into any deck \xB7 PPTX = fully editable shapes"))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-auto bg-slate-100 p-6" }, layout.truncated && /* @__PURE__ */ React.createElement("div", { className: "mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" }, "This slice is large (", layout.count, "+ boxes). Reduce \u201CLevels deep\u201D, pick a lower manager as the top of the box, or use \u201Cone slide per team\u201D to keep each slide readable."), /* @__PURE__ */ React.createElement("div", { className: "mx-auto bg-white rounded-lg shadow-xl overflow-hidden", style: { maxWidth: 1100 } }, /* @__PURE__ */ React.createElement(
+    OrgSlideSVG,
+    {
+      layout,
+      fields,
+      colorDim,
+      title,
+      subtitle,
+      svgRef,
+      dens,
+      notes: stickyNotes,
+      onMoveNote: moveNote,
+      onSelectNote: setSelectedNoteId,
+      selectedNoteId
+    }
+  )), /* @__PURE__ */ React.createElement("p", { className: "text-center text-[11px] text-gray-400 mt-2" }, "Live preview \xB7 ", layout.count - openCount, " ", layout.count - openCount === 1 ? "person" : "people", " shown", openCount > 0 ? ` \xB7 ${openCount} open position${openCount === 1 ? "" : "s"}` : "")));
 }
 function largestRemainderAlloc(total, weights) {
   const sumW = weights.reduce((s, w) => s + w, 0);
@@ -5659,7 +5820,9 @@ function DetailPanel() {
     annotationType,
     setAnnotationType,
     saveAnnotation,
-    removeAnnotation
+    removeAnnotation,
+    setView,
+    setSlideSeedId
   } = useContext(AppCtx);
   if (!node) return null;
   const nodeAnnotations = annotations[node.id] || [];
@@ -5678,7 +5841,11 @@ function DetailPanel() {
     ["Direct Reports", node._directReports],
     ["Total Reports", node._totalReports],
     ["Band", node.band]
-  ].map(([k, v]) => /* @__PURE__ */ React.createElement("div", { key: k, className: "bg-gray-50 rounded-lg p-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-gray-400", style: { fontSize: 10 } }, k), /* @__PURE__ */ React.createElement("div", { className: "font-medium text-gray-700" }, v)))), nodeHotspots.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "mb-4" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold text-red-600 mb-2 flex items-center gap-1" }, /* @__PURE__ */ React.createElement(AlertTriangle, { size: 12 }), "Issues Detected"), nodeHotspots.map((h, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `text-xs p-2 rounded mb-1 ${h.severity === "critical" ? "bg-red-50 text-red-700" : h.severity === "warning" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}` }, h.msg))), /* @__PURE__ */ React.createElement("div", { className: "mb-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold text-gray-600" }, "Notes & Flags"), /* @__PURE__ */ React.createElement("button", { onClick: () => setShowAnnotationForm(node.id), className: "text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors" }, /* @__PURE__ */ React.createElement(Plus, { size: 12 }), "Add")), nodeAnnotations.map((a, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `text-xs p-2 rounded mb-1 flex items-start gap-2 ${a.type === "hotspot" ? "bg-red-50" : a.type === "flag" ? "bg-amber-50" : "bg-blue-50"}` }, /* @__PURE__ */ React.createElement("span", { className: "shrink-0 mt-0.5" }, a.type === "hotspot" ? "\u{1F534}" : a.type === "flag" ? "\u{1F6A9}" : "\u{1F4DD}"), /* @__PURE__ */ React.createElement("div", { className: "flex-1" }, /* @__PURE__ */ React.createElement("div", { className: "text-gray-700" }, a.text), /* @__PURE__ */ React.createElement("div", { className: "text-gray-400 mt-0.5", style: { fontSize: 9 } }, a.time)), /* @__PURE__ */ React.createElement("button", { onClick: () => removeAnnotation(node.id, i), className: "text-gray-400 hover:text-red-500 transition-colors" }, /* @__PURE__ */ React.createElement(X, { size: 10 })))), showAnnotationForm === node.id && /* @__PURE__ */ React.createElement("div", { className: "mt-2 p-2 bg-gray-50 rounded-lg" }, /* @__PURE__ */ React.createElement("div", { className: "flex gap-1 mb-2" }, [["note", "\u{1F4DD} Note"], ["flag", "\u{1F6A9} Flag"], ["hotspot", "\u{1F534} Hotspot"]].map(([t, l]) => /* @__PURE__ */ React.createElement("button", { key: t, onClick: () => setAnnotationType(t), className: `text-xs px-2 py-1 rounded transition-colors ${annotationType === t ? "bg-blue-600 text-white" : "bg-white text-gray-600 border"}` }, l))), /* @__PURE__ */ React.createElement("textarea", { value: annotationText, onChange: (e) => setAnnotationText(e.target.value), placeholder: "Enter note...", className: "w-full text-xs border rounded p-2 mb-2", rows: 2 }), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1" }, /* @__PURE__ */ React.createElement("button", { onClick: () => saveAnnotation(node.id), className: "text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition-colors" }, "Save"), /* @__PURE__ */ React.createElement("button", { onClick: () => setShowAnnotationForm(null), className: "text-xs bg-gray-200 text-gray-600 px-3 py-1 rounded hover:bg-gray-300 transition-colors" }, "Cancel")))), /* @__PURE__ */ React.createElement("div", { className: "border-t pt-3" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold text-gray-600 mb-2" }, "Actions"), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1" }, /* @__PURE__ */ React.createElement("button", { onClick: () => focusSubtree(node.id), className: "text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors flex items-center gap-1" }, /* @__PURE__ */ React.createElement(Eye, { size: 10 }), "Focus Subtree"), atLeast(mode, "advanced") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: () => focusChain(node.id), className: "text-xs bg-violet-50 text-violet-700 border border-violet-200 px-3 py-1.5 rounded hover:bg-violet-100 transition-colors flex items-center gap-1" }, /* @__PURE__ */ React.createElement(GitMerge, { size: 10 }), "Full Chain"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
+  ].map(([k, v]) => /* @__PURE__ */ React.createElement("div", { key: k, className: "bg-gray-50 rounded-lg p-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-gray-400", style: { fontSize: 10 } }, k), /* @__PURE__ */ React.createElement("div", { className: "font-medium text-gray-700" }, v)))), nodeHotspots.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "mb-4" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold text-red-600 mb-2 flex items-center gap-1" }, /* @__PURE__ */ React.createElement(AlertTriangle, { size: 12 }), "Issues Detected"), nodeHotspots.map((h, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `text-xs p-2 rounded mb-1 ${h.severity === "critical" ? "bg-red-50 text-red-700" : h.severity === "warning" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}` }, h.msg))), /* @__PURE__ */ React.createElement("div", { className: "mb-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold text-gray-600" }, "Notes & Flags"), /* @__PURE__ */ React.createElement("button", { onClick: () => setShowAnnotationForm(node.id), className: "text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors" }, /* @__PURE__ */ React.createElement(Plus, { size: 12 }), "Add")), nodeAnnotations.map((a, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `text-xs p-2 rounded mb-1 flex items-start gap-2 ${a.type === "hotspot" ? "bg-red-50" : a.type === "flag" ? "bg-amber-50" : "bg-blue-50"}` }, /* @__PURE__ */ React.createElement("span", { className: "shrink-0 mt-0.5" }, a.type === "hotspot" ? "\u{1F534}" : a.type === "flag" ? "\u{1F6A9}" : "\u{1F4DD}"), /* @__PURE__ */ React.createElement("div", { className: "flex-1" }, /* @__PURE__ */ React.createElement("div", { className: "text-gray-700" }, a.text), /* @__PURE__ */ React.createElement("div", { className: "text-gray-400 mt-0.5", style: { fontSize: 9 } }, a.time)), /* @__PURE__ */ React.createElement("button", { onClick: () => removeAnnotation(node.id, i), className: "text-gray-400 hover:text-red-500 transition-colors" }, /* @__PURE__ */ React.createElement(X, { size: 10 })))), showAnnotationForm === node.id && /* @__PURE__ */ React.createElement("div", { className: "mt-2 p-2 bg-gray-50 rounded-lg" }, /* @__PURE__ */ React.createElement("div", { className: "flex gap-1 mb-2" }, [["note", "\u{1F4DD} Note"], ["flag", "\u{1F6A9} Flag"], ["hotspot", "\u{1F534} Hotspot"]].map(([t, l]) => /* @__PURE__ */ React.createElement("button", { key: t, onClick: () => setAnnotationType(t), className: `text-xs px-2 py-1 rounded transition-colors ${annotationType === t ? "bg-blue-600 text-white" : "bg-white text-gray-600 border"}` }, l))), /* @__PURE__ */ React.createElement("textarea", { value: annotationText, onChange: (e) => setAnnotationText(e.target.value), placeholder: "Enter note...", className: "w-full text-xs border rounded p-2 mb-2", rows: 2 }), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1" }, /* @__PURE__ */ React.createElement("button", { onClick: () => saveAnnotation(node.id), className: "text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition-colors" }, "Save"), /* @__PURE__ */ React.createElement("button", { onClick: () => setShowAnnotationForm(null), className: "text-xs bg-gray-200 text-gray-600 px-3 py-1 rounded hover:bg-gray-300 transition-colors" }, "Cancel")))), /* @__PURE__ */ React.createElement("div", { className: "border-t pt-3" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold text-gray-600 mb-2" }, "Actions"), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1" }, /* @__PURE__ */ React.createElement("button", { onClick: () => {
+    setSlideSeedId(node.id);
+    setView("slides");
+    setDetailPanel(null);
+  }, title: "Open the Slide builder with this person at the top of the box", className: "text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 transition-colors flex items-center gap-1" }, /* @__PURE__ */ React.createElement(FileText, { size: 10 }), "Make slide"), /* @__PURE__ */ React.createElement("button", { onClick: () => focusSubtree(node.id), className: "text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors flex items-center gap-1" }, /* @__PURE__ */ React.createElement(Eye, { size: 10 }), "Focus Subtree"), atLeast(mode, "advanced") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: () => focusChain(node.id), className: "text-xs bg-violet-50 text-violet-700 border border-violet-200 px-3 py-1.5 rounded hover:bg-violet-100 transition-colors flex items-center gap-1" }, /* @__PURE__ */ React.createElement(GitMerge, { size: 10 }), "Full Chain"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
     setExitSimNode(node);
     setDetailPanel(null);
   }, className: "text-xs bg-red-50 text-red-700 border border-red-200 px-3 py-1.5 rounded hover:bg-red-100 transition-colors flex items-center gap-1" }, /* @__PURE__ */ React.createElement(AlertOctagon, { size: 10 }), "Simulate Exit"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
@@ -9733,6 +9900,7 @@ function OrgChartApp() {
   const [view, setView] = useState("org-chart");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNode, setSelectedNode] = useState(null);
+  const [slideSeedId, setSlideSeedId] = useState(null);
   const [expandedNodes, setExpandedNodes] = useState(/* @__PURE__ */ new Set());
   const [annotations, setAnnotations] = useState(() => {
     const initTree = buildTree(employees);
@@ -10937,6 +11105,8 @@ function OrgChartApp() {
     setSelectedNode,
     expandedNodes,
     setExpandedNodes,
+    slideSeedId,
+    setSlideSeedId,
     annotations,
     setAnnotations,
     showAnnotationForm,

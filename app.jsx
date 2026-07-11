@@ -3100,6 +3100,33 @@ const SLIDE_DENSITY = {
   micro:       { key: "micro",       label: "Micro",       cardW: 92,  cardH: 26, hGap: 7,  vGap: 24, nameSz: 8.5, subSz: 7, metaSz: 6.5, lines: 1 },
 };
 
+// Sticky-note palette (bg / border / text) for slide callouts.
+const STICKY_NOTE_COLORS = {
+  yellow: { bg: "#fef9c3", border: "#facc15", text: "#713f12" },
+  blue:   { bg: "#dbeafe", border: "#60a5fa", text: "#1e3a8a" },
+  green:  { bg: "#dcfce7", border: "#4ade80", text: "#14532d" },
+  pink:   { bg: "#fce7f3", border: "#f472b6", text: "#831843" },
+};
+const NOTE_W = 172, NOTE_FONT = 13, NOTE_LINE = 16, NOTE_PAD = 11;
+
+// Greedy word-wrap into lines that fit `maxChars`; also hard-breaks over-long words.
+function wrapNoteText(text, maxChars) {
+  const out = [];
+  (text || "").split(/\n/).forEach(para => {
+    let cur = "";
+    para.split(/\s+/).forEach(w => {
+      while (w.length > maxChars) { if (cur) { out.push(cur); cur = ""; } out.push(w.slice(0, maxChars)); w = w.slice(maxChars); }
+      if (!cur) cur = w;
+      else if ((cur + " " + w).length <= maxChars) cur += " " + w;
+      else { out.push(cur); cur = w; }
+    });
+    out.push(cur);
+  });
+  return out.length ? out : [""];
+}
+function noteLines(text) { return wrapNoteText(text, Math.floor((NOTE_W - NOTE_PAD * 2) / (NOTE_FONT * 0.52))); }
+function noteHeight(text) { return NOTE_PAD * 2 + noteLines(text).length * NOTE_LINE; }
+
 // Tidy top-down tree layout. Shows the root plus `maxDepth` generations of reports.
 // Two compression levers:
 //   • `dens` — card/gap sizing (see SLIDE_DENSITY).
@@ -3221,7 +3248,7 @@ function slideCardTextLines(node, fields, dens) {
 }
 
 // ─── The slide as an <svg>. Also the exact thing the PNG exporter serializes. ───
-function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable }) {
+function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable, notes = [], onMoveNote, onSelectNote, selectedNoteId }) {
   const PAD = 28, TITLE_H = title ? 74 : 24;
   const W = Math.max(760, layout.width + PAD * 2);
   const H = layout.height + PAD * 2 + TITLE_H;
@@ -3230,6 +3257,30 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
   const stripe = Math.max(4, Math.round(dens.cardW * 0.032));
   const padL = Math.max(stripe + 4, Math.round(dens.cardW * 0.07));
   const rx = Math.min(9, Math.round(dens.cardH * 0.18));
+
+  // Drag sticky notes directly on the canvas (client px → SVG user units via CTM).
+  const dragRef = useRef(null);
+  const clientToSvg = (cx, cy) => {
+    const svg = svgRef.current; if (!svg || !svg.getScreenCTM) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return { x: p.x, y: p.y };
+  };
+  const onNoteDown = (e, note) => {
+    e.stopPropagation();
+    const p = clientToSvg(e.clientX, e.clientY);
+    dragRef.current = { id: note.id, dx: p.x - note.fx * W, dy: p.y - note.fy * H };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    onSelectNote && onSelectNote(note.id);
+  };
+  const onNoteMove = e => {
+    if (!dragRef.current || !onMoveNote) return;
+    const p = clientToSvg(e.clientX, e.clientY);
+    const fx = Math.max(0, Math.min(0.985, (p.x - dragRef.current.dx) / W));
+    const fy = Math.max(0, Math.min(0.985, (p.y - dragRef.current.dy) / H));
+    onMoveNote(dragRef.current.id, fx, fy);
+  };
+  const onNoteUp = () => { dragRef.current = null; };
 
   return (
     <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width={W} height={H} xmlns="http://www.w3.org/2000/svg"
@@ -3283,6 +3334,23 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
           </g>
         );
       })}
+      {/* sticky notes (draggable, drawn on top) */}
+      {notes.map(n => {
+        const pal = STICKY_NOTE_COLORS[n.color] || STICKY_NOTE_COLORS.yellow;
+        const lines = noteLines(n.text);
+        const h = NOTE_PAD * 2 + lines.length * NOTE_LINE;
+        const nx = n.fx * W, ny = n.fy * H;
+        return (
+          <g key={n.id} onPointerDown={e => onNoteDown(e, n)} onPointerMove={onNoteMove} onPointerUp={onNoteUp}
+            style={{ cursor: "move" }}>
+            <rect x={nx + 2} y={ny + 3} width={NOTE_W} height={h} rx="4" fill="#000000" opacity="0.06" />
+            <rect x={nx} y={ny} width={NOTE_W} height={h} rx="4" fill={pal.bg} stroke={pal.border} strokeWidth="1" />
+            {lines.map((ln, i) => (
+              <text key={i} x={nx + NOTE_PAD} y={ny + NOTE_PAD + (i + 1) * NOTE_LINE - 4} fontSize={NOTE_FONT} fill={pal.text} style={{ fontFamily: "'Caveat', 'DM Sans', cursive" }} fontWeight="600">{ln}</text>
+            ))}
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -3324,7 +3392,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
   const hex = c => (c || "#64748b").replace("#", "");
 
   slideModels.forEach(model => {
-    const { layout, fields, colorDim, title, subtitle, dens = SLIDE_DENSITY.comfortable } = model;
+    const { layout, fields, colorDim, title, subtitle, dens = SLIDE_DENSITY.comfortable, notes = [] } = model;
     const slide = pptx.addSlide();
     slide.background = { color: "FFFFFF" };
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: SW, h: 0.09, fill: { color: "2563EB" } });
@@ -3383,6 +3451,20 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
       }
     });
 
+    // sticky notes — positioned relative to the whole slide, editable text boxes
+    const NOTE_W_IN = 2.0;
+    notes.forEach(n => {
+      const pal = STICKY_NOTE_COLORS[n.color] || STICKY_NOTE_COLORS.yellow;
+      const hIn = Math.max(0.45, noteLines(n.text).length * 0.24 + 0.2);
+      const nx = Math.max(0.1, Math.min(SW - NOTE_W_IN - 0.1, n.fx * SW));
+      const ny = Math.max(0.1, Math.min(SH - hIn - 0.1, n.fy * SH));
+      slide.addText(n.text || "", {
+        x: nx, y: ny, w: NOTE_W_IN, h: hIn, shape: pptx.ShapeType.roundRect, rectRadius: 0.04,
+        fill: { color: hex(pal.bg) }, line: { color: hex(pal.border), width: 1 },
+        fontSize: 12, color: hex(pal.text), align: "left", valign: "top", margin: 6, fontFace: "Arial",
+      });
+    });
+
     if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: "94A3B8", fontFace: "Arial" });
   });
 
@@ -3391,7 +3473,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
 
 // The Slide Builder view.
 function OrgSlideView() {
-  const { tree, activeEmployees, focusRoot, importEmployeesCSV } = useContext(AppCtx);
+  const { tree, activeEmployees, focusRoot, importEmployeesCSV, slideSeedId, setSlideSeedId } = useContext(AppCtx);
   const svgRef = useRef(null);
 
   // People who can head a slide (anyone in the tree). Default to the focused subtree
@@ -3401,7 +3483,7 @@ function OrgSlideView() {
     return list.sort((a, b) => (b._totalReports || 0) - (a._totalReports || 0) || `${a.first} ${a.last}`.localeCompare(`${b.first} ${b.last}`));
   }, [tree]);
 
-  const [rootId, setRootId]   = useState(() => focusRoot && tree.map[focusRoot] ? focusRoot : (tree.root ? tree.root.id : (people[0] && people[0].id)));
+  const [rootId, setRootId]   = useState(() => (slideSeedId && tree.map[slideSeedId] && slideSeedId) || (focusRoot && tree.map[focusRoot] ? focusRoot : (tree.root ? tree.root.id : (people[0] && people[0].id))));
   const [maxDepth, setMaxDepth] = useState(2);
   const [colorDim, setColorDim] = useState("department");
   const [fields, setFields]     = useState({ title: true, dept: true, level: true, size: true });
@@ -3414,10 +3496,18 @@ function OrgSlideView() {
   // User-added "open position" ghost cards: [{ id, managerId, title, level, dept }]
   const [openRoles, setOpenRoles] = useState([]);
   const [newRole, setNewRole]   = useState({ managerId: "", title: "", level: "L4", count: 1 });
+  // Sticky notes (callouts) placed over the slide: [{ id, text, color, fx, fy }]
+  const [stickyNotes, setStickyNotes] = useState([]);
+  const [selectedNoteId, setSelectedNoteId] = useState(null);
 
   useEffect(() => {
     if (!tree.map[rootId]) setRootId(tree.root ? tree.root.id : (people[0] && people[0].id));
   }, [tree]);
+
+  // Consume a "Make slide from this person" jump from the org-chart detail panel.
+  useEffect(() => {
+    if (slideSeedId && tree.map[slideSeedId]) { setRootId(slideSeedId); setSearch(""); setSlideSeedId(null); }
+  }, [slideSeedId]);
 
   const dens = SLIDE_DENSITY[density] || SLIDE_DENSITY.comfortable;
   const wrapColsVal = wrapCols === "auto" ? "auto" : parseInt(wrapCols, 10);
@@ -3534,6 +3624,16 @@ function OrgSlideView() {
     reader.readAsText(file);
   }
 
+  function addNote() {
+    const n = stickyNotes.length;
+    const id = `note_${Date.now()}_${Math.round(Math.random() * 1e6)}`;
+    setStickyNotes(prev => [...prev, { id, text: "New note", color: "yellow", fx: Math.min(0.72, 0.62 + (n % 3) * 0.02), fy: Math.min(0.78, 0.12 + (n % 6) * 0.05) }]);
+    setSelectedNoteId(id);
+  }
+  const updateNote = (id, patch) => setStickyNotes(prev => prev.map(n => (n.id === id ? { ...n, ...patch } : n)));
+  const moveNote = (id, fx, fy) => setStickyNotes(prev => prev.map(n => (n.id === id ? { ...n, fx, fy } : n)));
+  const removeNote = id => setStickyNotes(prev => prev.filter(n => n.id !== id));
+
   function downloadOpeningsTemplate() {
     const mgrs = attachOptions.slice(0, 3);
     const roleEx = ["Senior Engineer", "Product Manager", "Program Manager"];
@@ -3559,20 +3659,20 @@ function OrgSlideView() {
 
   // Build the list of slide models for a multi-slide (.pptx) export.
   function buildDeckModels() {
-    const mk = (node, mDepth, ttl, sub) => ({
+    const mk = (node, mDepth, ttl, sub, withNotes) => ({
       layout: computeSlideLayout(node, { maxDepth: mDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }),
-      fields, colorDim, dens, title: ttl, subtitle: sub,
+      fields, colorDim, dens, title: ttl, subtitle: sub, notes: withNotes ? stickyNotes : [],
     });
     if (!perTeam || !rootNode.children || rootNode.children.length === 0) {
-      return [mk(rootNode, maxDepth, title, subtitle)];
+      return [mk(rootNode, maxDepth, title, subtitle, true)];
     }
     // Overview slide (root + direct reports) then one slide per report that manages people.
-    const models = [mk(rootNode, 1, title, `Leadership overview  ·  ${rootNode.children.length} direct reports`)];
+    const models = [mk(rootNode, 1, title, `Leadership overview  ·  ${rootNode.children.length} direct reports`, true)];
     rootNode.children.forEach(child => {
       const heads = (child.children && child.children.length > 0);
       models.push(mk(child, heads ? maxDepth : 1,
         `${child.first} ${child.last}${/s$/i.test(child.last || "") ? "’" : "’s"} team`,
-        `${child.title || displayLevel(child.level)}  ·  ${(child._totalReports || 0)} in org`));
+        `${child.title || displayLevel(child.level)}  ·  ${(child._totalReports || 0)} in org`, false));
     });
     return models;
   }
@@ -3723,6 +3823,30 @@ function OrgSlideView() {
           )}
         </div>
 
+        <div className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide">Sticky notes</label>
+            <button onClick={addNote} className="flex items-center gap-1 text-[11px] text-amber-700 hover:text-amber-900"><Plus size={11}/>Add note</button>
+          </div>
+          <p className="text-[10px] text-gray-400 -mt-1">Callouts on the slide. <b>Drag them on the preview</b> to place. They export to PNG + PowerPoint.</p>
+          {stickyNotes.length === 0 && <p className="text-[10px] text-gray-300">No notes yet.</p>}
+          {stickyNotes.map(n => (
+            <div key={n.id} className={`rounded-md p-1.5 border ${selectedNoteId === n.id ? "border-blue-300 bg-blue-50/40" : "border-gray-100"}`} onClick={() => setSelectedNoteId(n.id)}>
+              <div className="flex items-center gap-1.5 mb-1">
+                {Object.keys(STICKY_NOTE_COLORS).map(c => (
+                  <button key={c} onClick={() => updateNote(n.id, { color: c })} title={c}
+                    className={`w-4 h-4 rounded-full border ${n.color === c ? "ring-2 ring-offset-1 ring-gray-400" : ""}`}
+                    style={{ background: STICKY_NOTE_COLORS[c].bg, borderColor: STICKY_NOTE_COLORS[c].border }} />
+                ))}
+                <button onClick={() => removeNote(n.id)} className="ml-auto text-gray-300 hover:text-red-500"><X size={12}/></button>
+              </div>
+              <textarea value={n.text} onChange={e => updateNote(n.id, { text: e.target.value })} rows={2}
+                onFocus={() => setSelectedNoteId(n.id)}
+                className="w-full text-xs border border-gray-200 rounded px-1.5 py-1 bg-white resize-none" placeholder="Note text…" />
+            </div>
+          ))}
+        </div>
+
         <div>
           <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Slide title</label>
           <input value={titleText} onChange={e => setTitleText(e.target.value)} placeholder={autoTitle}
@@ -3755,7 +3879,8 @@ function OrgSlideView() {
           </div>
         )}
         <div className="mx-auto bg-white rounded-lg shadow-xl overflow-hidden" style={{ maxWidth: 1100 }}>
-          <OrgSlideSVG layout={layout} fields={fields} colorDim={colorDim} title={title} subtitle={subtitle} svgRef={svgRef} dens={dens} />
+          <OrgSlideSVG layout={layout} fields={fields} colorDim={colorDim} title={title} subtitle={subtitle} svgRef={svgRef} dens={dens}
+            notes={stickyNotes} onMoveNote={moveNote} onSelectNote={setSelectedNoteId} selectedNoteId={selectedNoteId} />
         </div>
         <p className="text-center text-[11px] text-gray-400 mt-2">Live preview · {layout.count - openCount} {(layout.count - openCount) === 1 ? "person" : "people"} shown{openCount > 0 ? ` · ${openCount} open position${openCount === 1 ? "" : "s"}` : ""}</p>
       </div>
@@ -6913,7 +7038,7 @@ function DetailPanel() {
     focusSubtree, setDragMode, getNodeColor, focusChain, setExitSimNode, mode,
     showAnnotationForm, setShowAnnotationForm,
     annotationText, setAnnotationText, annotationType, setAnnotationType,
-    saveAnnotation, removeAnnotation,
+    saveAnnotation, removeAnnotation, setView, setSlideSeedId,
   } = useContext(AppCtx);
 
   if (!node) return null;
@@ -6996,6 +7121,7 @@ function DetailPanel() {
         <div className="border-t pt-3">
           <h4 className="text-xs font-bold text-gray-600 mb-2">Actions</h4>
           <div className="flex flex-wrap gap-1">
+            <button onClick={() => { setSlideSeedId(node.id); setView("slides"); setDetailPanel(null); }} title="Open the Slide builder with this person at the top of the box" className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 transition-colors flex items-center gap-1"><FileText size={10}/>Make slide</button>
             <button onClick={() => focusSubtree(node.id)} className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors flex items-center gap-1"><Eye size={10}/>Focus Subtree</button>
             {atLeast(mode, "advanced") && <>
               <button onClick={() => focusChain(node.id)} className="text-xs bg-violet-50 text-violet-700 border border-violet-200 px-3 py-1.5 rounded hover:bg-violet-100 transition-colors flex items-center gap-1"><GitMerge size={10}/>Full Chain</button>
@@ -9909,6 +10035,7 @@ function OrgChartApp() {
   const [view, setView] = useState("org-chart");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNode, setSelectedNode] = useState(null);
+  const [slideSeedId, setSlideSeedId] = useState(null); // "make a slide from this person" bridge → Slides view
   const [expandedNodes, setExpandedNodes] = useState(new Set());
   const [annotations, setAnnotations] = useState(() => {
     const initTree = buildTree(employees);
@@ -11091,6 +11218,7 @@ function OrgChartApp() {
   const ctxValue = {
     employees, setEmployees, view, setView, searchQuery, setSearchQuery,
     selectedNode, setSelectedNode, expandedNodes, setExpandedNodes,
+    slideSeedId, setSlideSeedId,
     annotations, setAnnotations, showAnnotationForm, setShowAnnotationForm,
     annotationText, setAnnotationText, annotationType, setAnnotationType,
     colorBy, setColorBy, filterDept, setFilterDept, filterLoc, setFilterLoc,
