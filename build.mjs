@@ -7,16 +7,25 @@
 //   node build.mjs
 //
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 
-const compiled = execSync(
-  "npx --yes esbuild@0.24.0 app.jsx --loader:.jsx=jsx --target=es2019",
-  { encoding: "utf8", maxBuffer: 128 * 1024 * 1024 }
-);
+// Merge core.mjs (strip ESM exports) + app.jsx into one scope, then transpile.
+const core = readFileSync("core.mjs", "utf8").replace(/^export\s+/gm, "");
+const app  = readFileSync("app.jsx", "utf8");
+const mergedFile = "._merged.jsx";
+writeFileSync(mergedFile, core + "\n/* ---- app.jsx ---- */\n" + app);
+
+let compiled;
+try {
+  compiled = execSync(
+    `npx --yes esbuild@0.24.0 ${mergedFile} --loader:.jsx=jsx --target=es2019`,
+    { encoding: "utf8", maxBuffer: 128 * 1024 * 1024 }
+  );
+} finally {
+  try { unlinkSync(mergedFile); } catch {}
+}
 
 const tpl = readFileSync("app.template.html", "utf8");
 if (!tpl.includes("/*__APP_JS__*/")) throw new Error("template placeholder /*__APP_JS__*/ missing");
-const out = tpl.replace("/*__APP_JS__*/", () => compiled);
-writeFileSync("org-chart-editable_3.html", out);
-
-console.log(`built org-chart-editable_3.html — ${(out.length / 1024).toFixed(0)} KB; babel present: ${/@babel\/standalone/.test(out)}`);
+writeFileSync("org-chart-editable_3.html", tpl.replace("/*__APP_JS__*/", () => compiled));
+console.log(`built org-chart-editable_3.html — babel present: ${/@babel\/standalone/.test(compiled)}`);
