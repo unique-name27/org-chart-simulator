@@ -2531,249 +2531,6 @@ function ReorgRipplePreview() {
   );
 }
 
-// Natural-language queries: send the employee dataset to Claude with prompt caching
-// so repeat queries are cheap, then highlight any returned employee IDs on the chart.
-// API key lives only in this browser's localStorage — never sent anywhere except
-// directly to api.anthropic.com.
-function NaturalLanguageQuery() {
-  const ctx = useContext(AppCtx);
-  const [apiKey, setApiKey] = useState(() => {
-    try { return localStorage.getItem("orgSimAnthropicKey") || ""; } catch { return ""; }
-  });
-  const [question, setQuestion] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
-  const [history, setHistory] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("orgSimNLHistory") || "[]"); } catch { return []; }
-  });
-  const inputRef = useRef(null);
-  const askConsentRef = useRef(false);
-
-  useEffect(() => {
-    if (ctx?.nlOpen) {
-      setError(null);
-      setTimeout(() => inputRef.current?.focus(), 10);
-    }
-  }, [ctx?.nlOpen]);
-
-  // Compact employee serialisation: just the fields the model needs to reason. Costs
-  // ~25 tokens per person — 200-person org fits in ~5K tokens, well under context.
-  const employeesAsContext = useMemo(() => {
-    const emps = ctx?.activeEmployees || [];
-    return emps.map(e => `${e.id} | ${e.first} ${e.last} | ${e.title} | ${e.level} | ${e.dept} | ${e.location} | mgr=${e.managerId || "—"}`).join("\n");
-  }, [ctx?.activeEmployees]);
-
-  if (!ctx?.nlOpen) return null;
-
-  const close = () => ctx.setNlOpen(false);
-
-  const saveKey = (k) => {
-    setApiKey(k);
-    try { localStorage.setItem("orgSimAnthropicKey", k); } catch {}
-  };
-  const clearKey = () => {
-    setApiKey("");
-    try { localStorage.removeItem("orgSimAnthropicKey"); } catch {}
-  };
-
-  async function ask() {
-    if (!question.trim() || !apiKey) return;
-    const realData = !ctx.isSyntheticData;
-    if (realData || !askConsentRef.current) {
-      const warn = realData ? "WARNING: You have imported real org data. Sending it to an external API may violate your company's data policy.\n\n" : "";
-      const ok = window.confirm(warn + "This sends your active employee roster (names, titles, levels, departments, locations, reporting lines) to Anthropic's API to answer your question.\n\nContinue?");
-      if (!ok) return;
-      if (!realData) askConsentRef.current = true;
-    }
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-opus-4-7",
-          max_tokens: 4096,
-          thinking: { type: "adaptive" },
-          output_config: {
-            effort: "medium",
-            format: {
-              type: "json_schema",
-              schema: {
-                type: "object",
-                properties: {
-                  answer: { type: "string", description: "Markdown-formatted answer to the user's question. Be concise. Cite specific people by name." },
-                  highlight_ids: { type: "array", items: { type: "string" }, description: "Employee IDs (the leftmost field in the dataset) to visually highlight on the org chart. Empty array if no specific people are relevant." },
-                  focus_id: { type: ["string", "null"], description: "Single employee ID to scroll/focus the org chart on. Use when the answer is about one specific person or one specific subtree. Null otherwise." },
-                },
-                required: ["answer", "highlight_ids", "focus_id"],
-                additionalProperties: false,
-              },
-            },
-          },
-          system: [
-            {
-              type: "text",
-              text: "You are an org analytics assistant for a recruiting/headcount planning tool. Answer questions about the organization concisely and accurately, citing specific people by name when relevant. Use markdown for formatting. When the question is about specific people or a subtree, populate highlight_ids and (if appropriate) focus_id so the UI can show them on the chart. The data format is one employee per line: `id | first last | title | level | dept | location | mgr=managerId`.",
-            },
-            {
-              type: "text",
-              text: `Current org dataset (${(ctx.activeEmployees || []).length} active people):\n\n${employeesAsContext}`,
-              cache_control: { type: "ephemeral" },
-            },
-          ],
-          messages: [{ role: "user", content: question }],
-        }),
-      });
-      if (!resp.ok) {
-        const errText = await resp.text();
-        let msg = `API error ${resp.status}`;
-        try { msg = JSON.parse(errText)?.error?.message || msg; } catch {}
-        throw new Error(msg);
-      }
-      const data = await resp.json();
-      const textBlock = data.content?.find(b => b.type === "text");
-      if (!textBlock?.text) throw new Error("No answer in response");
-      const parsed = JSON.parse(textBlock.text);
-
-      setResult(parsed);
-      const next = [{ q: question, ts: Date.now() }, ...history].slice(0, 8);
-      setHistory(next);
-      try { localStorage.setItem("orgSimNLHistory", JSON.stringify(next)); } catch {}
-
-      // Apply highlights on the chart
-      if (parsed.highlight_ids?.length) {
-        const valid = parsed.highlight_ids.filter(id => ctx.tree.map[id]);
-        ctx.setInsightHighlightIds(new Set(valid));
-      }
-      if (parsed.focus_id && ctx.tree.map[parsed.focus_id]) {
-        ctx.setView("org-chart");
-        ctx.navigateTo(parsed.focus_id);
-      }
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const onKey = (e) => {
-    if (e.key === "Escape") { close(); return; }
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ask(); return; }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-start justify-center pt-[8vh]"
-      style={{ background: "rgba(15, 23, 42, 0.55)", backdropFilter: "blur(4px)" }}
-      onClick={close}>
-      <div
-        className="w-full max-w-2xl mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col"
-        style={{ maxHeight: "82vh" }}
-        onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
-          <Sparkles size={16} className="text-violet-600"/>
-          <div className="font-semibold text-sm text-gray-900">Ask the org</div>
-          <span className="text-[10px] text-gray-400 ml-2">powered by Claude Opus 4.7</span>
-          <button onClick={close} className="ml-auto text-gray-400 hover:text-gray-700 text-xl leading-none px-2">×</button>
-        </div>
-
-        {/* API key gate */}
-        {!apiKey ? (
-          <div className="px-5 py-5 space-y-3">
-            <div className="text-sm text-gray-700">
-              Paste your <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" className="text-blue-600 underline">Anthropic API key</a> to enable natural-language queries.
-            </div>
-            <div className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded p-2">
-              Your key is stored only in this browser's <code>localStorage</code> and sent directly to <code>api.anthropic.com</code>. Nothing else sees it. Clear it any time below.
-            </div>
-            <input
-              type="password"
-              placeholder="sk-ant-..."
-              autoFocus
-              onKeyDown={e => { if (e.key === "Enter" && e.target.value.startsWith("sk-")) saveKey(e.target.value.trim()); }}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"/>
-            <div className="text-[11px] text-gray-400">Press <span className="font-mono">Enter</span> to save.</div>
-          </div>
-        ) : (
-          <>
-            {/* Question input */}
-            <div className="px-5 py-3 border-b border-gray-100">
-              <textarea
-                ref={inputRef}
-                value={question}
-                onChange={e => setQuestion(e.target.value)}
-                onKeyDown={onKey}
-                placeholder="e.g. Who reports to Maya transitively? · Single points of failure in Hsinchu · Compare engineering early-career mix to product"
-                rows={3}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"/>
-              <div className="flex items-center gap-2 mt-2">
-                <button
-                  onClick={ask}
-                  disabled={loading || !question.trim()}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
-                  <Sparkles size={12}/>
-                  {loading ? "Thinking..." : "Ask"}
-                </button>
-                <span className="text-[10px] text-gray-400">⌘/Ctrl + Enter to submit</span>
-                <button onClick={clearKey} className="ml-auto text-[10px] text-gray-400 hover:text-rose-600">Clear API key</button>
-              </div>
-            </div>
-
-            {/* Output */}
-            <div className="overflow-y-auto flex-1 px-5 py-4 text-sm">
-              {error && (
-                <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded p-3 text-xs">
-                  <b>Error:</b> {error}
-                </div>
-              )}
-              {loading && (
-                <div className="text-gray-400 text-xs italic">Querying Claude — adaptive thinking, prompt caching enabled…</div>
-              )}
-              {result && !loading && (
-                <div className="space-y-3">
-                  <div className="prose prose-sm max-w-none text-gray-800 whitespace-pre-wrap">{result.answer}</div>
-                  {result.highlight_ids?.length > 0 && (
-                    <div className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded p-2">
-                      Highlighted <b>{result.highlight_ids.length}</b> {result.highlight_ids.length === 1 ? "person" : "people"} on the org chart.
-                      {result.focus_id && <> Scrolled to <b>{ctx.tree.map[result.focus_id]?.first} {ctx.tree.map[result.focus_id]?.last}</b>.</>}
-                    </div>
-                  )}
-                </div>
-              )}
-              {!result && !loading && !error && history.length > 0 && (
-                <div>
-                  <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-2">Recent queries</div>
-                  <div className="space-y-1">
-                    {history.map((h, i) => (
-                      <button key={i} onClick={() => setQuestion(h.q)}
-                        className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-gray-50 text-gray-600 truncate">
-                        {h.q}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// LEVEL_LABELS, ALL_DISPLAY_LEVELS, EARLY_DISPLAY_LEVELS, displayLevel, isEarlyCareer,
-// levelTier moved to core.mjs (merged into build scope by build.mjs)
-
-// ─── REQUISITION HELPERS (shared by HeadcountPlanningView + OrgChartApp) ───
 function seededRand(seedStr) {
   let h = 2166136261;
   for (let i = 0; i < seedStr.length; i++) { h ^= seedStr.charCodeAt(i); h = Math.imul(h, 16777619); }
@@ -10081,9 +9838,8 @@ function OrgChartApp() {
       return next;
     });
   }, []);
-  // Cmd/Ctrl+K command palette + natural-language query modal
+  // Cmd/Ctrl+K command palette
   const [cmdkOpen, setCmdkOpen] = useState(false);
-  const [nlOpen, setNlOpen] = useState(false);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -11258,119 +11014,6 @@ function OrgChartApp() {
     reader.readAsText(file);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // ─── CO-OP: serverless real-time multiplayer (Trystero WebRTC P2P) ───────
-  // The shared document is { employees, annotations }. A newcomer requests the
-  // current doc (hello → doc); established peers answer, and every local edit
-  // re-broadcasts the whole doc (debounced, last-writer-wins) — simple and solid
-  // for the discrete edits this app makes (reorg drops, imports, notes, undo).
-  // No backend: WebRTC peer-to-peer with nostr relays for signaling. The room
-  // code lives in the URL as ?room=CODE, so that URL is the shareable link.
-  // ─────────────────────────────────────────────────────────────────────────
-  const COOP_COLORS = ["#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#db2777", "#ca8a04"];
-  const netRef = useRef({ active: false, room: null, sendDoc: null, sendPres: null, gotState: false });
-  const coopConsentRef = useRef(false);
-  const employeesRef = useRef(employees); employeesRef.current = employees;
-  const annotationsRef = useRef(annotations); annotationsRef.current = annotations;
-  const suppressUntilRef = useRef(0);
-  const [coopActive, setCoopActive] = useState(false);
-  const [coopOpen, setCoopOpen] = useState(false);
-  const [coopName, setCoopName] = useState(() => { try { return localStorage.getItem("orgSimCoopName") || ""; } catch { return ""; } });
-  const [coopCode, setCoopCode] = useState("");
-  const [coopPeers, setCoopPeers] = useState({}); // peerId → { name, color }
-  const [coopSelf, setCoopSelf] = useState(null);  // { name, color }
-  const [coopStatus, setCoopStatus] = useState("");
-
-  const serializeDoc = () => ({ employees: employeesRef.current, annotations: annotationsRef.current });
-  const applyDoc = (doc) => {
-    if (!doc) return;
-    suppressUntilRef.current = Date.now() + 600; // don't echo a remote change back out
-    netRef.current.gotState = true;
-    if (Array.isArray(doc.employees)) setEmployees(doc.employees);
-    if (doc.annotations && typeof doc.annotations === "object") setAnnotations(doc.annotations);
-    setSelectedNode(null); setDetailPanel(null);
-  };
-
-  async function coopJoin(codeRaw, nameRaw) {
-    if (netRef.current.active) return;
-    const realData = !isSyntheticData;
-    if (realData || !coopConsentRef.current) {
-      const warn = realData ? "WARNING: You have imported real org data. Sharing it over public P2P relays may violate your company's data policy.\n\n" : "";
-      const ok = window.confirm(warn + "Co-op shares your CURRENT org data (names, titles, reporting lines) with everyone who has the room code, streamed peer-to-peer over public relays. Room codes are guessable and there is no access control.\n\nContinue?");
-      if (!ok) { setCoopStatus("Co-op cancelled."); return; }
-      if (!realData) coopConsentRef.current = true;
-    }
-    const code = (codeRaw || "").trim();
-    if (!code) { setCoopStatus("Enter a room code first."); return; }
-    setCoopStatus("Connecting…");
-    try {
-      const mod = await import("https://esm.sh/trystero@0.20.0/nostr");
-      const selfId = mod.selfId || "";
-      let h = 0; for (let i = 0; i < selfId.length; i++) h = (h * 31 + selfId.charCodeAt(i)) | 0;
-      const color = COOP_COLORS[Math.abs(h) % COOP_COLORS.length];
-      const name = (nameRaw || "").trim() || ("User-" + selfId.slice(0, 4));
-      try { localStorage.setItem("orgSimCoopName", name); } catch {}
-      const room = mod.joinRoom({ appId: "org-chart-simulator-coop" }, code);
-      const [sendDoc, getDoc] = room.makeAction("doc");
-      const [sendHello, getHello] = room.makeAction("hello");
-      const [sendPres, getPres] = room.makeAction("pres");
-      netRef.current = { active: true, room, sendDoc, sendPres, gotState: false };
-      setCoopActive(true); setCoopSelf({ name, color }); setCoopCode(code);
-      getDoc(doc => applyDoc(doc));
-      getHello((_, peer) => { try { sendDoc(serializeDoc(), peer); } catch {} });
-      getPres((p, peer) => setCoopPeers(prev => ({ ...prev, [peer]: { name: p && p.name, color: p && p.color } })));
-      room.onPeerJoin(peer => {
-        try { if (netRef.current.gotState) sendDoc(serializeDoc(), peer); } catch {}
-        try { sendPres({ name, color }); } catch {}
-      });
-      room.onPeerLeave(peer => setCoopPeers(prev => { const n = { ...prev }; delete n[peer]; return n; }));
-      try { sendHello(1); } catch {}
-      try { sendPres({ name, color }); } catch {}
-      // If nobody answers within ~1.6s we're first in the room → become the host.
-      setTimeout(() => { if (netRef.current.active && !netRef.current.gotState) netRef.current.gotState = true; }, 1600);
-      try { const u = new URL(location.href); u.searchParams.set("room", code); history.replaceState(null, "", u); } catch {}
-      setCoopStatus("Connected — share the link so others can join.");
-    } catch (e) {
-      console.warn("coop join failed", e);
-      setCoopStatus("Couldn't connect — check your internet and try again.");
-      netRef.current.active = false; setCoopActive(false);
-    }
-  }
-  function coopLeave() {
-    try { netRef.current.room && netRef.current.room.leave(); } catch {}
-    netRef.current = { active: false, room: null, sendDoc: null, sendPres: null, gotState: false };
-    setCoopActive(false); setCoopPeers({}); setCoopSelf(null); setCoopStatus("");
-    try { const u = new URL(location.href); u.searchParams.delete("room"); history.replaceState(null, "", u); } catch {}
-  }
-  function coopCopyLink() {
-    try {
-      const u = new URL(location.href); u.searchParams.set("room", coopCode || ""); const link = u.toString();
-      if (navigator.clipboard) navigator.clipboard.writeText(link);
-      setCoopStatus("Link copied — paste it to a teammate.");
-    } catch { setCoopStatus("Couldn't copy the link."); }
-  }
-  function coopSuggestCode() {
-    const words = ["falcon", "harbor", "willow", "quartz", "cobalt", "meadow", "ember", "cedar", "pixel", "orbit"];
-    setCoopCode(words[Math.floor(Math.random() * words.length)] + "-" + Math.floor(1000 + Math.random() * 9000));
-  }
-
-  // Broadcast the doc when it changes locally (debounced; skips remote-origin changes).
-  useEffect(() => {
-    if (!coopActive || !netRef.current.gotState) return;
-    if (Date.now() < suppressUntilRef.current) return;
-    const send = netRef.current.sendDoc; if (!send) return;
-    const t = setTimeout(() => { try { send(serializeDoc()); } catch {} }, 250);
-    return () => clearTimeout(t);
-  }, [employees, annotations, coopActive]);
-
-  // Auto-join when the URL carries ?room=CODE (someone opened a shared link).
-  useEffect(() => {
-    try {
-      const r = new URLSearchParams(location.search).get("room");
-      if (r) { setCoopCode(r); setCoopOpen(true); coopJoin(r, coopName); }
-    } catch {}
-  }, []);
-
   // ─── Session persistence: autosave to localStorage + manual Save/Load session file ───
   const SESSION_KEY = "orgSimSession";
   function buildSessionDoc() {
@@ -11482,7 +11125,6 @@ function OrgChartApp() {
     importEmployeesCSV: openImportWizard, exportPipelineConfig, importPipelineConfig,
     tutorialMode, setTutorialMode, toggleTutorialMode,
     cmdkOpen, setCmdkOpen,
-    nlOpen, setNlOpen,
     pendingDrop, confirmDrop, cancelDrop,
   };
 
@@ -11492,7 +11134,7 @@ function OrgChartApp() {
       {!dataNoticeDismissed && (
         <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-xs text-amber-900">
           <span className="font-semibold">Privacy notice:</span>
-          <span>Your org data stays in this browser and is auto-saved here. Two optional features send data out when you explicitly turn them on: "Ask the org" (sends the roster to Anthropic) and Co-op (streams the org peer-to-peer over public relays). Everything else is local. Use Save session to keep a file copy.</span>
+          <span>Your org data never leaves this browser — nothing is sent over the network. It is auto-saved locally on this device; use Save session to keep a file copy or move it to another machine.</span>
           <button onClick={clearAllLocalData}
             className="ml-auto text-[11px] px-2 py-1 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors font-medium">
             Clear all local data
@@ -11816,63 +11458,11 @@ function OrgChartApp() {
                 className="flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors"
               ><Download size={12}/>Analytics</button>}
               <button
-                title="Ask the org in natural language (Claude Opus 4.7)"
-                onClick={() => setNlOpen(true)}
-                className="flex items-center gap-1 text-xs bg-violet-50 border border-violet-200 text-violet-700 px-2.5 py-1.5 rounded-lg hover:bg-violet-100 transition-colors">
-                <Sparkles size={12}/>Ask
-              </button>
-              <button
                 title="Generate a 6-slide exec deck PDF (cover, org shape, pyramid, hotspots, plan, risks)"
                 onClick={generateExecDeck}
                 className="flex items-center gap-1 text-xs bg-amber-50 border border-amber-200 text-amber-700 px-2.5 py-1.5 rounded-lg hover:bg-amber-100 transition-colors">
                 <FileText size={12}/>Exec deck
               </button>
-              {/* ── Live co-op ── */}
-              <div className="relative">
-                <button onClick={() => setCoopOpen(o => !o)} title="Real-time co-op — edit this org together over a shareable link (no backend, peer-to-peer)"
-                  className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${coopActive ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-gray-100 border-transparent text-gray-600 hover:bg-gray-200"}`}>
-                  <Globe size={12}/>Co-op{coopActive ? ` · ${Object.keys(coopPeers).length + 1}` : ""}
-                  {coopActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"/>}
-                </button>
-                {coopOpen && (
-                  <div className="absolute right-0 top-full mt-1.5 w-72 bg-white border border-gray-200 rounded-xl shadow-2xl p-3 z-[60]" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="text-sm font-bold text-gray-900 flex items-center gap-1.5"><Globe size={13} className={coopActive ? "text-emerald-600" : "text-gray-400"}/>Live co-op</h4>
-                      <button onClick={() => setCoopOpen(false)} className="text-gray-400 hover:text-gray-700"><X size={14}/></button>
-                    </div>
-                    {!coopActive ? (
-                      <>
-                        <p className="text-[11px] text-gray-500 mb-2">Edit this org chart together in real time. Pick a room code and share the link — no account, no server.</p>
-                        <input value={coopName} onChange={e => setCoopName(e.target.value)} placeholder="Your name" className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 mb-1.5" />
-                        <div className="flex gap-1.5 mb-2">
-                          <input value={coopCode} onChange={e => setCoopCode(e.target.value)} onKeyDown={e => { if (e.key === "Enter") coopJoin(coopCode, coopName); }} placeholder="Room code" className="flex-1 min-w-0 text-xs border border-gray-200 rounded-lg px-2 py-1.5" />
-                          <button onClick={coopSuggestCode} className="text-[11px] text-blue-600 px-1.5 hover:text-blue-800 shrink-0">Suggest</button>
-                        </div>
-                        <button onClick={() => coopJoin(coopCode, coopName)} className="w-full text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-emerald-700">Join / create room</button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Room</div>
-                        <div className="flex items-center gap-1.5 mb-2.5">
-                          <code className="flex-1 min-w-0 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 text-gray-700 truncate">{coopCode}</code>
-                          <button onClick={coopCopyLink} className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 shrink-0">Copy link</button>
-                        </div>
-                        <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 flex items-center gap-1"><Users size={11}/>Here now ({Object.keys(coopPeers).length + 1})</div>
-                        <div className="space-y-1 mb-2.5 max-h-28 overflow-y-auto">
-                          {[coopSelf && { ...coopSelf, me: true }, ...Object.values(coopPeers)].filter(Boolean).map((p, i) => (
-                            <div key={i} className="flex items-center gap-2 text-xs">
-                              <span className="w-5 h-5 rounded-full flex items-center justify-center text-white font-bold shrink-0" style={{ background: p.color || "#64748b", fontSize: 8 }}>{(p.name || "?").slice(0, 2).toUpperCase()}</span>
-                              <span className="text-gray-700 truncate">{p.name || "User"}{p.me ? " (you)" : ""}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <button onClick={coopLeave} className="w-full text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200">Leave room</button>
-                      </>
-                    )}
-                    {coopStatus && <div className="text-[10px] text-gray-400 mt-2 leading-snug">{coopStatus}</div>}
-                  </div>
-                )}
-              </div>
             </div>
           </div>
 
@@ -12047,7 +11637,6 @@ function OrgChartApp() {
       </div>
       <CommandPalette/>
       <ReorgRipplePreview/>
-      <NaturalLanguageQuery/>
     </AppCtx.Provider>
   );
 }
