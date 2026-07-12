@@ -268,6 +268,72 @@ function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, 
   const height = Math.max(...cards.map((c) => c.y + c.h), ...groups.map((g) => g.y + g.h));
   return { cards, links, groups, width, height, count: cards.length, truncated };
 }
+function parseEmployeeName(raw) {
+  const s = (raw == null ? "" : String(raw)).trim();
+  if (!s) return { first: "", last: "" };
+  const commaIdx = s.indexOf(",");
+  if (commaIdx >= 0) {
+    const last = s.slice(0, commaIdx).trim();
+    const first = s.slice(commaIdx + 1).trim();
+    return { first, last };
+  }
+  const tokens = s.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return { first: "", last: "" };
+  if (tokens.length === 1) return { first: tokens[0], last: "" };
+  if (tokens.length === 2) return { first: tokens[0], last: tokens[1] };
+  return { first: tokens[0], last: tokens[tokens.length - 1] };
+}
+const _HRIS_MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+function _hrisPad2(n) {
+  return String(n).padStart(2, "0");
+}
+function _hrisValidYMD(y, m, d) {
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+function parseHrisDate(raw) {
+  try {
+    const s = (raw == null ? "" : String(raw)).trim();
+    const fail = { iso: null, ok: false, raw };
+    if (!s) return fail;
+    if (/^\d+$/.test(s)) {
+      const n = parseInt(s, 10);
+      if (n >= 2e4 && n <= 6e4) {
+        const dt = new Date(Date.UTC(1899, 11, 30) + n * 864e5);
+        const y = dt.getUTCFullYear(), mo = dt.getUTCMonth() + 1, d = dt.getUTCDate();
+        if (_hrisValidYMD(y, mo, d)) return { iso: `${y}-${_hrisPad2(mo)}-${_hrisPad2(d)}`, ok: true, raw };
+      }
+      return fail;
+    }
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) {
+      const y = +m[1], mo = +m[2], d = +m[3];
+      return _hrisValidYMD(y, mo, d) ? { iso: `${y}-${_hrisPad2(mo)}-${_hrisPad2(d)}`, ok: true, raw } : fail;
+    }
+    m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (m) {
+      const y = +m[1], mo = +m[2], d = +m[3];
+      return _hrisValidYMD(y, mo, d) ? { iso: `${y}-${_hrisPad2(mo)}-${_hrisPad2(d)}`, ok: true, raw } : fail;
+    }
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+      const mo = +m[1], d = +m[2], y = +m[3];
+      return _hrisValidYMD(y, mo, d) ? { iso: `${y}-${_hrisPad2(mo)}-${_hrisPad2(d)}`, ok: true, raw } : fail;
+    }
+    m = s.match(/^(\d{1,2})-([A-Za-z]{3,9})-(\d{4})$/);
+    if (m) {
+      const mo = _HRIS_MONTHS[m[2].toLowerCase().slice(0, 3)];
+      const d = +m[1], y = +m[3];
+      if (mo && _hrisValidYMD(y, mo, d)) return { iso: `${y}-${_hrisPad2(mo)}-${_hrisPad2(d)}`, ok: true, raw };
+      return fail;
+    }
+    return fail;
+  } catch {
+    return { iso: null, ok: false, raw };
+  }
+}
 function _nameOf(rec) {
   return rec ? `${rec.first || ""} ${rec.last || ""}`.trim() : "";
 }
@@ -2951,21 +3017,21 @@ function downloadFile(filename, content, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1e3);
 }
 const IMPORT_FIELDS = [
-  { key: "id", label: "Employee ID", required: true, aliases: ["id", "employee id", "emp id", "employeeid", "empid", "worker id", "workerid", "person id", "personid"] },
-  { key: "fullName", label: "Full name (auto-split)", aliases: ["name", "full name", "fullname", "employee name", "display name", "employee"] },
+  { key: "id", label: "Employee ID", required: true, aliases: ["id", "employee id", "emp id", "employeeid", "empid", "worker id", "workerid", "person id", "personid", "worker", "user id", "person id external", "employee #", "employee number"] },
+  { key: "fullName", label: "Full name (auto-split)", aliases: ["name", "full name", "fullname", "employee name", "display name", "employee", "legal name", "preferred name"] },
   { key: "first", label: "First name", aliases: ["first", "first name", "firstname", "given name", "given", "forename"] },
   { key: "last", label: "Last name", aliases: ["last", "last name", "lastname", "surname", "family name"] },
-  { key: "title", label: "Job title", aliases: ["title", "job title", "jobtitle", "role", "position", "job"] },
-  { key: "level", label: "Level", aliases: ["level", "grade", "job level", "joblevel", "seniority", "rank"] },
-  { key: "dept", label: "Department", aliases: ["dept", "department", "team", "sub-department", "subdepartment", "org unit", "orgunit"] },
+  { key: "title", label: "Job title", aliases: ["title", "job title", "jobtitle", "role", "position", "job", "business title"] },
+  { key: "level", label: "Level", aliases: ["level", "grade", "job level", "joblevel", "seniority", "rank", "management level", "compensation grade", "pay grade"] },
+  { key: "dept", label: "Department", aliases: ["dept", "department", "team", "sub-department", "subdepartment", "org unit", "orgunit", "supervisory organization", "division"] },
   { key: "bg", label: "Business Unit", aliases: ["bg", "business unit", "businessunit", "bu", "business group", "division", "segment"] },
   { key: "fn", label: "Discipline / job family", aliases: ["fn", "discipline", "function", "job family", "jobfamily", "family"] },
   { key: "location", label: "Location", aliases: ["location", "city", "site", "office", "work location", "worklocation"] },
   { key: "country", label: "Country", aliases: ["country", "nation"] },
   { key: "employmentType", label: "Employment type", aliases: ["employmenttype", "employment type", "emp type", "worker type", "workertype", "type"] },
-  { key: "managerId", label: "Manager ID", aliases: ["managerid", "manager id", "manager", "reports to", "reportsto", "supervisor id", "supervisor", "supervisorid", "manager employee id"] },
+  { key: "managerId", label: "Manager ID", aliases: ["managerid", "manager id", "manager", "reports to", "reportsto", "supervisor id", "supervisor", "supervisorid", "manager employee id", "manager (worker)", "manager name", "manager user", "manager user id"] },
   { key: "status", label: "Status", aliases: ["status", "active", "employment status", "employmentstatus"] },
-  { key: "startDate", label: "Start date", aliases: ["startdate", "start date", "hire date", "hiredate", "start", "date hired"] },
+  { key: "startDate", label: "Start date", aliases: ["startdate", "start date", "hire date", "hiredate", "start", "date hired", "original hire date", "event date"] },
   { key: "endDate", label: "End date", aliases: ["enddate", "end date", "term date", "termdate", "end", "exit date", "termination date"] },
   { key: "costCenter", label: "Cost center", aliases: ["costcenter", "cost center", "cc", "cost centre"] },
   { key: "band", label: "Band", aliases: ["band", "pay band", "payband", "salary band"] }
@@ -3021,9 +3087,9 @@ function EmployeeImportWizard({ data, onCancel, onConfirm }) {
     };
     let first = g(col("first")), last = g(col("last"));
     if ((!first || !last) && col("fullName") >= 0) {
-      const p = g(col("fullName")).split(/\s+/);
-      first = first || p[0] || "";
-      last = last || p.slice(1).join(" ") || "";
+      const p = parseEmployeeName(g(col("fullName")));
+      first = first || p.first;
+      last = last || p.last;
     }
     const lv = normalizeLevel(g(col("level")));
     return { id: g(col("id")), name: `${first} ${last}`.trim() || "\u2014", level: lv ? displayLevel(lv) : "L3*", dept: g(col("dept")) || "\u2014", mgr: g(col("managerId")) || "\u2014" };
@@ -10075,6 +10141,7 @@ function OrgChartApp() {
   const [undoStack, setUndoStack] = useState([]);
   const [detailPanel, setDetailPanel] = useState(null);
   const [importState, setImportState] = useState(null);
+  const [lastImportExceptions, setLastImportExceptions] = useState([]);
   const [focusRoot, setFocusRoot] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [timelineMonth, setTimelineMonth] = useState(null);
@@ -11101,8 +11168,11 @@ function OrgChartApp() {
     };
     const out = [];
     const seenIds = /* @__PURE__ */ new Set();
+    const rowById = /* @__PURE__ */ new Map();
+    const exceptions = [];
     let dupIds = 0, blankRows = 0, lvDefaulted = 0;
     for (let r = 0; r < rows.length; r++) {
+      const rowNum = r + 1;
       const row = rows[r];
       const id = get(row, col("id"));
       if (!id) {
@@ -11111,14 +11181,16 @@ function OrgChartApp() {
       }
       if (seenIds.has(id)) {
         dupIds++;
+        exceptions.push({ row: rowNum, id, field: "id", issue: `Duplicate id '${id}'`, action: "row skipped" });
         continue;
       }
       seenIds.add(id);
+      rowById.set(id, rowNum);
       let first = get(row, col("first")), last = get(row, col("last"));
       if ((!first || !last) && col("fullName") >= 0) {
-        const p = get(row, col("fullName")).split(/\s+/);
-        if (!first) first = p[0] || "";
-        if (!last) last = p.slice(1).join(" ") || "";
+        const p = parseEmployeeName(get(row, col("fullName")));
+        if (!first) first = p.first;
+        if (!last) last = p.last;
       }
       if (!first && !last) first = id;
       const dept = get(row, col("dept")) || "General";
@@ -11126,8 +11198,23 @@ function OrgChartApp() {
       if (!level) {
         level = "IC3";
         lvDefaulted++;
+        exceptions.push({ row: rowNum, id, field: "level", issue: "Unrecognized level", action: "defaulted to L3" });
       }
       const mgr = get(row, col("managerId"));
+      const rawStart = get(row, col("startDate"));
+      let startDate = null;
+      if (rawStart) {
+        const parsed = parseHrisDate(rawStart);
+        if (parsed.ok) startDate = parsed.iso;
+        else exceptions.push({ row: rowNum, id, field: "startDate", issue: `Unparseable date '${rawStart}'`, action: "left blank" });
+      }
+      const rawEnd = get(row, col("endDate"));
+      let endDate = null;
+      if (rawEnd) {
+        const parsed = parseHrisDate(rawEnd);
+        if (parsed.ok) endDate = parsed.iso;
+        else exceptions.push({ row: rowNum, id, field: "endDate", issue: `Unparseable date '${rawEnd}'`, action: "left blank" });
+      }
       out.push({
         id,
         first,
@@ -11142,9 +11229,8 @@ function OrgChartApp() {
         employmentType: get(row, col("employmentType")) || "FTE",
         managerId: mgr || null,
         status: get(row, col("status")) || "Active",
-        // Missing dates default to ~18mo before "today" so tenure math stays sane (not 1970)
-        startDate: get(row, col("startDate")) || "2024-01-01",
-        endDate: get(row, col("endDate")) || null,
+        startDate,
+        endDate,
         costCenter: get(row, col("costCenter")) || null,
         band: get(row, col("band")) || null
       });
@@ -11164,11 +11250,14 @@ function OrgChartApp() {
     const idSet = new Set(finalList.map((e) => e.id));
     let orphaned = 0;
     finalList.forEach((e) => {
+      var _a2, _b;
       if (e.managerId && !idSet.has(e.managerId)) {
+        exceptions.push({ row: (_a2 = rowById.get(e.id)) != null ? _a2 : null, id: e.id, field: "managerId", issue: `Unknown manager id '${e.managerId}'`, action: "reset to top-level" });
         e.managerId = null;
         orphaned++;
       }
       if (e.id === e.managerId) {
+        exceptions.push({ row: (_b = rowById.get(e.id)) != null ? _b : null, id: e.id, field: "managerId", issue: "Manager id equals own id", action: "reset to top-level" });
         e.managerId = null;
         orphaned++;
       }
@@ -11176,10 +11265,12 @@ function OrgChartApp() {
     const idMap = new Map(finalList.map((e) => [e.id, e]));
     let cyclesBroken = 0;
     finalList.forEach((e) => {
+      var _a2;
       const seen = /* @__PURE__ */ new Set();
       let cur = e;
       while (cur && cur.managerId) {
         if (seen.has(cur.id)) {
+          exceptions.push({ row: (_a2 = rowById.get(e.id)) != null ? _a2 : null, id: e.id, field: "managerId", issue: "Reporting cycle detected", action: "reset to top-level" });
           e.managerId = null;
           cyclesBroken++;
           break;
@@ -11199,6 +11290,7 @@ function OrgChartApp() {
     setInsightHighlightIds(/* @__PURE__ */ new Set());
     setChainFilterId(null);
     setImportState(null);
+    setLastImportExceptions(exceptions);
     const notes = [];
     if (mode2 === "append") notes.push(`merged into existing org \u2014 ${finalList.length} total`);
     if (dupIds) notes.push(`${dupIds} duplicate id${dupIds > 1 ? "s" : ""} skipped`);
@@ -11206,7 +11298,17 @@ function OrgChartApp() {
     if (lvDefaulted) notes.push(`${lvDefaulted} unrecognized level${lvDefaulted > 1 ? "s" : ""} set to L3`);
     if (orphaned) notes.push(`${orphaned} unknown manager ref${orphaned > 1 ? "s" : ""} reset to root`);
     if (cyclesBroken) notes.push(`${cyclesBroken} reporting cycle${cyclesBroken > 1 ? "s" : ""} broken`);
-    alert(`Imported ${out.length} row${out.length > 1 ? "s" : ""}.${notes.length ? "\n\u2022 " + notes.join("\n\u2022 ") : ""}`);
+    alert(`Imported ${out.length} row${out.length > 1 ? "s" : ""}.${notes.length ? "\n\u2022 " + notes.join("\n\u2022 ") : ""}${exceptions.length ? `
+
+${exceptions.length} exception${exceptions.length > 1 ? "s" : ""} logged \u2014 see the banner below the toolbar to download the CSV.` : ""}`);
+  }
+  function downloadImportExceptions() {
+    const cols = ["Row", "Employee ID", "Field", "Issue", "Action"];
+    const lines = [cols.join(","), ...lastImportExceptions.map((x) => {
+      var _a2, _b, _c, _d, _e;
+      return [(_a2 = x.row) != null ? _a2 : "", (_b = x.id) != null ? _b : "", (_c = x.field) != null ? _c : "", (_d = x.issue) != null ? _d : "", (_e = x.action) != null ? _e : ""].map(csvCell).join(",");
+    })];
+    downloadFile(`import-exceptions-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv`, lines.join("\n"), "text/csv");
   }
   function exportPipelineConfig() {
     let stageOrder = null;
@@ -11998,7 +12100,7 @@ function OrgChartApp() {
     coopActive && /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" })
   ), coopOpen && /* @__PURE__ */ React.createElement("div", { className: "absolute right-0 top-full mt-1.5 w-72 bg-white border border-gray-200 rounded-xl shadow-2xl p-3 z-[60]", style: { fontFamily: "'DM Sans', sans-serif" } }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-sm font-bold text-gray-900 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Globe, { size: 13, className: coopActive ? "text-emerald-600" : "text-gray-400" }), "Live co-op"), /* @__PURE__ */ React.createElement("button", { onClick: () => setCoopOpen(false), className: "text-gray-400 hover:text-gray-700" }, /* @__PURE__ */ React.createElement(X, { size: 14 }))), !coopActive ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-gray-500 mb-2" }, "Edit this org chart together in real time. Pick a room code and share the link \u2014 no account, no server."), /* @__PURE__ */ React.createElement("input", { value: coopName, onChange: (e) => setCoopName(e.target.value), placeholder: "Your name", className: "w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 mb-1.5" }), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1.5 mb-2" }, /* @__PURE__ */ React.createElement("input", { value: coopCode, onChange: (e) => setCoopCode(e.target.value), onKeyDown: (e) => {
     if (e.key === "Enter") coopJoin(coopCode, coopName);
-  }, placeholder: "Room code", className: "flex-1 min-w-0 text-xs border border-gray-200 rounded-lg px-2 py-1.5" }), /* @__PURE__ */ React.createElement("button", { onClick: coopSuggestCode, className: "text-[11px] text-blue-600 px-1.5 hover:text-blue-800 shrink-0" }, "Suggest")), /* @__PURE__ */ React.createElement("button", { onClick: () => coopJoin(coopCode, coopName), className: "w-full text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-emerald-700" }, "Join / create room")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1" }, "Room"), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1.5 mb-2.5" }, /* @__PURE__ */ React.createElement("code", { className: "flex-1 min-w-0 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 text-gray-700 truncate" }, coopCode), /* @__PURE__ */ React.createElement("button", { onClick: coopCopyLink, className: "text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 shrink-0" }, "Copy link")), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 flex items-center gap-1" }, /* @__PURE__ */ React.createElement(Users, { size: 11 }), "Here now (", Object.keys(coopPeers).length + 1, ")"), /* @__PURE__ */ React.createElement("div", { className: "space-y-1 mb-2.5 max-h-28 overflow-y-auto" }, [coopSelf && { ...coopSelf, me: true }, ...Object.values(coopPeers)].filter(Boolean).map((p, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "flex items-center gap-2 text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "w-5 h-5 rounded-full flex items-center justify-center text-white font-bold shrink-0", style: { background: p.color || "#64748b", fontSize: 8 } }, (p.name || "?").slice(0, 2).toUpperCase()), /* @__PURE__ */ React.createElement("span", { className: "text-gray-700 truncate" }, p.name || "User", p.me ? " (you)" : "")))), /* @__PURE__ */ React.createElement("button", { onClick: coopLeave, className: "w-full text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200" }, "Leave room")), coopStatus && /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-gray-400 mt-2 leading-snug" }, coopStatus))))), view === "org-chart" && (focusRoot && tree.map[focusRoot] || insightHighlightIds.size > 0) && /* @__PURE__ */ React.createElement("div", { className: `border-b px-4 py-1.5 flex items-center gap-2 text-xs ${chainFilterId ? "bg-violet-50 border-violet-100" : "bg-blue-50 border-blue-100"}` }, /* @__PURE__ */ React.createElement(GitMerge, { size: 12, className: chainFilterId ? "text-violet-600" : "text-blue-600" }), focusRoot && tree.map[focusRoot] ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "text-blue-700" }, "Subtree view:"), getAncestorPath(tree.map, focusRoot).map((n, i, arr) => /* @__PURE__ */ React.createElement("span", { key: n.id }, /* @__PURE__ */ React.createElement("button", { onClick: () => focusSubtree(n.id), className: "text-blue-600 hover:underline" }, n.first, " ", n.last), i < arr.length - 1 && /* @__PURE__ */ React.createElement("span", { className: "text-blue-300 mx-1" }, "\u203A")))) : chainFilterId && tree.map[chainFilterId] ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "text-violet-700" }, "Chain view:"), /* @__PURE__ */ React.createElement("span", { className: "font-semibold text-violet-900" }, tree.map[chainFilterId].first, " ", tree.map[chainFilterId].last), /* @__PURE__ */ React.createElement("span", { className: "text-violet-400" }, "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "text-violet-600" }, getAncestorPath(tree.map, chainFilterId).length - 1, " levels up to CEO"), /* @__PURE__ */ React.createElement("span", { className: "text-violet-300" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "text-violet-600" }, insightHighlightIds.size - getAncestorPath(tree.map, chainFilterId).length, " reports below")) : /* @__PURE__ */ React.createElement("span", { className: "text-violet-700" }, "Analytics insight highlight \u2014 ", /* @__PURE__ */ React.createElement("span", { className: "font-semibold" }, insightHighlightIds.size), " nodes"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
+  }, placeholder: "Room code", className: "flex-1 min-w-0 text-xs border border-gray-200 rounded-lg px-2 py-1.5" }), /* @__PURE__ */ React.createElement("button", { onClick: coopSuggestCode, className: "text-[11px] text-blue-600 px-1.5 hover:text-blue-800 shrink-0" }, "Suggest")), /* @__PURE__ */ React.createElement("button", { onClick: () => coopJoin(coopCode, coopName), className: "w-full text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-emerald-700" }, "Join / create room")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1" }, "Room"), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1.5 mb-2.5" }, /* @__PURE__ */ React.createElement("code", { className: "flex-1 min-w-0 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 text-gray-700 truncate" }, coopCode), /* @__PURE__ */ React.createElement("button", { onClick: coopCopyLink, className: "text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 shrink-0" }, "Copy link")), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 flex items-center gap-1" }, /* @__PURE__ */ React.createElement(Users, { size: 11 }), "Here now (", Object.keys(coopPeers).length + 1, ")"), /* @__PURE__ */ React.createElement("div", { className: "space-y-1 mb-2.5 max-h-28 overflow-y-auto" }, [coopSelf && { ...coopSelf, me: true }, ...Object.values(coopPeers)].filter(Boolean).map((p, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "flex items-center gap-2 text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "w-5 h-5 rounded-full flex items-center justify-center text-white font-bold shrink-0", style: { background: p.color || "#64748b", fontSize: 8 } }, (p.name || "?").slice(0, 2).toUpperCase()), /* @__PURE__ */ React.createElement("span", { className: "text-gray-700 truncate" }, p.name || "User", p.me ? " (you)" : "")))), /* @__PURE__ */ React.createElement("button", { onClick: coopLeave, className: "w-full text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200" }, "Leave room")), coopStatus && /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-gray-400 mt-2 leading-snug" }, coopStatus))))), view === "org-chart" && lastImportExceptions.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "border-b px-4 py-1.5 flex items-center gap-2 text-xs bg-amber-50 border-amber-100" }, /* @__PURE__ */ React.createElement(AlertTriangle, { size: 12, className: "text-amber-600" }), /* @__PURE__ */ React.createElement("span", { className: "text-amber-800" }, "Import needed ", /* @__PURE__ */ React.createElement("span", { className: "font-semibold" }, lastImportExceptions.length), " fix-up", lastImportExceptions.length > 1 ? "s" : "", " \u2014 bad dates, defaulted levels, or manager refs."), /* @__PURE__ */ React.createElement("button", { onClick: downloadImportExceptions, className: "flex items-center gap-1 text-amber-700 hover:text-amber-900 font-medium" }, /* @__PURE__ */ React.createElement(Download, { size: 12 }), "Download exceptions (CSV)"), /* @__PURE__ */ React.createElement("button", { onClick: () => setLastImportExceptions([]), className: "ml-auto flex items-center gap-1 text-amber-600 hover:text-amber-800" }, /* @__PURE__ */ React.createElement(X, { size: 12 }), "Dismiss")), view === "org-chart" && (focusRoot && tree.map[focusRoot] || insightHighlightIds.size > 0) && /* @__PURE__ */ React.createElement("div", { className: `border-b px-4 py-1.5 flex items-center gap-2 text-xs ${chainFilterId ? "bg-violet-50 border-violet-100" : "bg-blue-50 border-blue-100"}` }, /* @__PURE__ */ React.createElement(GitMerge, { size: 12, className: chainFilterId ? "text-violet-600" : "text-blue-600" }), focusRoot && tree.map[focusRoot] ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "text-blue-700" }, "Subtree view:"), getAncestorPath(tree.map, focusRoot).map((n, i, arr) => /* @__PURE__ */ React.createElement("span", { key: n.id }, /* @__PURE__ */ React.createElement("button", { onClick: () => focusSubtree(n.id), className: "text-blue-600 hover:underline" }, n.first, " ", n.last), i < arr.length - 1 && /* @__PURE__ */ React.createElement("span", { className: "text-blue-300 mx-1" }, "\u203A")))) : chainFilterId && tree.map[chainFilterId] ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "text-violet-700" }, "Chain view:"), /* @__PURE__ */ React.createElement("span", { className: "font-semibold text-violet-900" }, tree.map[chainFilterId].first, " ", tree.map[chainFilterId].last), /* @__PURE__ */ React.createElement("span", { className: "text-violet-400" }, "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "text-violet-600" }, getAncestorPath(tree.map, chainFilterId).length - 1, " levels up to CEO"), /* @__PURE__ */ React.createElement("span", { className: "text-violet-300" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "text-violet-600" }, insightHighlightIds.size - getAncestorPath(tree.map, chainFilterId).length, " reports below")) : /* @__PURE__ */ React.createElement("span", { className: "text-violet-700" }, "Analytics insight highlight \u2014 ", /* @__PURE__ */ React.createElement("span", { className: "font-semibold" }, insightHighlightIds.size), " nodes"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
     setFocusRoot(null);
     setInsightHighlightIds(/* @__PURE__ */ new Set());
     setChainFilterId(null);

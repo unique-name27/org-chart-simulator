@@ -188,6 +188,89 @@ export function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfor
   return { cards, links, groups, width, height, count: cards.length, truncated };
 }
 
+// ─── HRIS-GRADE IMPORT HELPERS ───
+// Split a single "full name" cell into { first, last }. Tolerant of extra
+// whitespace and never throws — worst case both fields come back empty.
+// "Last, First" convention (comma present) takes priority over space-splitting,
+// since that's the dominant HRIS export convention (Workday, SAP, etc).
+export function parseEmployeeName(raw) {
+  const s = (raw == null ? "" : String(raw)).trim();
+  if (!s) return { first: "", last: "" };
+  const commaIdx = s.indexOf(",");
+  if (commaIdx >= 0) {
+    const last = s.slice(0, commaIdx).trim();
+    const first = s.slice(commaIdx + 1).trim();
+    return { first, last };
+  }
+  const tokens = s.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return { first: "", last: "" };
+  if (tokens.length === 1) return { first: tokens[0], last: "" };
+  if (tokens.length === 2) return { first: tokens[0], last: tokens[1] };
+  return { first: tokens[0], last: tokens[tokens.length - 1] }; // 3+: drop middle token(s)
+}
+
+// Parse a raw HRIS date cell into { iso: "YYYY-MM-DD"|null, ok, raw }. Accepts:
+// ISO (YYYY-MM-DD), YYYY/MM/DD, US M/D/YYYY, D-Mon-YYYY (month name, case-insensitive),
+// and Excel serial-date integers (epoch 1899-12-30, the standard JS conversion trick
+// that already accounts for Excel's 1900-leap-year bug) in a plausible 20000-60000
+// range (~1954-2064). Never guesses ambiguous formats, always validates the resulting
+// calendar date is real (rejects e.g. 2020-02-30), and never throws.
+const _HRIS_MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+function _hrisPad2(n) { return String(n).padStart(2, "0"); }
+function _hrisValidYMD(y, m, d) {
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+export function parseHrisDate(raw) {
+  try {
+    const s = (raw == null ? "" : String(raw)).trim();
+    const fail = { iso: null, ok: false, raw };
+    if (!s) return fail;
+
+    if (/^\d+$/.test(s)) {
+      const n = parseInt(s, 10);
+      if (n >= 20000 && n <= 60000) {
+        const dt = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+        const y = dt.getUTCFullYear(), mo = dt.getUTCMonth() + 1, d = dt.getUTCDate();
+        if (_hrisValidYMD(y, mo, d)) return { iso: `${y}-${_hrisPad2(mo)}-${_hrisPad2(d)}`, ok: true, raw };
+      }
+      return fail;
+    }
+
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) {
+      const y = +m[1], mo = +m[2], d = +m[3];
+      return _hrisValidYMD(y, mo, d) ? { iso: `${y}-${_hrisPad2(mo)}-${_hrisPad2(d)}`, ok: true, raw } : fail;
+    }
+
+    m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (m) {
+      const y = +m[1], mo = +m[2], d = +m[3];
+      return _hrisValidYMD(y, mo, d) ? { iso: `${y}-${_hrisPad2(mo)}-${_hrisPad2(d)}`, ok: true, raw } : fail;
+    }
+
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+      const mo = +m[1], d = +m[2], y = +m[3];
+      return _hrisValidYMD(y, mo, d) ? { iso: `${y}-${_hrisPad2(mo)}-${_hrisPad2(d)}`, ok: true, raw } : fail;
+    }
+
+    m = s.match(/^(\d{1,2})-([A-Za-z]{3,9})-(\d{4})$/);
+    if (m) {
+      const mo = _HRIS_MONTHS[m[2].toLowerCase().slice(0, 3)];
+      const d = +m[1], y = +m[3];
+      if (mo && _hrisValidYMD(y, mo, d)) return { iso: `${y}-${_hrisPad2(mo)}-${_hrisPad2(d)}`, ok: true, raw };
+      return fail;
+    }
+
+    return fail;
+  } catch {
+    return { iso: null, ok: false, raw };
+  }
+}
+
 // ─── SCENARIO COMPARE / DIFF ───
 // Pure diff over two plain employee-array snapshots. No React/DOM. O(n) via lookup maps.
 function _nameOf(rec) { return rec ? `${rec.first || ""} ${rec.last || ""}`.trim() : ""; }

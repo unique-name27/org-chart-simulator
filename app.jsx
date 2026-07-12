@@ -2860,21 +2860,21 @@ function downloadFile(filename, content, mime) {
 // ─── EMPLOYEE CSV IMPORT — configurable column mapping ───
 // Target fields the app understands, with header-name aliases for auto-detection.
 const IMPORT_FIELDS = [
-  { key: "id",             label: "Employee ID",          required: true,  aliases: ["id","employee id","emp id","employeeid","empid","worker id","workerid","person id","personid"] },
-  { key: "fullName",       label: "Full name (auto-split)",               aliases: ["name","full name","fullname","employee name","display name","employee"] },
+  { key: "id",             label: "Employee ID",          required: true,  aliases: ["id","employee id","emp id","employeeid","empid","worker id","workerid","person id","personid","worker","user id","person id external","employee #","employee number"] },
+  { key: "fullName",       label: "Full name (auto-split)",               aliases: ["name","full name","fullname","employee name","display name","employee","legal name","preferred name"] },
   { key: "first",          label: "First name",                           aliases: ["first","first name","firstname","given name","given","forename"] },
   { key: "last",           label: "Last name",                            aliases: ["last","last name","lastname","surname","family name"] },
-  { key: "title",          label: "Job title",                            aliases: ["title","job title","jobtitle","role","position","job"] },
-  { key: "level",          label: "Level",                                 aliases: ["level","grade","job level","joblevel","seniority","rank"] },
-  { key: "dept",           label: "Department",                            aliases: ["dept","department","team","sub-department","subdepartment","org unit","orgunit"] },
+  { key: "title",          label: "Job title",                            aliases: ["title","job title","jobtitle","role","position","job","business title"] },
+  { key: "level",          label: "Level",                                 aliases: ["level","grade","job level","joblevel","seniority","rank","management level","compensation grade","pay grade"] },
+  { key: "dept",           label: "Department",                            aliases: ["dept","department","team","sub-department","subdepartment","org unit","orgunit","supervisory organization","division"] },
   { key: "bg",             label: "Business Unit",                        aliases: ["bg","business unit","businessunit","bu","business group","division","segment"] },
   { key: "fn",             label: "Discipline / job family",              aliases: ["fn","discipline","function","job family","jobfamily","family"] },
   { key: "location",       label: "Location",                             aliases: ["location","city","site","office","work location","worklocation"] },
   { key: "country",        label: "Country",                              aliases: ["country","nation"] },
   { key: "employmentType", label: "Employment type",                      aliases: ["employmenttype","employment type","emp type","worker type","workertype","type"] },
-  { key: "managerId",      label: "Manager ID",                            aliases: ["managerid","manager id","manager","reports to","reportsto","supervisor id","supervisor","supervisorid","manager employee id"] },
+  { key: "managerId",      label: "Manager ID",                            aliases: ["managerid","manager id","manager","reports to","reportsto","supervisor id","supervisor","supervisorid","manager employee id","manager (worker)","manager name","manager user","manager user id"] },
   { key: "status",         label: "Status",                               aliases: ["status","active","employment status","employmentstatus"] },
-  { key: "startDate",      label: "Start date",                           aliases: ["startdate","start date","hire date","hiredate","start","date hired"] },
+  { key: "startDate",      label: "Start date",                           aliases: ["startdate","start date","hire date","hiredate","start","date hired","original hire date","event date"] },
   { key: "endDate",        label: "End date",                             aliases: ["enddate","end date","term date","termdate","end","exit date","termination date"] },
   { key: "costCenter",     label: "Cost center",                          aliases: ["costcenter","cost center","cc","cost centre"] },
   { key: "band",           label: "Band",                                 aliases: ["band","pay band","payband","salary band"] },
@@ -2917,7 +2917,7 @@ function EmployeeImportWizard({ data, onCancel, onConfirm }) {
   const preview = useMemo(() => rows.slice(0, 6).map(r => {
     const g = i => i >= 0 ? (r[i] ?? "").toString().trim() : "";
     let first = g(col("first")), last = g(col("last"));
-    if ((!first || !last) && col("fullName") >= 0) { const p = g(col("fullName")).split(/\s+/); first = first || p[0] || ""; last = last || p.slice(1).join(" ") || ""; }
+    if ((!first || !last) && col("fullName") >= 0) { const p = parseEmployeeName(g(col("fullName"))); first = first || p.first; last = last || p.last; }
     const lv = normalizeLevel(g(col("level")));
     return { id: g(col("id")), name: `${first} ${last}`.trim() || "—", level: lv ? displayLevel(lv) : "L3*", dept: g(col("dept")) || "—", mgr: g(col("managerId")) || "—" };
   }), [rows, mapping]);
@@ -10022,6 +10022,7 @@ function OrgChartApp() {
   const [undoStack, setUndoStack] = useState([]);
   const [detailPanel, setDetailPanel] = useState(null);
   const [importState, setImportState] = useState(null); // open employee-import wizard payload
+  const [lastImportExceptions, setLastImportExceptions] = useState([]); // rows applyEmployeeImport had to fix up (bad dates, defaulted levels, orphaned/cyclic managers, duplicate ids)
   const [focusRoot, setFocusRoot] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [timelineMonth, setTimelineMonth] = useState(null);
@@ -11068,24 +11069,54 @@ function OrgChartApp() {
     const get = (row, i) => i >= 0 ? (row[i] ?? "").toString().trim() : "";
     const out = [];
     const seenIds = new Set();
+    const rowById = new Map(); // id -> 1-based source data row (for the exceptions report)
+    const exceptions = []; // { row, id, field, issue, action }
     let dupIds = 0, blankRows = 0, lvDefaulted = 0;
     for (let r = 0; r < rows.length; r++) {
+      const rowNum = r + 1; // 1-based data row (header excluded)
       const row = rows[r];
       const id = get(row, col("id"));
       if (!id) { blankRows++; continue; }
-      if (seenIds.has(id)) { dupIds++; continue; }
+      if (seenIds.has(id)) {
+        dupIds++;
+        exceptions.push({ row: rowNum, id, field: "id", issue: `Duplicate id '${id}'`, action: "row skipped" });
+        continue;
+      }
       seenIds.add(id);
+      rowById.set(id, rowNum);
       let first = get(row, col("first")), last = get(row, col("last"));
       if ((!first || !last) && col("fullName") >= 0) {
-        const p = get(row, col("fullName")).split(/\s+/);
-        if (!first) first = p[0] || "";
-        if (!last) last = p.slice(1).join(" ") || "";
+        const p = parseEmployeeName(get(row, col("fullName")));
+        if (!first) first = p.first;
+        if (!last) last = p.last;
       }
       if (!first && !last) first = id; // never leave a person nameless (blank avatar/labels)
       const dept = get(row, col("dept")) || "General";
       let level = normalizeLevel(get(row, col("level")));
-      if (!level) { level = "IC3"; lvDefaulted++; }
+      if (!level) {
+        level = "IC3"; lvDefaulted++;
+        exceptions.push({ row: rowNum, id, field: "level", issue: "Unrecognized level", action: "defaulted to L3" });
+      }
       const mgr = get(row, col("managerId"));
+
+      // Dates: empty is a legitimately-unknown value (null), NOT an exception. A non-empty
+      // cell that fails to parse (bad format, impossible calendar date, etc.) is left blank
+      // AND logged so the importer can go fix the source instead of silently getting "2024-01-01".
+      const rawStart = get(row, col("startDate"));
+      let startDate = null;
+      if (rawStart) {
+        const parsed = parseHrisDate(rawStart);
+        if (parsed.ok) startDate = parsed.iso;
+        else exceptions.push({ row: rowNum, id, field: "startDate", issue: `Unparseable date '${rawStart}'`, action: "left blank" });
+      }
+      const rawEnd = get(row, col("endDate"));
+      let endDate = null;
+      if (rawEnd) {
+        const parsed = parseHrisDate(rawEnd);
+        if (parsed.ok) endDate = parsed.iso;
+        else exceptions.push({ row: rowNum, id, field: "endDate", issue: `Unparseable date '${rawEnd}'`, action: "left blank" });
+      }
+
       out.push({
         id, first, last,
         title: get(row, col("title")) || `${displayLevel(level)} ${dept}`,
@@ -11097,9 +11128,7 @@ function OrgChartApp() {
         employmentType: get(row, col("employmentType")) || "FTE",
         managerId: mgr || null,
         status: get(row, col("status")) || "Active",
-        // Missing dates default to ~18mo before "today" so tenure math stays sane (not 1970)
-        startDate: get(row, col("startDate")) || "2024-01-01",
-        endDate: get(row, col("endDate")) || null,
+        startDate, endDate,
         costCenter: get(row, col("costCenter")) || null,
         band: get(row, col("band")) || null,
       });
@@ -11117,14 +11146,26 @@ function OrgChartApp() {
     const idSet = new Set(finalList.map(e => e.id));
     let orphaned = 0;
     finalList.forEach(e => {
-      if (e.managerId && !idSet.has(e.managerId)) { e.managerId = null; orphaned++; }
-      if (e.id === e.managerId) { e.managerId = null; orphaned++; }
+      if (e.managerId && !idSet.has(e.managerId)) {
+        exceptions.push({ row: rowById.get(e.id) ?? null, id: e.id, field: "managerId", issue: `Unknown manager id '${e.managerId}'`, action: "reset to top-level" });
+        e.managerId = null; orphaned++;
+      }
+      if (e.id === e.managerId) {
+        exceptions.push({ row: rowById.get(e.id) ?? null, id: e.id, field: "managerId", issue: "Manager id equals own id", action: "reset to top-level" });
+        e.managerId = null; orphaned++;
+      }
     });
     const idMap = new Map(finalList.map(e => [e.id, e]));
     let cyclesBroken = 0;
     finalList.forEach(e => {
       const seen = new Set(); let cur = e;
-      while (cur && cur.managerId) { if (seen.has(cur.id)) { e.managerId = null; cyclesBroken++; break; } seen.add(cur.id); cur = idMap.get(cur.managerId); }
+      while (cur && cur.managerId) {
+        if (seen.has(cur.id)) {
+          exceptions.push({ row: rowById.get(e.id) ?? null, id: e.id, field: "managerId", issue: "Reporting cycle detected", action: "reset to top-level" });
+          e.managerId = null; cyclesBroken++; break;
+        }
+        seen.add(cur.id); cur = idMap.get(cur.managerId);
+      }
     });
 
     setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(employees))]);
@@ -11134,6 +11175,7 @@ function OrgChartApp() {
     setSelectedNode(null); setDetailPanel(null); setFocusRoot(null);
     setExpandedNodes(new Set()); setInsightHighlightIds(new Set()); setChainFilterId(null);
     setImportState(null);
+    setLastImportExceptions(exceptions);
     const notes = [];
     if (mode === "append") notes.push(`merged into existing org — ${finalList.length} total`);
     if (dupIds)       notes.push(`${dupIds} duplicate id${dupIds > 1 ? "s" : ""} skipped`);
@@ -11141,7 +11183,15 @@ function OrgChartApp() {
     if (lvDefaulted)  notes.push(`${lvDefaulted} unrecognized level${lvDefaulted > 1 ? "s" : ""} set to L3`);
     if (orphaned)     notes.push(`${orphaned} unknown manager ref${orphaned > 1 ? "s" : ""} reset to root`);
     if (cyclesBroken) notes.push(`${cyclesBroken} reporting cycle${cyclesBroken > 1 ? "s" : ""} broken`);
-    alert(`Imported ${out.length} row${out.length > 1 ? "s" : ""}.${notes.length ? "\n• " + notes.join("\n• ") : ""}`);
+    alert(`Imported ${out.length} row${out.length > 1 ? "s" : ""}.${notes.length ? "\n• " + notes.join("\n• ") : ""}${exceptions.length ? `\n\n${exceptions.length} exception${exceptions.length > 1 ? "s" : ""} logged — see the banner below the toolbar to download the CSV.` : ""}`);
+  }
+
+  // CSV export of lastImportExceptions for the dismissible import-exceptions banner.
+  function downloadImportExceptions() {
+    const cols = ["Row", "Employee ID", "Field", "Issue", "Action"];
+    const lines = [cols.join(","), ...lastImportExceptions.map(x =>
+      [x.row ?? "", x.id ?? "", x.field ?? "", x.issue ?? "", x.action ?? ""].map(csvCell).join(","))];
+    downloadFile(`import-exceptions-${new Date().toISOString().slice(0, 10)}.csv`, lines.join("\n"), "text/csv");
   }
 
   // Pipeline config — currently the user-editable piece is just the stage order, persisted in
@@ -11797,6 +11847,20 @@ function OrgChartApp() {
               </div>
             </div>
           </div>
+
+          {/* Import exceptions banner — bad dates, defaulted levels, orphaned/cyclic managers, dup ids */}
+          {view === "org-chart" && lastImportExceptions.length > 0 && (
+            <div className="border-b px-4 py-1.5 flex items-center gap-2 text-xs bg-amber-50 border-amber-100">
+              <AlertTriangle size={12} className="text-amber-600"/>
+              <span className="text-amber-800">
+                Import needed <span className="font-semibold">{lastImportExceptions.length}</span> fix-up{lastImportExceptions.length > 1 ? "s" : ""} — bad dates, defaulted levels, or manager refs.
+              </span>
+              <button onClick={downloadImportExceptions} className="flex items-center gap-1 text-amber-700 hover:text-amber-900 font-medium">
+                <Download size={12}/>Download exceptions (CSV)
+              </button>
+              <button onClick={() => setLastImportExceptions([])} className="ml-auto flex items-center gap-1 text-amber-600 hover:text-amber-800"><X size={12}/>Dismiss</button>
+            </div>
+          )}
 
           {/* Focus root breadcrumb / chain filter banner */}
           {view === "org-chart" && (focusRoot && tree.map[focusRoot] || insightHighlightIds.size > 0) && (
