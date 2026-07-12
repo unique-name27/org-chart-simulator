@@ -3008,6 +3008,116 @@ function EmployeeImportWizard({ data, onCancel, onConfirm }) {
   );
 }
 
+// ─── SCENARIO DIFF MODAL — compares two captured org snapshots (scenario A/B) ──
+// Snapshot + diff only, no branching history. Reads scenarioA/scenarioB from
+// context, runs the pure diffScenarios() from core.mjs, and renders it read-only.
+function ScenarioDiffModal({ onClose }) {
+  const { scenarioA, scenarioB } = useContext(AppCtx);
+  const d = useMemo(() => diffScenarios(scenarioA.employees, scenarioB.employees), [scenarioA, scenarioB]);
+  const deptSorted = useMemo(() => [...d.deptDeltas].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)), [d.deptDeltas]);
+  const depthKeys = useMemo(() => [...new Set([...Object.keys(d.layers.beforeByDepth), ...Object.keys(d.layers.afterByDepth)])]
+    .map(Number).sort((a, b) => a - b), [d.layers]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()} style={{ fontFamily: "'DM Sans', sans-serif" }}>
+        <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Compare scenarios</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              <span className="font-medium">{scenarioA.label}</span> ({new Date(scenarioA.capturedAt).toLocaleString()}) vs{" "}
+              <span className="font-medium">{scenarioB.label}</span> ({new Date(scenarioB.capturedAt).toLocaleString()})
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={18} /></button>
+        </div>
+
+        <div className="px-5 py-4 overflow-y-auto space-y-5">
+          <section>
+            <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Reporting moves</h3>
+            {d.reportingChanges.length === 0 ? <p className="text-xs text-gray-400">No reporting changes.</p> : (
+              <ul className="text-xs text-gray-700 space-y-1">
+                {d.reportingChanges.map(r => (
+                  <li key={r.id} className="flex items-center gap-1.5">
+                    <span className="font-medium">{r.name}</span>
+                    <span className="text-gray-400">{r.fromManagerName || "(none)"}</span>
+                    <ArrowRight size={10} className="text-gray-400"/>
+                    <span className="text-gray-700">{r.toManagerName || "(none)"}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section>
+            <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Span changes</h3>
+            {d.spanChanges.length === 0 ? <p className="text-xs text-gray-400">No span changes.</p> : (
+              <ul className="text-xs text-gray-700 space-y-1">
+                {d.spanChanges.map(s => (
+                  <li key={s.managerId} className="flex items-center gap-1.5">
+                    <span className="font-medium">{s.name || s.managerId}</span>
+                    <span className="text-gray-500">{s.fromSpan} → {s.toSpan}</span>
+                    <span className={s.delta > 0 ? "text-emerald-600" : "text-red-500"}>({s.delta > 0 ? "+" : ""}{s.delta})</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section>
+            <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Layers</h3>
+            <p className="text-xs text-gray-700 mb-1">Max depth: {d.layers.beforeMaxDepth} → {d.layers.afterMaxDepth}</p>
+            {depthKeys.length === 0 ? <p className="text-xs text-gray-400">No data.</p> : (
+              <ul className="text-xs text-gray-600 space-y-0.5">
+                {depthKeys.map(k => (
+                  <li key={k}>Depth {k}: {d.layers.beforeByDepth[k] || 0} → {d.layers.afterByDepth[k] || 0}</li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section>
+            <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Headcount by department</h3>
+            {deptSorted.length === 0 ? <p className="text-xs text-gray-400">No department changes.</p> : (
+              <ul className="text-xs text-gray-700 space-y-0.5">
+                {deptSorted.map(x => (
+                  <li key={x.dept} className="flex items-center gap-1.5">
+                    <span className="font-medium">{x.dept}</span>
+                    <span className="text-gray-500">{x.before} → {x.after}</span>
+                    <span className={x.delta > 0 ? "text-emerald-600" : x.delta < 0 ? "text-red-500" : "text-gray-400"}>({x.delta > 0 ? "+" : ""}{x.delta})</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section>
+            <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Added <span className="text-gray-400 font-normal normal-case">({d.added.length})</span></h3>
+            {d.added.length === 0 ? <p className="text-xs text-gray-400">No one added.</p> : (
+              <ul className="text-xs text-gray-700 space-y-0.5">
+                {d.added.map(a => <li key={a.id}>{a.name} <span className="text-gray-400">· {a.dept || "—"}</span></li>)}
+              </ul>
+            )}
+          </section>
+
+          <section>
+            <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Removed <span className="text-gray-400 font-normal normal-case">({d.removed.length})</span></h3>
+            {d.removed.length === 0 ? <p className="text-xs text-gray-400">No one removed.</p> : (
+              <ul className="text-xs text-gray-700 space-y-0.5">
+                {d.removed.map(r => <li key={r.id}>{r.name} <span className="text-gray-400">· {r.dept || "—"}</span></li>)}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-end">
+          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ─── SLIDE BUILDER — turn a chunk of the org into a presentation slide ───────
 // HRBPs import headcount (Excel/CSV), pick a person as the top of the box, choose
@@ -9881,6 +9991,11 @@ function OrgChartApp() {
   // and sticky notes on the slide builder alongside the rest of the org data.
   const [openRoles, setOpenRoles] = useState([]);
   const [stickyNotes, setStickyNotes] = useState([]);
+  // Scenario compare/diff — snapshot-only (no branching history). Each slot holds
+  // { label, capturedAt, employees } captured on demand via captureScenario().
+  const [scenarioA, setScenarioA] = useState(null);
+  const [scenarioB, setScenarioB] = useState(null);
+  const [showDiff, setShowDiff] = useState(false);
   const [view, setView] = useState("org-chart");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNode, setSelectedNode] = useState(null);
@@ -11181,7 +11296,7 @@ function OrgChartApp() {
   // ─── Session persistence: autosave to localStorage + manual Save/Load session file ───
   const SESSION_KEY = "orgSimSession";
   function buildSessionDoc() {
-    return { v: 1, savedAt: new Date().toISOString(), isSyntheticData, importedAt, employees, annotations, plan, openRoles, stickyNotes };
+    return { v: 1, savedAt: new Date().toISOString(), isSyntheticData, importedAt, employees, annotations, plan, openRoles, stickyNotes, scenarioA, scenarioB };
   }
   function applySessionDoc(doc) {
     if (!doc || typeof doc !== "object") return false;
@@ -11191,14 +11306,37 @@ function OrgChartApp() {
     if (Array.isArray(doc.openRoles)) setOpenRoles(doc.openRoles);
     if (Array.isArray(doc.stickyNotes)) setStickyNotes(doc.stickyNotes);
     if (typeof doc.isSyntheticData === "boolean") setIsSyntheticData(doc.isSyntheticData);
+    if (doc.scenarioA) setScenarioA(doc.scenarioA);
+    if (doc.scenarioB) setScenarioB(doc.scenarioB);
     setImportedAt(doc.importedAt || null);
     return true;
+  }
+  // Snapshot the current roster into slot "A" or "B" for later comparison.
+  const captureScenario = (slot) => {
+    const snap = { label: slot === "A" ? "Option A" : "Option B", capturedAt: new Date().toISOString(), employees: JSON.parse(JSON.stringify(employees)) };
+    (slot === "A" ? setScenarioA : setScenarioB)(snap);
+  };
+  // Flatten the A/B diff into a single CSV (leading "Section" column) matching the
+  // sections shown in ScenarioDiffModal, and download it.
+  function exportScenarioDiffCSV() {
+    if (!scenarioA || !scenarioB) return;
+    const d = diffScenarios(scenarioA.employees, scenarioB.employees);
+    const rows = [["Section", "Field1", "Field2", "Field3", "Field4", "Field5"]];
+    d.reportingChanges.forEach(r => rows.push(["Reporting", r.name, r.fromManagerName ?? "(none)", r.toManagerName ?? "(none)", r.fromManagerId ?? "", r.toManagerId ?? ""]));
+    d.spanChanges.forEach(s => rows.push(["Span", s.name, s.fromSpan, s.toSpan, s.delta]));
+    rows.push(["Layers", "Max depth", d.layers.beforeMaxDepth, d.layers.afterMaxDepth, d.layers.afterMaxDepth - d.layers.beforeMaxDepth]);
+    d.deptDeltas.forEach(x => rows.push(["Dept", x.dept, x.before, x.after, x.delta]));
+    d.levelDeltas.forEach(x => rows.push(["Level", x.level, x.before, x.after, x.delta]));
+    d.added.forEach(a => rows.push(["Added", a.name, a.dept, a.managerId ?? ""]));
+    d.removed.forEach(r => rows.push(["Removed", r.name, r.dept, r.managerId ?? ""]));
+    const csv = rows.map(r => r.map(csvCell).join(",")).join("\n");
+    downloadFile(`scenario-diff-${new Date().toISOString().slice(0, 10)}.csv`, csv, "text/csv");
   }
   // Debounced autosave — fires 800ms after the last change to any persisted slice.
   useEffect(() => {
     const t = setTimeout(() => { try { localStorage.setItem(SESSION_KEY, JSON.stringify(buildSessionDoc())); } catch {} }, 800);
     return () => clearTimeout(t);
-  }, [employees, annotations, plan, openRoles, stickyNotes, isSyntheticData, importedAt]);
+  }, [employees, annotations, plan, openRoles, stickyNotes, isSyntheticData, importedAt, scenarioA, scenarioB]);
   // Restore the last autosaved session once on mount.
   useEffect(() => { try { const raw = localStorage.getItem(SESSION_KEY); if (raw) applySessionDoc(JSON.parse(raw)); } catch {} }, []);
 
@@ -11206,6 +11344,7 @@ function OrgChartApp() {
   const ctxValue = {
     employees, setEmployees, isSyntheticData, importedAt,
     openRoles, setOpenRoles, stickyNotes, setStickyNotes,
+    scenarioA, setScenarioA, scenarioB, setScenarioB,
     view, setView, searchQuery, setSearchQuery,
     selectedNode, setSelectedNode, expandedNodes, setExpandedNodes,
     slideSeedId, setSlideSeedId,
@@ -11557,6 +11696,37 @@ function OrgChartApp() {
                     reader.readAsText(f);
                   }}/>
               </label>
+              {/* ── Scenario compare/diff — capture two snapshots of the roster and diff them ── */}
+              <div className="flex items-center gap-1 border-l border-gray-200 pl-2 ml-0.5">
+                <button
+                  title="Capture the current roster as scenario A"
+                  onClick={() => captureScenario("A")}
+                  className="flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors">
+                  <Check size={12}/>Capture as A
+                </button>
+                {scenarioA && <span className="text-[10px] text-gray-400 -ml-0.5">A: {new Date(scenarioA.capturedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
+                <button
+                  title="Capture the current roster as scenario B"
+                  onClick={() => captureScenario("B")}
+                  className="flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors">
+                  <Check size={12}/>Capture as B
+                </button>
+                {scenarioB && <span className="text-[10px] text-gray-400 -ml-0.5">B: {new Date(scenarioB.capturedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
+                <button
+                  title="Compare scenario A against scenario B"
+                  disabled={!scenarioA || !scenarioB}
+                  onClick={() => setShowDiff(true)}
+                  className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${scenarioA && scenarioB ? "bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100" : "bg-gray-50 text-gray-300 cursor-not-allowed"}`}>
+                  <Layers size={12}/>Compare A ↔ B
+                </button>
+                <button
+                  title="Export the A/B diff as a CSV file"
+                  disabled={!scenarioA || !scenarioB}
+                  onClick={exportScenarioDiffCSV}
+                  className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${scenarioA && scenarioB ? "bg-gray-100 text-gray-600 hover:bg-gray-200" : "bg-gray-50 text-gray-300 cursor-not-allowed"}`}>
+                  <Download size={12}/>Export diff (CSV)
+                </button>
+              </div>
               {atLeast(mode, "advanced") && <button
                 title="Export analytics report as JSON"
                 onClick={() => {
@@ -11779,6 +11949,7 @@ function OrgChartApp() {
         {/* Detail panel */}
         {detailPanel && <DetailPanel/>}
         {importState && <EmployeeImportWizard data={importState} onCancel={() => setImportState(null)} onConfirm={(mapping, mode) => applyEmployeeImport(importState, mapping, mode)} />}
+        {showDiff && scenarioA && scenarioB && <ScenarioDiffModal onClose={() => setShowDiff(false)} />}
         {exitSimNode && <ExitSimModal/>}
       </div>
       </div>

@@ -187,3 +187,141 @@ export function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfor
 
   return { cards, links, groups, width, height, count: cards.length, truncated };
 }
+
+// ─── SCENARIO COMPARE / DIFF ───
+// Pure diff over two plain employee-array snapshots. No React/DOM. O(n) via lookup maps.
+function _nameOf(rec) { return rec ? `${rec.first || ""} ${rec.last || ""}`.trim() : ""; }
+
+function _spanByManager(list) {
+  const spans = new Map();
+  for (const e of list) {
+    if (e.managerId == null) continue;
+    spans.set(e.managerId, (spans.get(e.managerId) || 0) + 1);
+  }
+  return spans;
+}
+
+function _countBy(list, key) {
+  const counts = new Map();
+  for (const e of list) {
+    const k = e[key] == null ? "—" : e[key];
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  return counts;
+}
+
+// Depth of each node (root = 0), walking managerId chains. Guards cycles with a
+// per-walk visited set so a malformed chain (or a cycle) can't hang the function.
+function _computeDepths(list, byId) {
+  const depth = new Map();
+  for (const e of list) {
+    if (depth.has(e.id)) continue;
+    const chain = [];
+    let cur = e;
+    const seen = new Set();
+    while (cur && !seen.has(cur.id)) {
+      if (depth.has(cur.id)) break;
+      seen.add(cur.id);
+      chain.push(cur.id);
+      cur = cur.managerId != null ? byId.get(cur.managerId) : null;
+    }
+    let base = cur && depth.has(cur.id) ? depth.get(cur.id) + 1 : 0;
+    for (let i = chain.length - 1; i >= 0; i--) { depth.set(chain[i], base); base++; }
+  }
+  return depth;
+}
+
+function _depthCounts(list, byId) {
+  const depth = _computeDepths(list, byId);
+  const byDepth = {};
+  let maxDepth = 0;
+  for (const e of list) {
+    const d = depth.get(e.id) ?? 0;
+    byDepth[d] = (byDepth[d] || 0) + 1;
+    if (d > maxDepth) maxDepth = d;
+  }
+  return { maxDepth, byDepth };
+}
+
+export function diffScenarios(beforeEmployees, afterEmployees) {
+  const before = beforeEmployees || [];
+  const after = afterEmployees || [];
+  const beforeById = new Map(before.map(e => [e.id, e]));
+  const afterById = new Map(after.map(e => [e.id, e]));
+
+  const added = [];
+  for (const e of after) {
+    if (!beforeById.has(e.id)) added.push({ id: e.id, name: _nameOf(e), dept: e.dept ?? null, managerId: e.managerId ?? null });
+  }
+  const removed = [];
+  for (const e of before) {
+    if (!afterById.has(e.id)) removed.push({ id: e.id, name: _nameOf(e), dept: e.dept ?? null, managerId: e.managerId ?? null });
+  }
+
+  const reportingChanges = [];
+  for (const e of after) {
+    const b = beforeById.get(e.id);
+    if (!b) continue; // handled by added/removed
+    const fromMgrId = b.managerId ?? null;
+    const toMgrId = e.managerId ?? null;
+    if (fromMgrId !== toMgrId) {
+      reportingChanges.push({
+        id: e.id,
+        name: _nameOf(e) || _nameOf(b),
+        fromManagerId: fromMgrId,
+        fromManagerName: fromMgrId != null ? _nameOf(beforeById.get(fromMgrId)) : null,
+        toManagerId: toMgrId,
+        toManagerName: toMgrId != null ? _nameOf(afterById.get(toMgrId)) : null,
+      });
+    }
+  }
+
+  const beforeSpans = _spanByManager(before);
+  const afterSpans = _spanByManager(after);
+  const spanChanges = [];
+  const allManagerIds = new Set([...beforeSpans.keys(), ...afterSpans.keys()]);
+  for (const mgrId of allManagerIds) {
+    const fromSpan = beforeSpans.get(mgrId) || 0;
+    const toSpan = afterSpans.get(mgrId) || 0;
+    if (fromSpan !== toSpan) {
+      const mgrRec = afterById.get(mgrId) || beforeById.get(mgrId);
+      spanChanges.push({ managerId: mgrId, name: _nameOf(mgrRec), fromSpan, toSpan, delta: toSpan - fromSpan });
+    }
+  }
+
+  const beforeDept = _countBy(before, "dept");
+  const afterDept = _countBy(after, "dept");
+  const deptDeltas = [];
+  for (const dept of new Set([...beforeDept.keys(), ...afterDept.keys()])) {
+    const b = beforeDept.get(dept) || 0;
+    const a = afterDept.get(dept) || 0;
+    deptDeltas.push({ dept, before: b, after: a, delta: a - b });
+  }
+
+  const beforeLevel = _countBy(before, "level");
+  const afterLevel = _countBy(after, "level");
+  const levelDeltas = [];
+  for (const level of new Set([...beforeLevel.keys(), ...afterLevel.keys()])) {
+    const b = beforeLevel.get(level) || 0;
+    const a = afterLevel.get(level) || 0;
+    levelDeltas.push({ level, before: b, after: a, delta: a - b });
+  }
+
+  const beforeDepth = _depthCounts(before, beforeById);
+  const afterDepth = _depthCounts(after, afterById);
+
+  return {
+    added,
+    removed,
+    reportingChanges,
+    spanChanges,
+    deptDeltas,
+    levelDeltas,
+    layers: {
+      beforeMaxDepth: beforeDepth.maxDepth,
+      afterMaxDepth: afterDepth.maxDepth,
+      beforeByDepth: beforeDepth.byDepth,
+      afterByDepth: afterDepth.byDepth,
+    },
+  };
+}
