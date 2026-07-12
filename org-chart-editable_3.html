@@ -4,7 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Org Chart Simulator</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net https://esm.sh 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob: https://api.anthropic.com https://esm.sh wss: https:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';"/>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net https://esm.sh 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob: https://api.anthropic.com https://esm.sh wss:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';"/>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Patrick+Hand&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
@@ -2310,6 +2310,7 @@ function NaturalLanguageQuery() {
     }
   });
   const inputRef = useRef(null);
+  const askConsentRef = useRef(false);
   useEffect(() => {
     if (ctx == null ? void 0 : ctx.nlOpen) {
       setError(null);
@@ -2342,6 +2343,13 @@ function NaturalLanguageQuery() {
   async function ask() {
     var _a2, _b2, _c2, _d;
     if (!question.trim() || !apiKey) return;
+    const realData = !ctx.isSyntheticData;
+    if (realData || !askConsentRef.current) {
+      const warn = realData ? "WARNING: You have imported real org data. Sending it to an external API may violate your company's data policy.\n\n" : "";
+      const ok = window.confirm(warn + "This sends your active employee roster (names, titles, levels, departments, locations, reporting lines) to Anthropic's API to answer your question.\n\nContinue?");
+      if (!ok) return;
+      if (!realData) askConsentRef.current = true;
+    }
     setLoading(true);
     setError(null);
     setResult(null);
@@ -3007,10 +3015,10 @@ function slideCardTextLines(node, fields, dens) {
   if (L.meta) lines.push({ text: L.meta, size: dens.metaSz, weight: 400, fill: "#94a3b8" });
   return lines.slice(0, dens.lines);
 }
-function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable, notes = [], onMoveNote, onSelectNote, selectedNoteId }) {
+function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable, notes = [], onMoveNote, onSelectNote, selectedNoteId, footer }) {
   const PAD = 28, TITLE_H = title ? 74 : 24;
   const W = Math.max(760, layout.width + PAD * 2);
-  const H = layout.height + PAD * 2 + TITLE_H;
+  const H = layout.height + PAD * 2 + TITLE_H + (footer ? 22 : 0);
   const ox = (W - layout.width) / 2;
   const oy = PAD + TITLE_H;
   const stripe = Math.max(4, Math.round(dens.cardW * 0.032));
@@ -3107,7 +3115,8 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
         /* @__PURE__ */ React.createElement("rect", { x: nx, y: ny, width: NOTE_W, height: h, rx: "4", fill: pal.bg, stroke: pal.border, strokeWidth: "1" }),
         lines.map((ln, i) => /* @__PURE__ */ React.createElement("text", { key: i, x: nx + NOTE_PAD, y: ny + NOTE_PAD + (i + 1) * NOTE_LINE - 4, fontSize: NOTE_FONT, fill: pal.text, style: { fontFamily: "'Caveat', 'DM Sans', cursive" }, fontWeight: "600" }, ln))
       );
-    })
+    }),
+    footer && /* @__PURE__ */ React.createElement("text", { x: PAD, y: H - 12, fontSize: "11", fill: "#94a3b8" }, truncateToWidth(footer, W - PAD * 2, 11))
   );
 }
 function exportSlidePNG(svgEl, filename, scale = 2) {
@@ -3260,7 +3269,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
   pptx.writeFile({ fileName: deckName }).catch((err) => alert("Could not write PowerPoint: " + ((err == null ? void 0 : err.message) || err)));
 }
 function OrgSlideView() {
-  const { tree, activeEmployees, focusRoot, importEmployeesCSV, slideSeedId, setSlideSeedId } = useContext(AppCtx);
+  const { tree, activeEmployees, focusRoot, importEmployeesCSV, slideSeedId, setSlideSeedId, openRoles, setOpenRoles, stickyNotes, setStickyNotes, importedAt } = useContext(AppCtx);
   const svgRef = useRef(null);
   const people = useMemo(() => {
     const list = Object.values(tree.map || {});
@@ -3276,9 +3285,7 @@ function OrgSlideView() {
   const [density, setDensity] = useState("comfortable");
   const [wrap, setWrap] = useState(true);
   const [wrapCols, setWrapCols] = useState("auto");
-  const [openRoles, setOpenRoles] = useState([]);
   const [newRole, setNewRole] = useState({ managerId: "", title: "", level: "L4", count: 1 });
-  const [stickyNotes, setStickyNotes] = useState([]);
   const [selectedNoteId, setSelectedNoteId] = useState(null);
   useEffect(() => {
     if (!tree.map[rootId]) setRootId(tree.root ? tree.root.id : people[0] && people[0].id);
@@ -3450,7 +3457,9 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
   const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "\u2019" : "\u2019s"} organization` : "Org chart";
   const title = titleText.trim() || autoTitle;
   const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  \xB7  ${rootNode._totalReports || 0} people in org` : "";
-  const footer = (/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" });
+  const snapshotStamp = importedAt ? `Org snapshot as of ${new Date(importedAt).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" })}` : "Org snapshot (sample data)";
+  const CONFIDENTIAL = "Company Confidential";
+  const footer = `${CONFIDENTIAL}  \xB7  ${snapshotStamp}  \xB7  Generated ${(/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" })}`;
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const base = q ? people.filter((p) => `${p.first} ${p.last} ${p.title} ${p.dept}`.toLowerCase().includes(q)) : people;
@@ -3654,7 +3663,8 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
       notes: stickyNotes,
       onMoveNote: moveNote,
       onSelectNote: setSelectedNoteId,
-      selectedNoteId
+      selectedNoteId,
+      footer
     }
   )), /* @__PURE__ */ React.createElement("p", { className: "text-center text-[11px] text-gray-400 mt-2" }, "Live preview \xB7 ", layout.count - openCount, " ", layout.count - openCount === 1 ? "person" : "people", " shown", openCount > 0 ? ` \xB7 ${openCount} open position${openCount === 1 ? "" : "s"}` : "")));
 }
@@ -9897,6 +9907,10 @@ function ExitSimModal() {
 function OrgChartApp() {
   var _a;
   const [employees, setEmployees] = useState(() => generateSemiCompany());
+  const [isSyntheticData, setIsSyntheticData] = useState(true);
+  const [importedAt, setImportedAt] = useState(null);
+  const [openRoles, setOpenRoles] = useState([]);
+  const [stickyNotes, setStickyNotes] = useState([]);
   const [view, setView] = useState("org-chart");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNode, setSelectedNode] = useState(null);
@@ -10745,7 +10759,8 @@ function OrgChartApp() {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
-      doc.text(`SemiCorp \xB7 ${today}`, M, H - 24);
+      const stamp = importedAt ? `Org snapshot as of ${new Date(importedAt).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" })}` : "Org snapshot (sample data)";
+      doc.text(`Company Confidential  \xB7  ${stamp}  \xB7  Generated ${today}`, M, H - 24);
       doc.text(`${pageNum} / ${total}`, W - M, H - 24, { align: "right" });
     }
     function table(rows, x, y, colWidths, headers) {
@@ -10888,7 +10903,7 @@ function OrgChartApp() {
     }
     drawFooter(6, TOTAL);
     doc.save(`semicorp-exec-deck-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.pdf`);
-  }, [activeEmployees, employees, tree, hotspots, flightRisks, plan, locations, planYears, planHorizonQ, mode]);
+  }, [activeEmployees, employees, tree, hotspots, flightRisks, plan, locations, planYears, planHorizonQ, mode, importedAt]);
   const searchResults = useMemo(() => {
     if (!searchQuery || searchQuery.length < 2) return [];
     const q = searchQuery.toLowerCase();
@@ -11037,6 +11052,8 @@ function OrgChartApp() {
     });
     setUndoStack((prev) => [...prev, JSON.parse(JSON.stringify(employees))]);
     setEmployees(finalList);
+    setIsSyntheticData(false);
+    setImportedAt((/* @__PURE__ */ new Date()).toISOString());
     setSelectedNode(null);
     setDetailPanel(null);
     setFocusRoot(null);
@@ -11096,6 +11113,7 @@ function OrgChartApp() {
   }
   const COOP_COLORS = ["#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#db2777", "#ca8a04"];
   const netRef = useRef({ active: false, room: null, sendDoc: null, sendPres: null, gotState: false });
+  const coopConsentRef = useRef(false);
   const employeesRef = useRef(employees);
   employeesRef.current = employees;
   const annotationsRef = useRef(annotations);
@@ -11126,6 +11144,16 @@ function OrgChartApp() {
   };
   async function coopJoin(codeRaw, nameRaw) {
     if (netRef.current.active) return;
+    const realData = !isSyntheticData;
+    if (realData || !coopConsentRef.current) {
+      const warn = realData ? "WARNING: You have imported real org data. Sharing it over public P2P relays may violate your company's data policy.\n\n" : "";
+      const ok = window.confirm(warn + "Co-op shares your CURRENT org data (names, titles, reporting lines) with everyone who has the room code, streamed peer-to-peer over public relays. Room codes are guessable and there is no access control.\n\nContinue?");
+      if (!ok) {
+        setCoopStatus("Co-op cancelled.");
+        return;
+      }
+      if (!realData) coopConsentRef.current = true;
+    }
     const code = (codeRaw || "").trim();
     if (!code) {
       setCoopStatus("Enter a room code first.");
@@ -11255,9 +11283,46 @@ function OrgChartApp() {
     } catch {
     }
   }, []);
+  const SESSION_KEY = "orgSimSession";
+  function buildSessionDoc() {
+    return { v: 1, savedAt: (/* @__PURE__ */ new Date()).toISOString(), isSyntheticData, importedAt, employees, annotations, plan, openRoles, stickyNotes };
+  }
+  function applySessionDoc(doc) {
+    if (!doc || typeof doc !== "object") return false;
+    if (Array.isArray(doc.employees)) setEmployees(doc.employees);
+    if (doc.annotations && typeof doc.annotations === "object") setAnnotations(doc.annotations);
+    if (doc.plan && typeof doc.plan === "object") setPlan(doc.plan);
+    if (Array.isArray(doc.openRoles)) setOpenRoles(doc.openRoles);
+    if (Array.isArray(doc.stickyNotes)) setStickyNotes(doc.stickyNotes);
+    if (typeof doc.isSyntheticData === "boolean") setIsSyntheticData(doc.isSyntheticData);
+    setImportedAt(doc.importedAt || null);
+    return true;
+  }
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(SESSION_KEY, JSON.stringify(buildSessionDoc()));
+      } catch {
+      }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [employees, annotations, plan, openRoles, stickyNotes, isSyntheticData, importedAt]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (raw) applySessionDoc(JSON.parse(raw));
+    } catch {
+    }
+  }, []);
   const ctxValue = {
     employees,
     setEmployees,
+    isSyntheticData,
+    importedAt,
+    openRoles,
+    setOpenRoles,
+    stickyNotes,
+    setStickyNotes,
     view,
     setView,
     searchQuery,
@@ -11448,7 +11513,7 @@ function OrgChartApp() {
     confirmDrop,
     cancelDrop
   };
-  return /* @__PURE__ */ React.createElement(AppCtx.Provider, { value: ctxValue }, /* @__PURE__ */ React.createElement("div", { className: "h-screen flex flex-col overflow-hidden", style: { fontFamily: "'DM Sans', sans-serif", background: "#f8fafc" } }, !dataNoticeDismissed && /* @__PURE__ */ React.createElement("div", { className: "shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-xs text-amber-900" }, /* @__PURE__ */ React.createElement("span", { className: "font-semibold" }, "Privacy notice:"), /* @__PURE__ */ React.createElement("span", null, "All data stays in your browser \u2014 nothing is sent over the network. There is no auto-save; use Export to save your work."), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement(AppCtx.Provider, { value: ctxValue }, /* @__PURE__ */ React.createElement("div", { className: "h-screen flex flex-col overflow-hidden", style: { fontFamily: "'DM Sans', sans-serif", background: "#f8fafc" } }, !dataNoticeDismissed && /* @__PURE__ */ React.createElement("div", { className: "shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-xs text-amber-900" }, /* @__PURE__ */ React.createElement("span", { className: "font-semibold" }, "Privacy notice:"), /* @__PURE__ */ React.createElement("span", null, 'Your org data stays in this browser and is auto-saved here. Two optional features send data out when you explicitly turn them on: "Ask the org" (sends the roster to Anthropic) and Co-op (streams the org peer-to-peer over public relays). Everything else is local. Use Save session to keep a file copy.'), /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: clearAllLocalData,
@@ -11631,6 +11696,48 @@ function OrgChartApp() {
           const f = (_a2 = e.target.files) == null ? void 0 : _a2[0];
           if (f) openImportWizard(f);
           e.target.value = "";
+        }
+      }
+    )
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      title: "Save the full session (employees, annotations, plan, slide notes) as a JSON file you can Load later",
+      onClick: () => downloadFile(`org-session-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.json`, JSON.stringify(buildSessionDoc(), null, 2), "application/json"),
+      className: "flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors"
+    },
+    /* @__PURE__ */ React.createElement(Download, { size: 12 }),
+    "Save session"
+  ), /* @__PURE__ */ React.createElement(
+    "label",
+    {
+      title: "Load a previously saved session JSON file \u2014 restores employees, annotations, plan, and slide notes",
+      className: "flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer"
+    },
+    /* @__PURE__ */ React.createElement(Plus, { size: 12 }),
+    "Load session",
+    /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "file",
+        accept: "application/json,.json",
+        className: "hidden",
+        onChange: (e) => {
+          var _a2;
+          const f = (_a2 = e.target.files) == null ? void 0 : _a2[0];
+          e.target.value = "";
+          if (!f) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            try {
+              const doc = JSON.parse(reader.result);
+              if (!applySessionDoc(doc)) throw new Error("Invalid session file");
+            } catch (err) {
+              alert("Could not load session: " + err.message);
+            }
+          };
+          reader.onerror = () => alert("Could not read the session file.");
+          reader.readAsText(f);
         }
       }
     )

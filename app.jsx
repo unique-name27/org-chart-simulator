@@ -2548,6 +2548,7 @@ function NaturalLanguageQuery() {
     try { return JSON.parse(localStorage.getItem("orgSimNLHistory") || "[]"); } catch { return []; }
   });
   const inputRef = useRef(null);
+  const askConsentRef = useRef(false);
 
   useEffect(() => {
     if (ctx?.nlOpen) {
@@ -2578,6 +2579,13 @@ function NaturalLanguageQuery() {
 
   async function ask() {
     if (!question.trim() || !apiKey) return;
+    const realData = !ctx.isSyntheticData;
+    if (realData || !askConsentRef.current) {
+      const warn = realData ? "WARNING: You have imported real org data. Sending it to an external API may violate your company's data policy.\n\n" : "";
+      const ok = window.confirm(warn + "This sends your active employee roster (names, titles, levels, departments, locations, reporting lines) to Anthropic's API to answer your question.\n\nContinue?");
+      if (!ok) return;
+      if (!realData) askConsentRef.current = true;
+    }
     setLoading(true);
     setError(null);
     setResult(null);
@@ -3248,10 +3256,10 @@ function slideCardTextLines(node, fields, dens) {
 }
 
 // ─── The slide as an <svg>. Also the exact thing the PNG exporter serializes. ───
-function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable, notes = [], onMoveNote, onSelectNote, selectedNoteId }) {
+function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable, notes = [], onMoveNote, onSelectNote, selectedNoteId, footer }) {
   const PAD = 28, TITLE_H = title ? 74 : 24;
   const W = Math.max(760, layout.width + PAD * 2);
-  const H = layout.height + PAD * 2 + TITLE_H;
+  const H = layout.height + PAD * 2 + TITLE_H + (footer ? 22 : 0);
   const ox = (W - layout.width) / 2;
   const oy = PAD + TITLE_H;
   const stripe = Math.max(4, Math.round(dens.cardW * 0.032));
@@ -3351,6 +3359,7 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
           </g>
         );
       })}
+      {footer && <text x={PAD} y={H - 12} fontSize="11" fill="#94a3b8">{truncateToWidth(footer, W - PAD * 2, 11)}</text>}
     </svg>
   );
 }
@@ -3473,7 +3482,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
 
 // The Slide Builder view.
 function OrgSlideView() {
-  const { tree, activeEmployees, focusRoot, importEmployeesCSV, slideSeedId, setSlideSeedId } = useContext(AppCtx);
+  const { tree, activeEmployees, focusRoot, importEmployeesCSV, slideSeedId, setSlideSeedId, openRoles, setOpenRoles, stickyNotes, setStickyNotes, importedAt } = useContext(AppCtx);
   const svgRef = useRef(null);
 
   // People who can head a slide (anyone in the tree). Default to the focused subtree
@@ -3494,10 +3503,10 @@ function OrgSlideView() {
   const [wrap, setWrap]         = useState(true);
   const [wrapCols, setWrapCols] = useState("auto");
   // User-added "open position" ghost cards: [{ id, managerId, title, level, dept }]
-  const [openRoles, setOpenRoles] = useState([]);
+  // openRoles/setOpenRoles lifted to OrgChartApp (via context) so they persist with the session doc.
   const [newRole, setNewRole]   = useState({ managerId: "", title: "", level: "L4", count: 1 });
   // Sticky notes (callouts) placed over the slide: [{ id, text, color, fx, fy }]
-  const [stickyNotes, setStickyNotes] = useState([]);
+  // stickyNotes/setStickyNotes lifted to OrgChartApp (via context) so they persist with the session doc.
   const [selectedNoteId, setSelectedNoteId] = useState(null);
 
   useEffect(() => {
@@ -3649,7 +3658,9 @@ function OrgSlideView() {
   const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "’" : "’s"} organization` : "Org chart";
   const title = titleText.trim() || autoTitle;
   const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  ·  ${(rootNode._totalReports || 0)} people in org` : "";
-  const footer = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  const snapshotStamp = importedAt ? `Org snapshot as of ${new Date(importedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}` : "Org snapshot (sample data)";
+  const CONFIDENTIAL = "Company Confidential";
+  const footer = `${CONFIDENTIAL}  ·  ${snapshotStamp}  ·  Generated ${new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}`;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -3880,7 +3891,7 @@ function OrgSlideView() {
         )}
         <div className="mx-auto bg-white rounded-lg shadow-xl overflow-hidden" style={{ maxWidth: 1100 }}>
           <OrgSlideSVG layout={layout} fields={fields} colorDim={colorDim} title={title} subtitle={subtitle} svgRef={svgRef} dens={dens}
-            notes={stickyNotes} onMoveNote={moveNote} onSelectNote={setSelectedNoteId} selectedNoteId={selectedNoteId} />
+            notes={stickyNotes} onMoveNote={moveNote} onSelectNote={setSelectedNoteId} selectedNoteId={selectedNoteId} footer={footer} />
         </div>
         <p className="text-center text-[11px] text-gray-400 mt-2">Live preview · {layout.count - openCount} {(layout.count - openCount) === 1 ? "person" : "people"} shown{openCount > 0 ? ` · ${openCount} open position${openCount === 1 ? "" : "s"}` : ""}</p>
       </div>
@@ -10032,6 +10043,12 @@ function ExitSimModal() {
 // ─── MAIN APP ───
 function OrgChartApp() {
   const [employees, setEmployees] = useState(() => generateSemiCompany());
+  const [isSyntheticData, setIsSyntheticData] = useState(true);
+  const [importedAt, setImportedAt] = useState(null);
+  // Lifted from OrgSlideView so autosave/session-save can persist open-position ghost cards
+  // and sticky notes on the slide builder alongside the rest of the org data.
+  const [openRoles, setOpenRoles] = useState([]);
+  const [stickyNotes, setStickyNotes] = useState([]);
   const [view, setView] = useState("org-chart");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNode, setSelectedNode] = useState(null);
@@ -10890,7 +10907,8 @@ function OrgChartApp() {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
-      doc.text(`SemiCorp · ${today}`, M, H - 24);
+      const stamp = importedAt ? `Org snapshot as of ${new Date(importedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}` : "Org snapshot (sample data)";
+      doc.text(`Company Confidential  ·  ${stamp}  ·  Generated ${today}`, M, H - 24);
       doc.text(`${pageNum} / ${total}`, W - M, H - 24, { align: "right" });
     }
     function table(rows, x, y, colWidths, headers) {
@@ -11034,7 +11052,7 @@ function OrgChartApp() {
     drawFooter(6, TOTAL);
 
     doc.save(`semicorp-exec-deck-${new Date().toISOString().slice(0, 10)}.pdf`);
-  }, [activeEmployees, employees, tree, hotspots, flightRisks, plan, locations, planYears, planHorizonQ, mode]);
+  }, [activeEmployees, employees, tree, hotspots, flightRisks, plan, locations, planYears, planHorizonQ, mode, importedAt]);
 
   const searchResults = useMemo(() => {
     if (!searchQuery || searchQuery.length < 2) return [];
@@ -11164,6 +11182,8 @@ function OrgChartApp() {
 
     setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(employees))]);
     setEmployees(finalList);
+    setIsSyntheticData(false);
+    setImportedAt(new Date().toISOString());
     setSelectedNode(null); setDetailPanel(null); setFocusRoot(null);
     setExpandedNodes(new Set()); setInsightHighlightIds(new Set()); setChainFilterId(null);
     setImportState(null);
@@ -11224,6 +11244,7 @@ function OrgChartApp() {
   // ─────────────────────────────────────────────────────────────────────────
   const COOP_COLORS = ["#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#db2777", "#ca8a04"];
   const netRef = useRef({ active: false, room: null, sendDoc: null, sendPres: null, gotState: false });
+  const coopConsentRef = useRef(false);
   const employeesRef = useRef(employees); employeesRef.current = employees;
   const annotationsRef = useRef(annotations); annotationsRef.current = annotations;
   const suppressUntilRef = useRef(0);
@@ -11247,6 +11268,13 @@ function OrgChartApp() {
 
   async function coopJoin(codeRaw, nameRaw) {
     if (netRef.current.active) return;
+    const realData = !isSyntheticData;
+    if (realData || !coopConsentRef.current) {
+      const warn = realData ? "WARNING: You have imported real org data. Sharing it over public P2P relays may violate your company's data policy.\n\n" : "";
+      const ok = window.confirm(warn + "Co-op shares your CURRENT org data (names, titles, reporting lines) with everyone who has the room code, streamed peer-to-peer over public relays. Room codes are guessable and there is no access control.\n\nContinue?");
+      if (!ok) { setCoopStatus("Co-op cancelled."); return; }
+      if (!realData) coopConsentRef.current = true;
+    }
     const code = (codeRaw || "").trim();
     if (!code) { setCoopStatus("Enter a room code first."); return; }
     setCoopStatus("Connecting…");
@@ -11318,9 +11346,35 @@ function OrgChartApp() {
     } catch {}
   }, []);
 
+  // ─── Session persistence: autosave to localStorage + manual Save/Load session file ───
+  const SESSION_KEY = "orgSimSession";
+  function buildSessionDoc() {
+    return { v: 1, savedAt: new Date().toISOString(), isSyntheticData, importedAt, employees, annotations, plan, openRoles, stickyNotes };
+  }
+  function applySessionDoc(doc) {
+    if (!doc || typeof doc !== "object") return false;
+    if (Array.isArray(doc.employees)) setEmployees(doc.employees);
+    if (doc.annotations && typeof doc.annotations === "object") setAnnotations(doc.annotations);
+    if (doc.plan && typeof doc.plan === "object") setPlan(doc.plan);
+    if (Array.isArray(doc.openRoles)) setOpenRoles(doc.openRoles);
+    if (Array.isArray(doc.stickyNotes)) setStickyNotes(doc.stickyNotes);
+    if (typeof doc.isSyntheticData === "boolean") setIsSyntheticData(doc.isSyntheticData);
+    setImportedAt(doc.importedAt || null);
+    return true;
+  }
+  // Debounced autosave — fires 800ms after the last change to any persisted slice.
+  useEffect(() => {
+    const t = setTimeout(() => { try { localStorage.setItem(SESSION_KEY, JSON.stringify(buildSessionDoc())); } catch {} }, 800);
+    return () => clearTimeout(t);
+  }, [employees, annotations, plan, openRoles, stickyNotes, isSyntheticData, importedAt]);
+  // Restore the last autosaved session once on mount.
+  useEffect(() => { try { const raw = localStorage.getItem(SESSION_KEY); if (raw) applySessionDoc(JSON.parse(raw)); } catch {} }, []);
+
   // Build context value — new object each render is fine; components re-render but don't remount
   const ctxValue = {
-    employees, setEmployees, view, setView, searchQuery, setSearchQuery,
+    employees, setEmployees, isSyntheticData, importedAt,
+    openRoles, setOpenRoles, stickyNotes, setStickyNotes,
+    view, setView, searchQuery, setSearchQuery,
     selectedNode, setSelectedNode, expandedNodes, setExpandedNodes,
     slideSeedId, setSlideSeedId,
     annotations, setAnnotations, showAnnotationForm, setShowAnnotationForm,
@@ -11389,7 +11443,7 @@ function OrgChartApp() {
       {!dataNoticeDismissed && (
         <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-xs text-amber-900">
           <span className="font-semibold">Privacy notice:</span>
-          <span>All data stays in your browser — nothing is sent over the network. There is no auto-save; use Export to save your work.</span>
+          <span>Your org data stays in this browser and is auto-saved here. Two optional features send data out when you explicitly turn them on: "Ask the org" (sends the roster to Anthropic) and Co-op (streams the org peer-to-peer over public relays). Everything else is local. Use Save session to keep a file copy.</span>
           <button onClick={clearAllLocalData}
             className="ml-auto text-[11px] px-2 py-1 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors font-medium">
             Clear all local data
@@ -11646,6 +11700,30 @@ function OrgChartApp() {
                 <Plus size={12}/>Import
                 <input type="file" accept=".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) openImportWizard(f); e.target.value = ""; }}/>
+              </label>
+              <button
+                title="Save the full session (employees, annotations, plan, slide notes) as a JSON file you can Load later"
+                onClick={() => downloadFile(`org-session-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(buildSessionDoc(), null, 2), "application/json")}
+                className="flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors"
+              ><Download size={12}/>Save session</button>
+              <label
+                title="Load a previously saved session JSON file — restores employees, annotations, plan, and slide notes"
+                className="flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer">
+                <Plus size={12}/>Load session
+                <input type="file" accept="application/json,.json" className="hidden"
+                  onChange={e => {
+                    const f = e.target.files?.[0]; e.target.value = "";
+                    if (!f) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      try {
+                        const doc = JSON.parse(reader.result);
+                        if (!applySessionDoc(doc)) throw new Error("Invalid session file");
+                      } catch (err) { alert("Could not load session: " + err.message); }
+                    };
+                    reader.onerror = () => alert("Could not read the session file.");
+                    reader.readAsText(f);
+                  }}/>
               </label>
               {atLeast(mode, "advanced") && <button
                 title="Export analytics report as JSON"
