@@ -11213,6 +11213,110 @@ function OrgChartApp() {
     reader.readAsText(file);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // ─── CO-OP: serverless real-time multiplayer (Trystero WebRTC P2P) ───────
+  // The shared document is { employees, annotations }. A newcomer requests the
+  // current doc (hello → doc); established peers answer, and every local edit
+  // re-broadcasts the whole doc (debounced, last-writer-wins) — simple and solid
+  // for the discrete edits this app makes (reorg drops, imports, notes, undo).
+  // No backend: WebRTC peer-to-peer with nostr relays for signaling. The room
+  // code lives in the URL as ?room=CODE, so that URL is the shareable link.
+  // ─────────────────────────────────────────────────────────────────────────
+  const COOP_COLORS = ["#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#db2777", "#ca8a04"];
+  const netRef = useRef({ active: false, room: null, sendDoc: null, sendPres: null, gotState: false });
+  const employeesRef = useRef(employees); employeesRef.current = employees;
+  const annotationsRef = useRef(annotations); annotationsRef.current = annotations;
+  const suppressUntilRef = useRef(0);
+  const [coopActive, setCoopActive] = useState(false);
+  const [coopOpen, setCoopOpen] = useState(false);
+  const [coopName, setCoopName] = useState(() => { try { return localStorage.getItem("orgSimCoopName") || ""; } catch { return ""; } });
+  const [coopCode, setCoopCode] = useState("");
+  const [coopPeers, setCoopPeers] = useState({}); // peerId → { name, color }
+  const [coopSelf, setCoopSelf] = useState(null);  // { name, color }
+  const [coopStatus, setCoopStatus] = useState("");
+
+  const serializeDoc = () => ({ employees: employeesRef.current, annotations: annotationsRef.current });
+  const applyDoc = (doc) => {
+    if (!doc) return;
+    suppressUntilRef.current = Date.now() + 600; // don't echo a remote change back out
+    netRef.current.gotState = true;
+    if (Array.isArray(doc.employees)) setEmployees(doc.employees);
+    if (doc.annotations && typeof doc.annotations === "object") setAnnotations(doc.annotations);
+    setSelectedNode(null); setDetailPanel(null);
+  };
+
+  async function coopJoin(codeRaw, nameRaw) {
+    if (netRef.current.active) return;
+    const code = (codeRaw || "").trim();
+    if (!code) { setCoopStatus("Enter a room code first."); return; }
+    setCoopStatus("Connecting…");
+    try {
+      const mod = await import("https://esm.sh/trystero@0.20.0/nostr");
+      const selfId = mod.selfId || "";
+      let h = 0; for (let i = 0; i < selfId.length; i++) h = (h * 31 + selfId.charCodeAt(i)) | 0;
+      const color = COOP_COLORS[Math.abs(h) % COOP_COLORS.length];
+      const name = (nameRaw || "").trim() || ("User-" + selfId.slice(0, 4));
+      try { localStorage.setItem("orgSimCoopName", name); } catch {}
+      const room = mod.joinRoom({ appId: "org-chart-simulator-coop" }, code);
+      const [sendDoc, getDoc] = room.makeAction("doc");
+      const [sendHello, getHello] = room.makeAction("hello");
+      const [sendPres, getPres] = room.makeAction("pres");
+      netRef.current = { active: true, room, sendDoc, sendPres, gotState: false };
+      setCoopActive(true); setCoopSelf({ name, color }); setCoopCode(code);
+      getDoc(doc => applyDoc(doc));
+      getHello((_, peer) => { try { sendDoc(serializeDoc(), peer); } catch {} });
+      getPres((p, peer) => setCoopPeers(prev => ({ ...prev, [peer]: { name: p && p.name, color: p && p.color } })));
+      room.onPeerJoin(peer => {
+        try { if (netRef.current.gotState) sendDoc(serializeDoc(), peer); } catch {}
+        try { sendPres({ name, color }); } catch {}
+      });
+      room.onPeerLeave(peer => setCoopPeers(prev => { const n = { ...prev }; delete n[peer]; return n; }));
+      try { sendHello(1); } catch {}
+      try { sendPres({ name, color }); } catch {}
+      // If nobody answers within ~1.6s we're first in the room → become the host.
+      setTimeout(() => { if (netRef.current.active && !netRef.current.gotState) netRef.current.gotState = true; }, 1600);
+      try { const u = new URL(location.href); u.searchParams.set("room", code); history.replaceState(null, "", u); } catch {}
+      setCoopStatus("Connected — share the link so others can join.");
+    } catch (e) {
+      console.warn("coop join failed", e);
+      setCoopStatus("Couldn't connect — check your internet and try again.");
+      netRef.current.active = false; setCoopActive(false);
+    }
+  }
+  function coopLeave() {
+    try { netRef.current.room && netRef.current.room.leave(); } catch {}
+    netRef.current = { active: false, room: null, sendDoc: null, sendPres: null, gotState: false };
+    setCoopActive(false); setCoopPeers({}); setCoopSelf(null); setCoopStatus("");
+    try { const u = new URL(location.href); u.searchParams.delete("room"); history.replaceState(null, "", u); } catch {}
+  }
+  function coopCopyLink() {
+    try {
+      const u = new URL(location.href); u.searchParams.set("room", coopCode || ""); const link = u.toString();
+      if (navigator.clipboard) navigator.clipboard.writeText(link);
+      setCoopStatus("Link copied — paste it to a teammate.");
+    } catch { setCoopStatus("Couldn't copy the link."); }
+  }
+  function coopSuggestCode() {
+    const words = ["falcon", "harbor", "willow", "quartz", "cobalt", "meadow", "ember", "cedar", "pixel", "orbit"];
+    setCoopCode(words[Math.floor(Math.random() * words.length)] + "-" + Math.floor(1000 + Math.random() * 9000));
+  }
+
+  // Broadcast the doc when it changes locally (debounced; skips remote-origin changes).
+  useEffect(() => {
+    if (!coopActive || !netRef.current.gotState) return;
+    if (Date.now() < suppressUntilRef.current) return;
+    const send = netRef.current.sendDoc; if (!send) return;
+    const t = setTimeout(() => { try { send(serializeDoc()); } catch {} }, 250);
+    return () => clearTimeout(t);
+  }, [employees, annotations, coopActive]);
+
+  // Auto-join when the URL carries ?room=CODE (someone opened a shared link).
+  useEffect(() => {
+    try {
+      const r = new URLSearchParams(location.search).get("room");
+      if (r) { setCoopCode(r); setCoopOpen(true); coopJoin(r, coopName); }
+    } catch {}
+  }, []);
 
   // Build context value — new object each render is fine; components re-render but don't remount
   const ctxValue = {
@@ -11565,6 +11669,52 @@ function OrgChartApp() {
                 className="flex items-center gap-1 text-xs bg-amber-50 border border-amber-200 text-amber-700 px-2.5 py-1.5 rounded-lg hover:bg-amber-100 transition-colors">
                 <FileText size={12}/>Exec deck
               </button>
+              {/* ── Live co-op ── */}
+              <div className="relative">
+                <button onClick={() => setCoopOpen(o => !o)} title="Real-time co-op — edit this org together over a shareable link (no backend, peer-to-peer)"
+                  className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${coopActive ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-gray-100 border-transparent text-gray-600 hover:bg-gray-200"}`}>
+                  <Globe size={12}/>Co-op{coopActive ? ` · ${Object.keys(coopPeers).length + 1}` : ""}
+                  {coopActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"/>}
+                </button>
+                {coopOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 w-72 bg-white border border-gray-200 rounded-xl shadow-2xl p-3 z-[60]" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-bold text-gray-900 flex items-center gap-1.5"><Globe size={13} className={coopActive ? "text-emerald-600" : "text-gray-400"}/>Live co-op</h4>
+                      <button onClick={() => setCoopOpen(false)} className="text-gray-400 hover:text-gray-700"><X size={14}/></button>
+                    </div>
+                    {!coopActive ? (
+                      <>
+                        <p className="text-[11px] text-gray-500 mb-2">Edit this org chart together in real time. Pick a room code and share the link — no account, no server.</p>
+                        <input value={coopName} onChange={e => setCoopName(e.target.value)} placeholder="Your name" className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 mb-1.5" />
+                        <div className="flex gap-1.5 mb-2">
+                          <input value={coopCode} onChange={e => setCoopCode(e.target.value)} onKeyDown={e => { if (e.key === "Enter") coopJoin(coopCode, coopName); }} placeholder="Room code" className="flex-1 min-w-0 text-xs border border-gray-200 rounded-lg px-2 py-1.5" />
+                          <button onClick={coopSuggestCode} className="text-[11px] text-blue-600 px-1.5 hover:text-blue-800 shrink-0">Suggest</button>
+                        </div>
+                        <button onClick={() => coopJoin(coopCode, coopName)} className="w-full text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-emerald-700">Join / create room</button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Room</div>
+                        <div className="flex items-center gap-1.5 mb-2.5">
+                          <code className="flex-1 min-w-0 text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 text-gray-700 truncate">{coopCode}</code>
+                          <button onClick={coopCopyLink} className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 shrink-0">Copy link</button>
+                        </div>
+                        <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 flex items-center gap-1"><Users size={11}/>Here now ({Object.keys(coopPeers).length + 1})</div>
+                        <div className="space-y-1 mb-2.5 max-h-28 overflow-y-auto">
+                          {[coopSelf && { ...coopSelf, me: true }, ...Object.values(coopPeers)].filter(Boolean).map((p, i) => (
+                            <div key={i} className="flex items-center gap-2 text-xs">
+                              <span className="w-5 h-5 rounded-full flex items-center justify-center text-white font-bold shrink-0" style={{ background: p.color || "#64748b", fontSize: 8 }}>{(p.name || "?").slice(0, 2).toUpperCase()}</span>
+                              <span className="text-gray-700 truncate">{p.name || "User"}{p.me ? " (you)" : ""}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <button onClick={coopLeave} className="w-full text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200">Leave room</button>
+                      </>
+                    )}
+                    {coopStatus && <div className="text-[10px] text-gray-400 mt-2 leading-snug">{coopStatus}</div>}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
