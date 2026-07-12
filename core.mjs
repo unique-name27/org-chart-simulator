@@ -188,6 +188,45 @@ export function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfor
   return { cards, links, groups, width, height, count: cards.length, truncated };
 }
 
+// ─── FULL ORG BOOK (recursive multi-slide deck) ───
+// Breadth-first walk of the tree producing a flat, plain-data slide plan: an overview
+// slide for the root, then one slide per manager (a node with children), shallower
+// depths first. Cycle-safe via a visited set. Returns only ids + strings (no node
+// objects) so the deck-building UI stays free to resolve nodes however it likes.
+export function enumerateBookNodes(root, { slideCap = 60 } = {}) {
+  if (!root) return { slides: [], truncated: false };
+  const name = `${root.first || ""} ${root.last || ""}`.trim();
+  const slides = [{
+    nodeId: root.id, depth: 0,
+    title: `${name}'s organization`,
+    subtitle: `${(root.children || []).length} direct reports`,
+  }];
+  let truncated = false;
+  const visited = new Set([root.id]);
+  let queue = (root.children || []).map(c => ({ node: c, depth: 1 }));
+  while (queue.length) {
+    const next = [];
+    for (const { node, depth } of queue) {
+      if (!node || visited.has(node.id)) continue;
+      visited.add(node.id);
+      const kids = node.children || [];
+      if (kids.length > 0) {
+        if (slides.length >= slideCap) { truncated = true; continue; }
+        const nm = `${node.first || ""} ${node.last || ""}`.trim();
+        const prefix = node.title ? `${node.title} · ` : "";
+        slides.push({
+          nodeId: node.id, depth,
+          title: `${nm}'s team`,
+          subtitle: `${prefix}${kids.length} reports`,
+        });
+      }
+      kids.forEach(k => next.push({ node: k, depth: depth + 1 }));
+    }
+    queue = next;
+  }
+  return { slides, truncated };
+}
+
 // ─── HRIS-GRADE IMPORT HELPERS ───
 // Split a single "full name" cell into { first, last }. Tolerant of extra
 // whitespace and never throws — worst case both fields come back empty.

@@ -3311,7 +3311,16 @@ function exportSlidePNG(svgEl, filename, scale = 2) {
   if (!svgEl) { alert("Nothing to export yet."); return; }
   const w = parseFloat(svgEl.getAttribute("width")) || svgEl.viewBox.baseVal.width;
   const h = parseFloat(svgEl.getAttribute("height")) || svgEl.viewBox.baseVal.height;
-  const xml = new XMLSerializer().serializeToString(svgEl);
+  // Clone + embed DM Sans as a data-URI @font-face so the rasterized PNG matches the
+  // on-screen preview — the serialized SVG is rendered via an isolated <img>, which has
+  // no access to the page's DM Sans webfont (loaded separately via Google Fonts @import).
+  const clone = svgEl.cloneNode(true);
+  const styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
+  styleEl.textContent =
+    `@font-face{font-family:'DM Sans';font-weight:400;src:url(data:font/woff2;base64,${DM_SANS_WOFF2_B64}) format('woff2');}\n` +
+    `@font-face{font-family:'DM Sans';font-weight:700;src:url(data:font/woff2;base64,${DM_SANS_WOFF2_B64}) format('woff2');}`;
+  clone.insertBefore(styleEl, clone.firstChild);
+  const xml = new XMLSerializer().serializeToString(clone);
   const svg64 = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
   const img = new Image();
   img.onload = () => {
@@ -3632,6 +3641,21 @@ function OrgSlideView() {
 
   const safeName = (title || "org-slide").replace(/[^\w\- ]+/g, "").replace(/\s+/g, "-").slice(0, 60) || "org-slide";
 
+  // Build the full, recursive org book: an overview slide + one slide per manager,
+  // breadth-first, down the whole subtree under rootNode (not just the visible depth).
+  function downloadOrgBook() {
+    const { slides, truncated } = enumerateBookNodes(rootNode, { slideCap: 60 });
+    const models = slides.map(s => {
+      const node = tree.map[s.nodeId] || rootNode;
+      return {
+        layout: computeSlideLayout(node, { maxDepth: 1, dens, wrap, wrapCols: wrapColsVal, openByManager }),
+        fields, colorDim, dens, title: s.title, subtitle: s.subtitle, notes: [],
+      };
+    });
+    exportSlidePPTX(models, { deckName: `${safeName}-org-book.pptx`, footer });
+    if (truncated) alert("This org is large — only the first 60 teams were included in the book.");
+  }
+
   if (!rootNode || !layout) return <div className="p-8 text-gray-500">No org data loaded yet. Import a headcount file to begin.</div>;
 
   return (
@@ -3820,7 +3844,11 @@ function OrgSlideView() {
             className="w-full flex items-center justify-center gap-1.5 text-xs bg-amber-500 text-white px-3 py-2 rounded-lg font-medium hover:bg-amber-600">
             <FileText size={13}/>Download PowerPoint{perTeam && rootNode.children && rootNode.children.length ? ` (${rootNode.children.length + 1} slides)` : ""}
           </button>
-          <p className="text-[10px] text-gray-400 text-center">PNG = paste into any deck · PPTX = fully editable shapes</p>
+          <button onClick={downloadOrgBook}
+            className="w-full flex items-center justify-center gap-1.5 text-xs bg-white text-amber-700 border border-amber-300 px-3 py-2 rounded-lg font-medium hover:bg-amber-50">
+            <FileText size={13}/>Download full org book (.pptx)
+          </button>
+          <p className="text-[10px] text-gray-400 text-center">PNG = paste into any deck · PPTX = fully editable shapes · Org book = every team, recursively</p>
         </div>
       </div>
 
