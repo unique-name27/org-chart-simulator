@@ -11416,7 +11416,8 @@ function OrgChartApp() {
                     reader.readAsText(f);
                   }}/>
               </label>
-              {/* ── Scenario compare/diff — capture two snapshots of the roster and diff them ── */}
+              {/* ── Scenario compare/diff — capture two snapshots of the roster and diff them (advanced+) ── */}
+              {atLeast(mode, "advanced") && (
               <div className="flex items-center gap-1 border-l border-gray-200 pl-2 ml-0.5">
                 <button
                   title="Capture the current roster as scenario A"
@@ -11447,6 +11448,7 @@ function OrgChartApp() {
                   <Download size={12}/>Export diff (CSV)
                 </button>
               </div>
+              )}
               {atLeast(mode, "advanced") && <button
                 title="Export analytics report as JSON"
                 onClick={() => {
