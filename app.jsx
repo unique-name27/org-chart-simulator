@@ -1,7 +1,7 @@
 
 const { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext, memo } = React;
 const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, AreaChart, Area, CartesianGrid, Legend, ReferenceLine } = Recharts;
-const { Search, ChevronDown, ChevronRight, Users, Building2, MapPin, TrendingUp, AlertTriangle, MessageSquare, GripVertical, Play, Pause, SkipBack, SkipForward, Download, Plus, Eye, EyeOff, Filter, BarChart3, Clock, Zap, Target, Layers, Globe, ChevronLeft, X, Check, Flag, Edit3, Trash2, Move, ArrowRight, Info, AlertCircle, Activity, GitMerge, AlertOctagon, UserPlus, Minus, Printer, Sparkles, FileText } = LucideReact;
+const { Search, ChevronDown, ChevronRight, Users, Building2, MapPin, TrendingUp, AlertTriangle, MessageSquare, GripVertical, Play, Pause, SkipBack, SkipForward, Download, Plus, Eye, EyeOff, Filter, BarChart3, Clock, Zap, Target, Layers, Globe, ChevronLeft, X, Check, Flag, Edit3, Trash2, Move, ArrowRight, Info, AlertCircle, Activity, GitMerge, AlertOctagon, UserPlus, Minus, Printer, Sparkles, FileText, UploadCloud } = LucideReact;
 
 
 
@@ -2629,7 +2629,7 @@ const IMPORT_FIELDS = [
   { key: "location",       label: "Location",                             aliases: ["location","city","site","office","work location","worklocation"] },
   { key: "country",        label: "Country",                              aliases: ["country","nation"] },
   { key: "employmentType", label: "Employment type",                      aliases: ["employmenttype","employment type","emp type","worker type","workertype","type"] },
-  { key: "managerId",      label: "Manager ID",                            aliases: ["managerid","manager id","manager","reports to","reportsto","supervisor id","supervisor","supervisorid","manager employee id","manager (worker)","manager name","manager user","manager user id"] },
+  { key: "managerId",      label: "Manager (ID or name)",                  aliases: ["managerid","manager id","manager","reports to","reportsto","supervisor id","supervisor","supervisorid","manager employee id","manager (worker)","manager name","manager user","manager user id"] },
   { key: "status",         label: "Status",                               aliases: ["status","active","employment status","employmentstatus"] },
   { key: "startDate",      label: "Start date",                           aliases: ["startdate","start date","hire date","hiredate","start","date hired","original hire date","event date"] },
   { key: "endDate",        label: "End date",                             aliases: ["enddate","end date","term date","termdate","end","exit date","termination date"] },
@@ -2679,6 +2679,11 @@ function EmployeeImportWizard({ data, onCancel, onConfirm }) {
     return { id: g(col("id")), name: `${first} ${last}`.trim() || "—", level: lv ? displayLevel(lv) : "L3*", dept: g(col("dept")) || "—", mgr: g(col("managerId")) || "—" };
   }), [rows, mapping]);
 
+  // Live pre-import validation: how many rows import, how many managers actually link.
+  const stats = useMemo(() => previewImportStats(rows, mapping), [rows, mapping]);
+  const linked = stats.managersById + stats.managersByName;
+  const flatChart = stats.hasMgr ? (stats.willImport > 1 && linked === 0) : (stats.willImport > 1);
+
   function downloadTemplate() {
     const cols = ["id", "first", "last", "title", "level", "dept", "bg", "fn", "location", "country", "employmentType", "managerId", "status", "startDate", "endDate"];
     const ex = [
@@ -2719,7 +2724,32 @@ function EmployeeImportWizard({ data, onCancel, onConfirm }) {
               </label>
             ))}
           </div>
-          <p className="text-[11px] text-gray-400 mb-4">Only <span className="text-red-500">*</span> <b>Employee ID</b> is required — anything you leave unmapped is filled with a sensible default (manager → top-level, level → L3, department → General, name → ID). Amber = recommended.</p>
+          <p className="text-[11px] text-gray-400 mb-3">Only <span className="text-red-500">*</span> <b>Employee ID</b> is required — anything you leave unmapped is filled with a sensible default (manager → top-level, level → L3, department → General, name → ID). Amber = recommended.</p>
+
+          {/* Live validation summary — catch mis-mappings before importing */}
+          <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+              <span className="font-semibold text-gray-700">{stats.willImport.toLocaleString()} {stats.willImport === 1 ? "person" : "people"} will import</span>
+              {stats.hasMgr ? (
+                <>
+                  <span className="text-emerald-600">{linked.toLocaleString()} manager{linked === 1 ? "" : "s"} linked{stats.managersByName ? ` (${stats.managersByName} by name)` : ""}</span>
+                  <span className="text-gray-500">{stats.topLevel.toLocaleString()} at top level</span>
+                  {stats.orphan > 0 && <span className="text-amber-600">{stats.orphan.toLocaleString()} manager{stats.orphan === 1 ? "" : "s"} won’t match</span>}
+                </>
+              ) : (
+                <span className="text-amber-600">No manager column mapped</span>
+              )}
+              {(stats.dup > 0 || stats.blank > 0) && <span className="text-gray-400">{stats.dup ? `${stats.dup} dup ID${stats.dup === 1 ? "" : "s"}` : ""}{stats.dup && stats.blank ? " · " : ""}{stats.blank ? `${stats.blank} blank` : ""} skipped</span>}
+            </div>
+            {flatChart && (
+              <div className="mt-1.5 text-[11px] text-amber-700 flex items-start gap-1">
+                <AlertTriangle size={12} className="mt-0.5 shrink-0"/>
+                <span>{stats.hasMgr
+                  ? "None of the manager values match a person here — the chart will be flat. Check that the Manager column maps to an Employee ID or a person’s name."
+                  : "Without a Manager column the whole org imports flat (everyone at the top). Map a Manager/“Reports To” column to build the hierarchy."}</span>
+              </div>
+            )}
+          </div>
 
           <div className="flex items-center gap-4 mb-4 text-xs">
             <span className="font-bold text-gray-600 uppercase tracking-wide">Mode</span>
@@ -3426,7 +3456,7 @@ function OrgSlideView() {
             title="Import employees from Excel (.xlsx) or CSV — opens the guided mapping dialog. Replaces or appends the current org."
             className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs bg-white border border-gray-200 text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer">
             <Plus size={12}/>Import headcount (Excel/CSV)
-            <input type="file" accept=".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
+            <input type="file" accept=".csv,text/csv,.tsv,.txt,text/tab-separated-values,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f && importEmployeesCSV) importEmployeesCSV(f); e.target.value = ""; }}/>
           </label>
         </div>
@@ -3531,7 +3561,7 @@ function OrgSlideView() {
             <label title="Bulk-import open positions from Excel/CSV — columns: Manager, Title, Level, Count, Department (all auto-detected)."
               className="flex-1 flex items-center justify-center gap-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md hover:bg-emerald-100 cursor-pointer">
               <Plus size={11}/>Import openings
-              <input type="file" accept=".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
+              <input type="file" accept=".csv,text/csv,.tsv,.txt,text/tab-separated-values,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
                 onChange={e => { const f = e.target.files?.[0]; if (f) importOpenings(f); e.target.value = ""; }}/>
             </label>
             <button onClick={downloadOpeningsTemplate} className="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-1" title="Download a starter CSV pre-filled with managers from this org">
@@ -9840,6 +9870,7 @@ function OrgChartApp() {
   }, []);
   // Cmd/Ctrl+K command palette
   const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [dragActive, setDragActive] = useState(false); // file drag-over overlay for import
 
   useEffect(() => {
     const onKey = (e) => {
@@ -10837,15 +10868,55 @@ function OrgChartApp() {
     }
 
     reader.onload = ev => {
-      try {
-        const rows = parseCSV(String(ev.target.result || ""));
-        if (rows.length < 2) throw new Error("File has no data rows");
-        const header = rows[0].map(c => (c || "").trim());
-        setImportState({ fileName: file.name || "import.csv", header, rows: rows.slice(1) });
-      } catch (err) { alert("Could not read CSV: " + err.message); }
+      try { openImportText(String(ev.target.result || ""), file.name || "import.csv"); }
+      catch (err) { alert("Could not read file: " + err.message); }
     };
     reader.readAsText(file);
   }
+
+  // Parse delimited text (CSV / TSV / semicolon / pipe — auto-detected) and open the
+  // guided wizard. Shared by file reads and clipboard paste.
+  function openImportText(text, fileName) {
+    const delim = detectDelimiter(text);
+    const rows = parseCSV(text, delim);
+    if (rows.length < 2) throw new Error("needs a header row plus at least one data row");
+    const header = rows[0].map(c => (c || "").trim());
+    setImportState({ fileName: fileName || "pasted data", header, rows: rows.slice(1) });
+  }
+
+  // Drag a headcount file anywhere onto the app, or paste rows copied from Excel, to
+  // open the import wizard — no need to hunt for the toolbar button.
+  useEffect(() => {
+    const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+    const onDragOver = e => { if (hasFiles(e)) { e.preventDefault(); setDragActive(true); } };
+    const onDragLeave = e => { if (e.relatedTarget == null) setDragActive(false); };
+    const onDrop = e => {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+        e.preventDefault(); setDragActive(false); openImportWizard(e.dataTransfer.files[0]);
+      } else setDragActive(false);
+    };
+    const onPaste = e => {
+      const el = document.activeElement;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return; // don't hijack form paste
+      const text = e.clipboardData && e.clipboardData.getData("text");
+      if (!text) return;
+      const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+      if (lines.length >= 2 && /[,\t;|]/.test(lines[0])) {
+        e.preventDefault();
+        try { openImportText(text, "Pasted data"); } catch (err) { alert("Could not read pasted data: " + err.message); }
+      }
+    };
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+      window.removeEventListener("paste", onPaste);
+    };
+  }, []);
 
   // Apply an import once the user has confirmed their column mapping + mode in the wizard.
   function applyEmployeeImport({ rows }, mapping, mode) {
@@ -10927,30 +10998,18 @@ function OrgChartApp() {
     } else {
       finalList = out;
     }
-    const idSet = new Set(finalList.map(e => e.id));
-    let orphaned = 0;
-    finalList.forEach(e => {
-      if (e.managerId && !idSet.has(e.managerId)) {
-        exceptions.push({ row: rowById.get(e.id) ?? null, id: e.id, field: "managerId", issue: `Unknown manager id '${e.managerId}'`, action: "reset to top-level" });
-        e.managerId = null; orphaned++;
-      }
-      if (e.id === e.managerId) {
-        exceptions.push({ row: rowById.get(e.id) ?? null, id: e.id, field: "managerId", issue: "Manager id equals own id", action: "reset to top-level" });
-        e.managerId = null; orphaned++;
-      }
-    });
-    const idMap = new Map(finalList.map(e => [e.id, e]));
-    let cyclesBroken = 0;
-    finalList.forEach(e => {
-      const seen = new Set(); let cur = e;
-      while (cur && cur.managerId) {
-        if (seen.has(cur.id)) {
-          exceptions.push({ row: rowById.get(e.id) ?? null, id: e.id, field: "managerId", issue: "Reporting cycle detected", action: "reset to top-level" });
-          e.managerId = null; cyclesBroken++; break;
-        }
-        seen.add(cur.id); cur = idMap.get(cur.managerId);
-      }
-    });
+    // Resolve manager references by employee ID first, then by NAME (so exports that
+    // list "Reports To: John Smith" instead of an ID still build a real hierarchy).
+    // Unknown/ambiguous refs, self-references and cycles are cleared to top-level.
+    const linkStats = linkManagers(finalList);
+    const mgrRow = id => rowById.get(id) ?? null;
+    linkStats.orphaned.forEach(o => exceptions.push({ row: mgrRow(o.id), id: o.id, field: "managerId", issue: `Manager '${o.ref}' not found`, action: "reset to top-level" }));
+    linkStats.ambiguous.forEach(o => exceptions.push({ row: mgrRow(o.id), id: o.id, field: "managerId", issue: `Manager name '${o.ref}' matches more than one person`, action: "reset to top-level" }));
+    linkStats.selfRef.forEach(o => exceptions.push({ row: mgrRow(o.id), id: o.id, field: "managerId", issue: "Listed as their own manager", action: "reset to top-level" }));
+    linkStats.cyclesBroken.forEach(o => exceptions.push({ row: mgrRow(o.id), id: o.id, field: "managerId", issue: "Reporting cycle detected", action: "reset to top-level" }));
+    const orphaned = linkStats.orphaned.length + linkStats.ambiguous.length + linkStats.selfRef.length;
+    const cyclesBroken = linkStats.cyclesBroken.length;
+    const resolvedByName = linkStats.resolvedByName;
 
     setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(employees))]);
     setEmployees(finalList);
@@ -10962,10 +11021,11 @@ function OrgChartApp() {
     setLastImportExceptions(exceptions);
     const notes = [];
     if (mode === "append") notes.push(`merged into existing org — ${finalList.length} total`);
+    if (resolvedByName) notes.push(`${resolvedByName} manager${resolvedByName > 1 ? "s" : ""} matched by name`);
     if (dupIds)       notes.push(`${dupIds} duplicate id${dupIds > 1 ? "s" : ""} skipped`);
     if (blankRows)    notes.push(`${blankRows} blank row${blankRows > 1 ? "s" : ""} skipped`);
     if (lvDefaulted)  notes.push(`${lvDefaulted} unrecognized level${lvDefaulted > 1 ? "s" : ""} set to L3`);
-    if (orphaned)     notes.push(`${orphaned} unknown manager ref${orphaned > 1 ? "s" : ""} reset to root`);
+    if (orphaned)     notes.push(`${orphaned} manager ref${orphaned > 1 ? "s" : ""} couldn't be matched — set to top-level`);
     if (cyclesBroken) notes.push(`${cyclesBroken} reporting cycle${cyclesBroken > 1 ? "s" : ""} broken`);
     alert(`Imported ${out.length} row${out.length > 1 ? "s" : ""}.${notes.length ? "\n• " + notes.join("\n• ") : ""}${exceptions.length ? `\n\n${exceptions.length} exception${exceptions.length > 1 ? "s" : ""} logged — see the banner below the toolbar to download the CSV.` : ""}`);
   }
@@ -11130,6 +11190,15 @@ function OrgChartApp() {
 
   return (
     <AppCtx.Provider value={ctxValue}>
+      {dragActive && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-blue-600/20 backdrop-blur-sm pointer-events-none" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+          <div className="bg-white rounded-2xl shadow-2xl border-2 border-dashed border-blue-400 px-10 py-8 text-center">
+            <UploadCloud size={40} className="mx-auto text-blue-500 mb-2"/>
+            <div className="text-lg font-bold text-gray-900">Drop your headcount file to import</div>
+            <div className="text-xs text-gray-500 mt-1">Excel (.xlsx) or CSV / TSV — you’ll map columns next</div>
+          </div>
+        </div>
+      )}
       <div className="h-screen flex flex-col overflow-hidden" style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8fafc" }}>
       {!dataNoticeDismissed && (
         <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-xs text-amber-900">
@@ -11389,7 +11458,7 @@ function OrgChartApp() {
                 title="Import employees from Excel (.xlsx) or CSV. Opens a guided dialog: auto-detects your columns (and lets you remap any), choose replace or append, download a starter template, and preview before importing. Ctrl+Z to undo."
                 className="flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors cursor-pointer">
                 <Plus size={12}/>Import
-                <input type="file" accept=".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
+                <input type="file" accept=".csv,text/csv,.tsv,.txt,text/tab-separated-values,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) openImportWizard(f); e.target.value = ""; }}/>
               </label>
               <button

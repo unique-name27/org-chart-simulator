@@ -67,7 +67,7 @@ function csvCell(v) {
   if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
-function parseCSV(text) {
+function parseCSV(text, delimiter = ",") {
   if (text.charCodeAt(0) === 65279) text = text.slice(1);
   const rows = [];
   let row = [], cell = "", inQuotes = false, i = 0;
@@ -93,7 +93,7 @@ function parseCSV(text) {
       i++;
       continue;
     }
-    if (ch === ",") {
+    if (ch === delimiter) {
       row.push(cell);
       cell = "";
       i++;
@@ -119,6 +119,151 @@ function parseCSV(text) {
     rows.push(row);
   }
   return rows.filter((r) => r.some((c) => c.trim() !== ""));
+}
+function detectDelimiter(text) {
+  if (!text) return ",";
+  if (text.charCodeAt(0) === 65279) text = text.slice(1);
+  const firstLine = text.split(/\r?\n/).find((l) => l.trim() !== "") || "";
+  const candidates = [",", "	", ";", "|"];
+  let best = ",", bestCount = 0;
+  for (const d of candidates) {
+    const count = firstLine.split(d).length - 1;
+    if (count > bestCount) {
+      bestCount = count;
+      best = d;
+    }
+  }
+  return best;
+}
+function normNameKey(raw) {
+  if (raw == null) return "";
+  const s = String(raw).trim();
+  if (!s) return "";
+  const p = parseEmployeeName(s);
+  const full = `${p.first} ${p.last}`.trim() || s;
+  return full.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+}
+function linkManagers(employees) {
+  const idSet = new Set(employees.map((e) => e.id));
+  const nameIndex = /* @__PURE__ */ new Map();
+  for (const e of employees) {
+    const k = normNameKey(`${e.first || ""} ${e.last || ""}`);
+    if (!k) continue;
+    if (!nameIndex.has(k)) nameIndex.set(k, []);
+    nameIndex.get(k).push(e.id);
+  }
+  const stats = { resolvedByName: 0, orphaned: [], ambiguous: [], selfRef: [], cyclesBroken: [] };
+  for (const e of employees) {
+    const ref = e.managerId;
+    if (ref == null || ref === "") {
+      e.managerId = null;
+      continue;
+    }
+    if (ref === e.id) {
+      e.managerId = null;
+      stats.selfRef.push({ id: e.id, ref });
+      continue;
+    }
+    if (idSet.has(ref)) continue;
+    const k = normNameKey(ref);
+    const matches = k ? (nameIndex.get(k) || []).filter((id) => id !== e.id) : [];
+    if (matches.length === 1) {
+      e.managerId = matches[0];
+      stats.resolvedByName++;
+      continue;
+    }
+    if (matches.length > 1) {
+      e.managerId = null;
+      stats.ambiguous.push({ id: e.id, ref });
+      continue;
+    }
+    e.managerId = null;
+    stats.orphaned.push({ id: e.id, ref });
+  }
+  const idMap = new Map(employees.map((e) => [e.id, e]));
+  for (const e of employees) {
+    const seen = /* @__PURE__ */ new Set();
+    let cur = e;
+    while (cur && cur.managerId) {
+      if (seen.has(cur.id)) {
+        e.managerId = null;
+        stats.cyclesBroken.push({ id: e.id });
+        break;
+      }
+      seen.add(cur.id);
+      cur = idMap.get(cur.managerId);
+    }
+  }
+  return stats;
+}
+function previewImportStats(rows, mapping) {
+  const col = (k) => {
+    var _a;
+    return (_a = mapping[k]) != null ? _a : -1;
+  };
+  const g = (row, i) => {
+    var _a;
+    return i >= 0 ? String((_a = row[i]) != null ? _a : "").trim() : "";
+  };
+  const idCol = col("id"), mgrCol = col("managerId");
+  const fullCol = col("fullName"), firstCol = col("first"), lastCol = col("last");
+  const hasId = idCol >= 0, hasMgr = mgrCol >= 0;
+  const ids = /* @__PURE__ */ new Set();
+  const nameCount = /* @__PURE__ */ new Map();
+  let willImport = 0, blank = 0, dup = 0;
+  for (const row of rows) {
+    const id = g(row, idCol);
+    if (!id) {
+      blank++;
+      continue;
+    }
+    if (ids.has(id)) {
+      dup++;
+      continue;
+    }
+    ids.add(id);
+    willImport++;
+    let first = g(row, firstCol), last = g(row, lastCol);
+    if ((!first || !last) && fullCol >= 0) {
+      const p = parseEmployeeName(g(row, fullCol));
+      first = first || p.first;
+      last = last || p.last;
+    }
+    const k = normNameKey(`${first} ${last}`);
+    if (k) nameCount.set(k, (nameCount.get(k) || 0) + 1);
+  }
+  let managersById = 0, managersByName = 0, topLevel = 0, orphan = 0, ambiguous = 0;
+  if (hasMgr) {
+    const seen = /* @__PURE__ */ new Set();
+    for (const row of rows) {
+      const id = g(row, idCol);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const ref = g(row, mgrCol);
+      if (!ref) {
+        topLevel++;
+        continue;
+      }
+      if (ids.has(ref) && ref !== id) {
+        managersById++;
+        continue;
+      }
+      const cnt = nameCount.get(normNameKey(ref)) || 0;
+      if (cnt === 1) {
+        managersByName++;
+        continue;
+      }
+      if (cnt > 1) {
+        ambiguous++;
+        orphan++;
+        continue;
+      }
+      orphan++;
+    }
+  } else {
+    topLevel = willImport;
+  }
+  return { total: rows.length, willImport, blank, dup, hasId, hasMgr, managersById, managersByName, topLevel, orphan, ambiguous };
 }
 const _LVL_FROM_DISPLAY = Object.fromEntries(Object.entries(LEVEL_LABELS).map(([k, v]) => [v.toUpperCase(), k]));
 function normalizeLevel(raw) {
@@ -503,7 +648,7 @@ function diffScenarios(beforeEmployees, afterEmployees) {
 }
 const { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext, memo } = React;
 const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, AreaChart, Area, CartesianGrid, Legend, ReferenceLine } = Recharts;
-const { Search, ChevronDown, ChevronRight, Users, Building2, MapPin, TrendingUp, AlertTriangle, MessageSquare, GripVertical, Play, Pause, SkipBack, SkipForward, Download, Plus, Eye, EyeOff, Filter, BarChart3, Clock, Zap, Target, Layers, Globe, ChevronLeft, X, Check, Flag, Edit3, Trash2, Move, ArrowRight, Info, AlertCircle, Activity, GitMerge, AlertOctagon, UserPlus, Minus, Printer, Sparkles, FileText } = LucideReact;
+const { Search, ChevronDown, ChevronRight, Users, Building2, MapPin, TrendingUp, AlertTriangle, MessageSquare, GripVertical, Play, Pause, SkipBack, SkipForward, Download, Plus, Eye, EyeOff, Filter, BarChart3, Clock, Zap, Target, Layers, Globe, ChevronLeft, X, Check, Flag, Edit3, Trash2, Move, ArrowRight, Info, AlertCircle, Activity, GitMerge, AlertOctagon, UserPlus, Minus, Printer, Sparkles, FileText, UploadCloud } = LucideReact;
 const FIXED_NOW = new Date(2025, 5, 1);
 const DEPT_COLORS = {
   "IC Design": "#2563eb",
@@ -2855,7 +3000,7 @@ const IMPORT_FIELDS = [
   { key: "location", label: "Location", aliases: ["location", "city", "site", "office", "work location", "worklocation"] },
   { key: "country", label: "Country", aliases: ["country", "nation"] },
   { key: "employmentType", label: "Employment type", aliases: ["employmenttype", "employment type", "emp type", "worker type", "workertype", "type"] },
-  { key: "managerId", label: "Manager ID", aliases: ["managerid", "manager id", "manager", "reports to", "reportsto", "supervisor id", "supervisor", "supervisorid", "manager employee id", "manager (worker)", "manager name", "manager user", "manager user id"] },
+  { key: "managerId", label: "Manager (ID or name)", aliases: ["managerid", "manager id", "manager", "reports to", "reportsto", "supervisor id", "supervisor", "supervisorid", "manager employee id", "manager (worker)", "manager name", "manager user", "manager user id"] },
   { key: "status", label: "Status", aliases: ["status", "active", "employment status", "employmentstatus"] },
   { key: "startDate", label: "Start date", aliases: ["startdate", "start date", "hire date", "hiredate", "start", "date hired", "original hire date", "event date"] },
   { key: "endDate", label: "End date", aliases: ["enddate", "end date", "term date", "termdate", "end", "exit date", "termination date"] },
@@ -2920,6 +3065,9 @@ function EmployeeImportWizard({ data, onCancel, onConfirm }) {
     const lv = normalizeLevel(g(col("level")));
     return { id: g(col("id")), name: `${first} ${last}`.trim() || "\u2014", level: lv ? displayLevel(lv) : "L3*", dept: g(col("dept")) || "\u2014", mgr: g(col("managerId")) || "\u2014" };
   }), [rows, mapping]);
+  const stats = useMemo(() => previewImportStats(rows, mapping), [rows, mapping]);
+  const linked = stats.managersById + stats.managersByName;
+  const flatChart = stats.hasMgr ? stats.willImport > 1 && linked === 0 : stats.willImport > 1;
   function downloadTemplate() {
     const cols = ["id", "first", "last", "title", "level", "dept", "bg", "fn", "location", "country", "employmentType", "managerId", "status", "startDate", "endDate"];
     const ex = [
@@ -2941,7 +3089,7 @@ function EmployeeImportWizard({ data, onCancel, onConfirm }) {
       className: `flex-1 min-w-0 border rounded-md px-2 py-1 bg-white text-gray-700 ${col(f.key) < 0 && f.required ? "border-red-300" : col(f.key) < 0 && REC.has(f.key) ? "border-amber-300" : "border-gray-200"}`
     },
     opts
-  )))), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-gray-400 mb-4" }, "Only ", /* @__PURE__ */ React.createElement("span", { className: "text-red-500" }, "*"), " ", /* @__PURE__ */ React.createElement("b", null, "Employee ID"), " is required \u2014 anything you leave unmapped is filled with a sensible default (manager \u2192 top-level, level \u2192 L3, department \u2192 General, name \u2192 ID). Amber = recommended."), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-4 mb-4 text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "font-bold text-gray-600 uppercase tracking-wide" }, "Mode"), [["replace", "Replace org", "Discards the current org and loads only this file"], ["append", "Append / merge", "Adds these people to the current org (same IDs are updated)"]].map(([v, l, desc]) => /* @__PURE__ */ React.createElement("label", { key: v, className: "flex items-center gap-1.5 cursor-pointer", title: desc }, /* @__PURE__ */ React.createElement("input", { type: "radio", name: "impmode", checked: mode === v, onChange: () => setMode(v) }), " ", /* @__PURE__ */ React.createElement("span", { className: "text-gray-700" }, l)))), /* @__PURE__ */ React.createElement("h3", { className: "text-xs font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Preview ", /* @__PURE__ */ React.createElement("span", { className: "text-gray-400 font-normal normal-case" }, "\xB7 first ", preview.length, " rows as they'll import")), /* @__PURE__ */ React.createElement("div", { className: "border border-gray-100 rounded-lg overflow-hidden" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-xs" }, /* @__PURE__ */ React.createElement("thead", { className: "bg-gray-50 text-gray-500" }, /* @__PURE__ */ React.createElement("tr", null, ["ID", "Name", "Level", "Department", "Manager"].map((h) => /* @__PURE__ */ React.createElement("th", { key: h, className: "text-left px-2 py-1 font-semibold" }, h)))), /* @__PURE__ */ React.createElement("tbody", null, preview.map((p, i) => /* @__PURE__ */ React.createElement("tr", { key: i, className: "border-t border-gray-50" }, /* @__PURE__ */ React.createElement("td", { className: "px-2 py-1 text-gray-700" }, p.id || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "px-2 py-1 text-gray-700" }, p.name), /* @__PURE__ */ React.createElement("td", { className: "px-2 py-1 text-gray-700" }, p.level), /* @__PURE__ */ React.createElement("td", { className: "px-2 py-1 text-gray-700" }, p.dept), /* @__PURE__ */ React.createElement("td", { className: "px-2 py-1 text-gray-500" }, p.mgr))))))), /* @__PURE__ */ React.createElement("div", { className: "px-5 py-3 border-t border-gray-100 flex items-center justify-between" }, /* @__PURE__ */ React.createElement("div", { className: "text-xs text-gray-500" }, !canImport ? /* @__PURE__ */ React.createElement("span", { className: "text-red-500" }, "Map the Employee ID column to continue.") : willDefault.length ? /* @__PURE__ */ React.createElement("span", { className: "text-amber-600" }, "Defaults will be applied: ", willDefault.join("; "), ".") : /* @__PURE__ */ React.createElement("span", { className: "text-emerald-600" }, "All set \u2014 ready to import.")), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: onCancel, className: "text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200" }, "Cancel"), /* @__PURE__ */ React.createElement(
+  )))), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-gray-400 mb-3" }, "Only ", /* @__PURE__ */ React.createElement("span", { className: "text-red-500" }, "*"), " ", /* @__PURE__ */ React.createElement("b", null, "Employee ID"), " is required \u2014 anything you leave unmapped is filled with a sensible default (manager \u2192 top-level, level \u2192 L3, department \u2192 General, name \u2192 ID). Amber = recommended."), /* @__PURE__ */ React.createElement("div", { className: "mb-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "font-semibold text-gray-700" }, stats.willImport.toLocaleString(), " ", stats.willImport === 1 ? "person" : "people", " will import"), stats.hasMgr ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "text-emerald-600" }, linked.toLocaleString(), " manager", linked === 1 ? "" : "s", " linked", stats.managersByName ? ` (${stats.managersByName} by name)` : ""), /* @__PURE__ */ React.createElement("span", { className: "text-gray-500" }, stats.topLevel.toLocaleString(), " at top level"), stats.orphan > 0 && /* @__PURE__ */ React.createElement("span", { className: "text-amber-600" }, stats.orphan.toLocaleString(), " manager", stats.orphan === 1 ? "" : "s", " won\u2019t match")) : /* @__PURE__ */ React.createElement("span", { className: "text-amber-600" }, "No manager column mapped"), (stats.dup > 0 || stats.blank > 0) && /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, stats.dup ? `${stats.dup} dup ID${stats.dup === 1 ? "" : "s"}` : "", stats.dup && stats.blank ? " \xB7 " : "", stats.blank ? `${stats.blank} blank` : "", " skipped")), flatChart && /* @__PURE__ */ React.createElement("div", { className: "mt-1.5 text-[11px] text-amber-700 flex items-start gap-1" }, /* @__PURE__ */ React.createElement(AlertTriangle, { size: 12, className: "mt-0.5 shrink-0" }), /* @__PURE__ */ React.createElement("span", null, stats.hasMgr ? "None of the manager values match a person here \u2014 the chart will be flat. Check that the Manager column maps to an Employee ID or a person\u2019s name." : "Without a Manager column the whole org imports flat (everyone at the top). Map a Manager/\u201CReports To\u201D column to build the hierarchy."))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-4 mb-4 text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "font-bold text-gray-600 uppercase tracking-wide" }, "Mode"), [["replace", "Replace org", "Discards the current org and loads only this file"], ["append", "Append / merge", "Adds these people to the current org (same IDs are updated)"]].map(([v, l, desc]) => /* @__PURE__ */ React.createElement("label", { key: v, className: "flex items-center gap-1.5 cursor-pointer", title: desc }, /* @__PURE__ */ React.createElement("input", { type: "radio", name: "impmode", checked: mode === v, onChange: () => setMode(v) }), " ", /* @__PURE__ */ React.createElement("span", { className: "text-gray-700" }, l)))), /* @__PURE__ */ React.createElement("h3", { className: "text-xs font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Preview ", /* @__PURE__ */ React.createElement("span", { className: "text-gray-400 font-normal normal-case" }, "\xB7 first ", preview.length, " rows as they'll import")), /* @__PURE__ */ React.createElement("div", { className: "border border-gray-100 rounded-lg overflow-hidden" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-xs" }, /* @__PURE__ */ React.createElement("thead", { className: "bg-gray-50 text-gray-500" }, /* @__PURE__ */ React.createElement("tr", null, ["ID", "Name", "Level", "Department", "Manager"].map((h) => /* @__PURE__ */ React.createElement("th", { key: h, className: "text-left px-2 py-1 font-semibold" }, h)))), /* @__PURE__ */ React.createElement("tbody", null, preview.map((p, i) => /* @__PURE__ */ React.createElement("tr", { key: i, className: "border-t border-gray-50" }, /* @__PURE__ */ React.createElement("td", { className: "px-2 py-1 text-gray-700" }, p.id || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "px-2 py-1 text-gray-700" }, p.name), /* @__PURE__ */ React.createElement("td", { className: "px-2 py-1 text-gray-700" }, p.level), /* @__PURE__ */ React.createElement("td", { className: "px-2 py-1 text-gray-700" }, p.dept), /* @__PURE__ */ React.createElement("td", { className: "px-2 py-1 text-gray-500" }, p.mgr))))))), /* @__PURE__ */ React.createElement("div", { className: "px-5 py-3 border-t border-gray-100 flex items-center justify-between" }, /* @__PURE__ */ React.createElement("div", { className: "text-xs text-gray-500" }, !canImport ? /* @__PURE__ */ React.createElement("span", { className: "text-red-500" }, "Map the Employee ID column to continue.") : willDefault.length ? /* @__PURE__ */ React.createElement("span", { className: "text-amber-600" }, "Defaults will be applied: ", willDefault.join("; "), ".") : /* @__PURE__ */ React.createElement("span", { className: "text-emerald-600" }, "All set \u2014 ready to import.")), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: onCancel, className: "text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200" }, "Cancel"), /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => canImport && onConfirm(mapping, mode),
@@ -3554,7 +3702,7 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
       "input",
       {
         type: "file",
-        accept: ".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
+        accept: ".csv,text/csv,.tsv,.txt,text/tab-separated-values,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
         className: "hidden",
         onChange: (e) => {
           var _a;
@@ -3642,7 +3790,7 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
       "input",
       {
         type: "file",
-        accept: ".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
+        accept: ".csv,text/csv,.tsv,.txt,text/tab-separated-values,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
         className: "hidden",
         onChange: (e) => {
           var _a;
@@ -10038,6 +10186,7 @@ function OrgChartApp() {
     });
   }, []);
   const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
@@ -11002,16 +11151,64 @@ function OrgChartApp() {
     }
     reader.onload = (ev) => {
       try {
-        const rows = parseCSV(String(ev.target.result || ""));
-        if (rows.length < 2) throw new Error("File has no data rows");
-        const header = rows[0].map((c) => (c || "").trim());
-        setImportState({ fileName: file.name || "import.csv", header, rows: rows.slice(1) });
+        openImportText(String(ev.target.result || ""), file.name || "import.csv");
       } catch (err) {
-        alert("Could not read CSV: " + err.message);
+        alert("Could not read file: " + err.message);
       }
     };
     reader.readAsText(file);
   }
+  function openImportText(text, fileName) {
+    const delim = detectDelimiter(text);
+    const rows = parseCSV(text, delim);
+    if (rows.length < 2) throw new Error("needs a header row plus at least one data row");
+    const header = rows[0].map((c) => (c || "").trim());
+    setImportState({ fileName: fileName || "pasted data", header, rows: rows.slice(1) });
+  }
+  useEffect(() => {
+    const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+    const onDragOver = (e) => {
+      if (hasFiles(e)) {
+        e.preventDefault();
+        setDragActive(true);
+      }
+    };
+    const onDragLeave = (e) => {
+      if (e.relatedTarget == null) setDragActive(false);
+    };
+    const onDrop = (e) => {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+        e.preventDefault();
+        setDragActive(false);
+        openImportWizard(e.dataTransfer.files[0]);
+      } else setDragActive(false);
+    };
+    const onPaste = (e) => {
+      const el = document.activeElement;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      const text = e.clipboardData && e.clipboardData.getData("text");
+      if (!text) return;
+      const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+      if (lines.length >= 2 && /[,\t;|]/.test(lines[0])) {
+        e.preventDefault();
+        try {
+          openImportText(text, "Pasted data");
+        } catch (err) {
+          alert("Could not read pasted data: " + err.message);
+        }
+      }
+    };
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+      window.removeEventListener("paste", onPaste);
+    };
+  }, []);
   function applyEmployeeImport({ rows }, mapping, mode2) {
     const col = (k) => {
       var _a2;
@@ -11102,38 +11299,18 @@ function OrgChartApp() {
     } else {
       finalList = out;
     }
-    const idSet = new Set(finalList.map((e) => e.id));
-    let orphaned = 0;
-    finalList.forEach((e) => {
-      var _a2, _b;
-      if (e.managerId && !idSet.has(e.managerId)) {
-        exceptions.push({ row: (_a2 = rowById.get(e.id)) != null ? _a2 : null, id: e.id, field: "managerId", issue: `Unknown manager id '${e.managerId}'`, action: "reset to top-level" });
-        e.managerId = null;
-        orphaned++;
-      }
-      if (e.id === e.managerId) {
-        exceptions.push({ row: (_b = rowById.get(e.id)) != null ? _b : null, id: e.id, field: "managerId", issue: "Manager id equals own id", action: "reset to top-level" });
-        e.managerId = null;
-        orphaned++;
-      }
-    });
-    const idMap = new Map(finalList.map((e) => [e.id, e]));
-    let cyclesBroken = 0;
-    finalList.forEach((e) => {
+    const linkStats = linkManagers(finalList);
+    const mgrRow = (id) => {
       var _a2;
-      const seen = /* @__PURE__ */ new Set();
-      let cur = e;
-      while (cur && cur.managerId) {
-        if (seen.has(cur.id)) {
-          exceptions.push({ row: (_a2 = rowById.get(e.id)) != null ? _a2 : null, id: e.id, field: "managerId", issue: "Reporting cycle detected", action: "reset to top-level" });
-          e.managerId = null;
-          cyclesBroken++;
-          break;
-        }
-        seen.add(cur.id);
-        cur = idMap.get(cur.managerId);
-      }
-    });
+      return (_a2 = rowById.get(id)) != null ? _a2 : null;
+    };
+    linkStats.orphaned.forEach((o) => exceptions.push({ row: mgrRow(o.id), id: o.id, field: "managerId", issue: `Manager '${o.ref}' not found`, action: "reset to top-level" }));
+    linkStats.ambiguous.forEach((o) => exceptions.push({ row: mgrRow(o.id), id: o.id, field: "managerId", issue: `Manager name '${o.ref}' matches more than one person`, action: "reset to top-level" }));
+    linkStats.selfRef.forEach((o) => exceptions.push({ row: mgrRow(o.id), id: o.id, field: "managerId", issue: "Listed as their own manager", action: "reset to top-level" }));
+    linkStats.cyclesBroken.forEach((o) => exceptions.push({ row: mgrRow(o.id), id: o.id, field: "managerId", issue: "Reporting cycle detected", action: "reset to top-level" }));
+    const orphaned = linkStats.orphaned.length + linkStats.ambiguous.length + linkStats.selfRef.length;
+    const cyclesBroken = linkStats.cyclesBroken.length;
+    const resolvedByName = linkStats.resolvedByName;
     setUndoStack((prev) => [...prev, JSON.parse(JSON.stringify(employees))]);
     setEmployees(finalList);
     setIsSyntheticData(false);
@@ -11148,10 +11325,11 @@ function OrgChartApp() {
     setLastImportExceptions(exceptions);
     const notes = [];
     if (mode2 === "append") notes.push(`merged into existing org \u2014 ${finalList.length} total`);
+    if (resolvedByName) notes.push(`${resolvedByName} manager${resolvedByName > 1 ? "s" : ""} matched by name`);
     if (dupIds) notes.push(`${dupIds} duplicate id${dupIds > 1 ? "s" : ""} skipped`);
     if (blankRows) notes.push(`${blankRows} blank row${blankRows > 1 ? "s" : ""} skipped`);
     if (lvDefaulted) notes.push(`${lvDefaulted} unrecognized level${lvDefaulted > 1 ? "s" : ""} set to L3`);
-    if (orphaned) notes.push(`${orphaned} unknown manager ref${orphaned > 1 ? "s" : ""} reset to root`);
+    if (orphaned) notes.push(`${orphaned} manager ref${orphaned > 1 ? "s" : ""} couldn't be matched \u2014 set to top-level`);
     if (cyclesBroken) notes.push(`${cyclesBroken} reporting cycle${cyclesBroken > 1 ? "s" : ""} broken`);
     alert(`Imported ${out.length} row${out.length > 1 ? "s" : ""}.${notes.length ? "\n\u2022 " + notes.join("\n\u2022 ") : ""}${exceptions.length ? `
 
@@ -11467,7 +11645,7 @@ ${exceptions.length} exception${exceptions.length > 1 ? "s" : ""} logged \u2014 
     confirmDrop,
     cancelDrop
   };
-  return /* @__PURE__ */ React.createElement(AppCtx.Provider, { value: ctxValue }, /* @__PURE__ */ React.createElement("div", { className: "h-screen flex flex-col overflow-hidden", style: { fontFamily: "'DM Sans', sans-serif", background: "#f8fafc" } }, !dataNoticeDismissed && /* @__PURE__ */ React.createElement("div", { className: "shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-xs text-amber-900" }, /* @__PURE__ */ React.createElement("span", { className: "font-semibold" }, "Privacy notice:"), /* @__PURE__ */ React.createElement("span", null, "Your org data never leaves this browser \u2014 nothing is sent over the network. It is auto-saved locally on this device; use Save session to keep a file copy or move it to another machine."), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement(AppCtx.Provider, { value: ctxValue }, dragActive && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-[100] flex items-center justify-center bg-blue-600/20 backdrop-blur-sm pointer-events-none", style: { fontFamily: "'DM Sans', sans-serif" } }, /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-2xl shadow-2xl border-2 border-dashed border-blue-400 px-10 py-8 text-center" }, /* @__PURE__ */ React.createElement(UploadCloud, { size: 40, className: "mx-auto text-blue-500 mb-2" }), /* @__PURE__ */ React.createElement("div", { className: "text-lg font-bold text-gray-900" }, "Drop your headcount file to import"), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-gray-500 mt-1" }, "Excel (.xlsx) or CSV / TSV \u2014 you\u2019ll map columns next"))), /* @__PURE__ */ React.createElement("div", { className: "h-screen flex flex-col overflow-hidden", style: { fontFamily: "'DM Sans', sans-serif", background: "#f8fafc" } }, !dataNoticeDismissed && /* @__PURE__ */ React.createElement("div", { className: "shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-xs text-amber-900" }, /* @__PURE__ */ React.createElement("span", { className: "font-semibold" }, "Privacy notice:"), /* @__PURE__ */ React.createElement("span", null, "Your org data never leaves this browser \u2014 nothing is sent over the network. It is auto-saved locally on this device; use Save session to keep a file copy or move it to another machine."), /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: clearAllLocalData,
@@ -11643,7 +11821,7 @@ ${exceptions.length} exception${exceptions.length > 1 ? "s" : ""} logged \u2014 
       "input",
       {
         type: "file",
-        accept: ".csv,text/csv,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
+        accept: ".csv,text/csv,.tsv,.txt,text/tab-separated-values,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
         className: "hidden",
         onChange: (e) => {
           var _a2;

@@ -34,7 +34,9 @@ export function csvCell(v) {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export function parseCSV(text) {
+// RFC-4180-ish parser. `delimiter` defaults to comma but can be a tab/semicolon/pipe
+// so tab-separated (Excel copy-paste), European semicolon CSVs, etc. all parse.
+export function parseCSV(text, delimiter = ",") {
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
   const rows = [];
   let row = [], cell = "", inQuotes = false, i = 0;
@@ -48,13 +50,119 @@ export function parseCSV(text) {
       cell += ch; i++; continue;
     }
     if (ch === '"') { inQuotes = true; i++; continue; }
-    if (ch === ',') { row.push(cell); cell = ""; i++; continue; }
+    if (ch === delimiter) { row.push(cell); cell = ""; i++; continue; }
     if (ch === '\r') { i++; continue; }
     if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ""; i++; continue; }
     cell += ch; i++;
   }
   if (cell.length || row.length) { row.push(cell); rows.push(row); }
   return rows.filter(r => r.some(c => c.trim() !== ""));
+}
+
+// Sniff the most likely column delimiter from the first non-empty line. Handles the
+// common cases: comma CSV, tab (TSV / Excel copy-paste), semicolon (European Excel),
+// and pipe. Falls back to comma.
+export function detectDelimiter(text) {
+  if (!text) return ",";
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const firstLine = (text.split(/\r?\n/).find(l => l.trim() !== "") || "");
+  const candidates = [",", "\t", ";", "|"];
+  let best = ",", bestCount = 0;
+  for (const d of candidates) {
+    const count = firstLine.split(d).length - 1;
+    if (count > bestCount) { bestCount = count; best = d; }
+  }
+  return best;
+}
+
+// Normalize a person name to a comparison key: handles "Last, First" vs "First Last",
+// case, punctuation and extra spaces. Used to resolve manager references by name.
+export function normNameKey(raw) {
+  if (raw == null) return "";
+  const s = String(raw).trim();
+  if (!s) return "";
+  const p = parseEmployeeName(s);
+  const full = `${p.first} ${p.last}`.trim() || s;
+  return full.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+}
+
+// Resolve each employee's `managerId` against the roster: first as an employee ID,
+// then — the big real-world win — by matching a manager NAME ("Reports To: John Smith")
+// to a unique person. Self-references, unknown refs, ambiguous names, and reporting
+// cycles are cleared to top-level. Mutates in place; returns stats for the report.
+export function linkManagers(employees) {
+  const idSet = new Set(employees.map(e => e.id));
+  const nameIndex = new Map(); // normNameKey -> [ids]
+  for (const e of employees) {
+    const k = normNameKey(`${e.first || ""} ${e.last || ""}`);
+    if (!k) continue;
+    if (!nameIndex.has(k)) nameIndex.set(k, []);
+    nameIndex.get(k).push(e.id);
+  }
+  const stats = { resolvedByName: 0, orphaned: [], ambiguous: [], selfRef: [], cyclesBroken: [] };
+  for (const e of employees) {
+    const ref = e.managerId;
+    if (ref == null || ref === "") { e.managerId = null; continue; }
+    if (ref === e.id) { e.managerId = null; stats.selfRef.push({ id: e.id, ref }); continue; }
+    if (idSet.has(ref)) continue; // already a valid id
+    const k = normNameKey(ref);
+    const matches = k ? (nameIndex.get(k) || []).filter(id => id !== e.id) : [];
+    if (matches.length === 1) { e.managerId = matches[0]; stats.resolvedByName++; continue; }
+    if (matches.length > 1) { e.managerId = null; stats.ambiguous.push({ id: e.id, ref }); continue; }
+    e.managerId = null; stats.orphaned.push({ id: e.id, ref });
+  }
+  // break reporting cycles (walk up to a root; if we revisit a node, cut the link)
+  const idMap = new Map(employees.map(e => [e.id, e]));
+  for (const e of employees) {
+    const seen = new Set(); let cur = e;
+    while (cur && cur.managerId) {
+      if (seen.has(cur.id)) { e.managerId = null; stats.cyclesBroken.push({ id: e.id }); break; }
+      seen.add(cur.id); cur = idMap.get(cur.managerId);
+    }
+  }
+  return stats;
+}
+
+// Live preview stats for the import wizard: given raw rows + the column mapping, how
+// many rows will import and how many managers will actually link (by id or name) vs.
+// land at top-level — shown BEFORE importing so mis-mappings are caught early.
+export function previewImportStats(rows, mapping) {
+  const col = k => (mapping[k] ?? -1);
+  const g = (row, i) => (i >= 0 ? String(row[i] ?? "").trim() : "");
+  const idCol = col("id"), mgrCol = col("managerId");
+  const fullCol = col("fullName"), firstCol = col("first"), lastCol = col("last");
+  const hasId = idCol >= 0, hasMgr = mgrCol >= 0;
+  const ids = new Set();
+  const nameCount = new Map();
+  let willImport = 0, blank = 0, dup = 0;
+  for (const row of rows) {
+    const id = g(row, idCol);
+    if (!id) { blank++; continue; }
+    if (ids.has(id)) { dup++; continue; }
+    ids.add(id); willImport++;
+    let first = g(row, firstCol), last = g(row, lastCol);
+    if ((!first || !last) && fullCol >= 0) { const p = parseEmployeeName(g(row, fullCol)); first = first || p.first; last = last || p.last; }
+    const k = normNameKey(`${first} ${last}`);
+    if (k) nameCount.set(k, (nameCount.get(k) || 0) + 1);
+  }
+  let managersById = 0, managersByName = 0, topLevel = 0, orphan = 0, ambiguous = 0;
+  if (hasMgr) {
+    const seen = new Set();
+    for (const row of rows) {
+      const id = g(row, idCol);
+      if (!id || seen.has(id)) continue; seen.add(id);
+      const ref = g(row, mgrCol);
+      if (!ref) { topLevel++; continue; }
+      if (ids.has(ref) && ref !== id) { managersById++; continue; }
+      const cnt = nameCount.get(normNameKey(ref)) || 0;
+      if (cnt === 1) { managersByName++; continue; }
+      if (cnt > 1) { ambiguous++; orphan++; continue; }
+      orphan++;
+    }
+  } else {
+    topLevel = willImport;
+  }
+  return { total: rows.length, willImport, blank, dup, hasId, hasMgr, managersById, managersByName, topLevel, orphan, ambiguous };
 }
 
 // Normalize any level input (internal IC1.., display L1/M1/E1, or common synonyms) to a canonical
