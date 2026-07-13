@@ -2,5 +2,9 @@
   "name": "org-chart-simulator",
   "private": true,
   "type": "module",
-  "scripts": { "build": "node build.mjs", "test": "node --test" }
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test",
+    "qa": "node qa.mjs"
+  }
 }
