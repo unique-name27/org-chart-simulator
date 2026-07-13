@@ -222,16 +222,21 @@ export const SLIDE_DENSITY = {
 };
 
 // Tidy top-down tree layout. Shows the root plus `maxDepth` generations of reports.
-// Two compression levers:
+// Compression levers:
 //   • `dens` — card/gap sizing (see SLIDE_DENSITY).
-//   • `wrap` — when a manager's reports are all leaves, pack them into a grid of
-//     `wrapCols` columns (auto by default) instead of one very wide row, and draw
-//     a light "team box" behind them with a single bracket connector. This is what
-//     turns an unreadable 18-wide strip into a tidy block that scales up big.
+//   • wide-team layout — when a manager's reports are all leaves and the team is
+//     bigger than `wrapThreshold`, reshape the row. `leafMode`:
+//       "row"   one long horizontal row (no reshaping)
+//       "grid"  pack into `wrapCols` columns (auto by default) inside a team box
+//       "stack" a vertical name-list of `stackCols` column(s) — the classic
+//               "stack the bottom level" org-chart style; narrowest of all
+//     (`wrap: true` is legacy shorthand for leafMode "grid".)
 // Returns cards (px x/y/w/h), links (polyline point lists), group rects, and bounds.
-export function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, wrap = false, wrapCols = "auto", nodeCap = 200, openByManager = {} }) {
+export function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfortable, wrap = false, wrapCols = "auto", leafMode, wrapThreshold = 3, stackCols = 1, nodeCap = 200, openByManager = {} }) {
   const { cardW, cardH, hGap, vGap } = dens;
-  const rowGap = Math.max(8, Math.round(vGap * 0.32)); // tighter vertical gap between wrapped grid rows
+  const mode = leafMode || (wrap ? "grid" : "row");
+  // Grid rows breathe a little; stacks sit tight like a list.
+  const rowGap = mode === "stack" ? Math.max(5, Math.round(vGap * 0.16)) : Math.max(8, Math.round(vGap * 0.32));
   const cards = [];
   const links = [];   // each: { pts: [[x,y], …] }
   const groups = [];  // each: { x, y, w, h } — team-box behind a wrapped grid
@@ -260,13 +265,15 @@ export function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfor
     }
 
     const allLeaves = kids.every(k => !childBranches(k, d));
-    // Grid-wrap only when it helps: wrapping on, every child a leaf, and enough of
-    // them that a single row would be wide.
-    if (wrap && allLeaves && kids.length > 3) {
+    // Reshape only when it helps: mode on, every child a leaf, and the team is
+    // bigger than the threshold (small teams read fine as a plain row).
+    if (mode !== "row" && allLeaves && kids.length > wrapThreshold) {
       const n = kids.length;
-      const cols = wrapCols === "auto"
-        ? Math.max(2, Math.min(n, Math.round(Math.sqrt(n) * 1.6)))
-        : Math.max(1, Math.min(n, wrapCols));
+      const cols = mode === "stack"
+        ? Math.max(1, Math.min(n, stackCols))
+        : (wrapCols === "auto"
+          ? Math.max(2, Math.min(n, Math.round(Math.sqrt(n) * 1.6)))
+          : Math.max(1, Math.min(n, wrapCols)));
       const rows = Math.ceil(n / cols);
       const blockW = cols * cardW + (cols - 1) * hGap;
       const spanW = Math.max(blockW, cardW);

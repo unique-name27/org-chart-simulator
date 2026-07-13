@@ -3251,8 +3251,10 @@ function OrgSlideView() {
   const [search, setSearch]     = useState("");
   const [titleText, setTitleText] = useState("");
   const [density, setDensity]   = useState("comfortable");
-  const [wrap, setWrap]         = useState(true);
-  const [wrapCols, setWrapCols] = useState("auto");
+  const [leafMode, setLeafMode] = useState("grid");     // wide-team layout: "row" | "grid" | "stack"
+  const [wrapCols, setWrapCols] = useState("auto");     // grid columns
+  const [stackCols, setStackCols] = useState(1);        // stack columns (1 = name list)
+  const [wrapThreshold, setWrapThreshold] = useState(3); // reshape teams bigger than this
   // User-added "open position" ghost cards: [{ id, managerId, title, level, dept }]
   // openRoles/setOpenRoles lifted to OrgChartApp (via context) so they persist with the session doc.
   const [newRole, setNewRole]   = useState({ managerId: "", title: "", level: "L4", count: 1 });
@@ -3310,7 +3312,7 @@ function OrgSlideView() {
   const effOpenByManager = chartMode === "group" ? {} : openByManager;
   const renderColorDim = chartMode === "group" ? groupDim : colorDim;
 
-  const layout = useMemo(() => effRoot ? computeSlideLayout(effRoot, { maxDepth: effMaxDepth, dens, wrap, wrapCols: wrapColsVal, openByManager: effOpenByManager }) : null, [effRoot, effMaxDepth, dens, wrap, wrapColsVal, effOpenByManager]);
+  const layout = useMemo(() => effRoot ? computeSlideLayout(effRoot, { maxDepth: effMaxDepth, dens, leafMode, wrapCols: wrapColsVal, stackCols, wrapThreshold, openByManager: effOpenByManager }) : null, [effRoot, effMaxDepth, dens, leafMode, wrapColsVal, stackCols, wrapThreshold, effOpenByManager]);
   const openCount = layout ? layout.cards.filter(c => c.node.__open).length : 0;
 
   // Managers you can attach an open role to = the real (non-open) cards currently on the slide.
@@ -3457,7 +3459,7 @@ function OrgSlideView() {
       return [{ layout, fields, colorDim: renderColorDim, dens, title, subtitle, notes: stickyNotes }];
     }
     const mk = (node, mDepth, ttl, sub, withNotes) => ({
-      layout: computeSlideLayout(node, { maxDepth: mDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }),
+      layout: computeSlideLayout(node, { maxDepth: mDepth, dens, leafMode, wrapCols: wrapColsVal, stackCols, wrapThreshold, openByManager }),
       fields, colorDim, dens, title: ttl, subtitle: sub, notes: withNotes ? stickyNotes : [],
     });
     if (!perTeam || !rootNode.children || rootNode.children.length === 0) {
@@ -3483,7 +3485,7 @@ function OrgSlideView() {
     const models = slides.map(s => {
       const node = tree.map[s.nodeId] || rootNode;
       return {
-        layout: computeSlideLayout(node, { maxDepth: 1, dens, wrap, wrapCols: wrapColsVal, openByManager }),
+        layout: computeSlideLayout(node, { maxDepth: 1, dens, leafMode, wrapCols: wrapColsVal, stackCols, wrapThreshold, openByManager }),
         fields, colorDim, dens, title: s.title, subtitle: s.subtitle, notes: [],
       };
     });
@@ -3565,16 +3567,43 @@ function OrgSlideView() {
               ))}
             </div>
           </div>
-          <label className="flex items-start gap-2 text-xs text-gray-700">
-            <input type="checkbox" checked={wrap} onChange={e => setWrap(e.target.checked)} className="mt-0.5" />
-            <span><span className="font-medium">Wrap wide teams into a grid</span><br/><span className="text-gray-400">Packs a long row of reports into a compact block.</span></span>
-          </label>
-          {wrap && (
-            <div className="flex items-center gap-2 text-xs pl-6">
+          <div>
+            <div className="text-[10px] text-gray-400 mb-1">Wide teams (bottom row)</div>
+            <div className="grid grid-cols-3 gap-1">
+              {[["row", "Row", "One long horizontal row — no reshaping"],
+                ["grid", "Grid", "Pack into a multi-column block inside a team box"],
+                ["stack", "Stack", "Vertical name list — narrowest, classic bottom-level style"]].map(([v, l, tip]) => (
+                <button key={v} onClick={() => setLeafMode(v)} title={tip}
+                  className={`text-[10px] py-1 rounded border transition-colors ${leafMode === v ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+          {leafMode === "grid" && (
+            <div className="flex items-center gap-2 text-xs">
               <span className="text-gray-500">Columns</span>
               <select value={wrapCols} onChange={e => setWrapCols(e.target.value)} className="flex-1 text-xs border border-gray-200 rounded-md px-2 py-1 bg-white">
                 <option value="auto">Auto</option>
                 {[3, 4, 5, 6, 8, 10].map(n => <option key={n} value={n}>{n} per row</option>)}
+              </select>
+            </div>
+          )}
+          {leafMode === "stack" && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-500">Columns</span>
+              <select value={stackCols} onChange={e => setStackCols(parseInt(e.target.value, 10))} className="flex-1 text-xs border border-gray-200 rounded-md px-2 py-1 bg-white">
+                <option value={1}>1 — single name list</option>
+                <option value={2}>2 — double stack</option>
+                <option value={3}>3 — triple stack</option>
+              </select>
+            </div>
+          )}
+          {leafMode !== "row" && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-500 shrink-0">When bigger than</span>
+              <select value={wrapThreshold} onChange={e => setWrapThreshold(parseInt(e.target.value, 10))} className="flex-1 text-xs border border-gray-200 rounded-md px-2 py-1 bg-white">
+                {[2, 3, 5, 8, 12].map(n => <option key={n} value={n}>{n} people</option>)}
               </select>
             </div>
           )}
