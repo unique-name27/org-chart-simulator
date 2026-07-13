@@ -3082,6 +3082,18 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
           </g>
         );
       })}
+      {/* anchored-note connectors (dashed, under the notes) */}
+      {notes.map(n => {
+        if (!n.anchorId) return null;
+        const card = layout.cards.find(c => c.node.id === n.anchorId);
+        if (!card) return null;
+        const pal = STICKY_NOTE_COLORS[n.color] || STICKY_NOTE_COLORS.yellow;
+        const h = NOTE_PAD * 2 + noteLines(n.text).length * NOTE_LINE;
+        const nx = n.fx * W + NOTE_W / 2, ny = n.fy * H + h / 2;             // note center
+        const cx = ox + card.x + card.w / 2, cy = oy + card.y + card.h / 2;  // card center
+        return <line key={`ln_${n.id}`} x1={nx} y1={ny} x2={cx} y2={cy}
+          stroke={pal.border} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.85" />;
+      })}
       {/* sticky notes (draggable, drawn on top) */}
       {notes.map(n => {
         const pal = STICKY_NOTE_COLORS[n.color] || STICKY_NOTE_COLORS.yellow;
@@ -3093,6 +3105,7 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
             style={{ cursor: "move" }}>
             <rect x={nx + 2} y={ny + 3} width={NOTE_W} height={h} rx="4" fill="#000000" opacity="0.06" />
             <rect x={nx} y={ny} width={NOTE_W} height={h} rx="4" fill={pal.bg} stroke={pal.border} strokeWidth="1" />
+            {n.anchorId && <circle cx={nx + NOTE_W - 8} cy={ny + 8} r="3" fill={pal.border} />}
             {lines.map((ln, i) => (
               <text key={i} x={nx + NOTE_PAD} y={ny + NOTE_PAD + (i + 1) * NOTE_LINE - 4} fontSize={NOTE_FONT} fill={pal.text} style={{ fontFamily: "'Caveat', 'DM Sans', cursive" }} fontWeight="600">{ln}</text>
             ))}
@@ -3116,7 +3129,9 @@ function exportSlidePNG(svgEl, filename, scale = 2) {
   const styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
   styleEl.textContent =
     `@font-face{font-family:'DM Sans';font-weight:400;src:url(data:font/woff2;base64,${DM_SANS_WOFF2_B64}) format('woff2');}\n` +
-    `@font-face{font-family:'DM Sans';font-weight:700;src:url(data:font/woff2;base64,${DM_SANS_WOFF2_B64}) format('woff2');}`;
+    `@font-face{font-family:'DM Sans';font-weight:700;src:url(data:font/woff2;base64,${DM_SANS_WOFF2_B64}) format('woff2');}\n` +
+    `@font-face{font-family:'Caveat';font-weight:400;src:url(data:font/woff2;base64,${CAVEAT_WOFF2_B64}) format('woff2');}\n` +
+    `@font-face{font-family:'Caveat';font-weight:700;src:url(data:font/woff2;base64,${CAVEAT_WOFF2_B64}) format('woff2');}`;
   clone.insertBefore(styleEl, clone.firstChild);
   const xml = new XMLSerializer().serializeToString(clone);
   const svg64 = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
@@ -3209,13 +3224,25 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
       }
     });
 
-    // sticky notes — positioned relative to the whole slide, editable text boxes
+    // sticky notes — positioned relative to the whole slide, editable text boxes.
+    // A note anchored to a person also gets a dashed connector to that card.
     const NOTE_W_IN = 2.0;
     notes.forEach(n => {
       const pal = STICKY_NOTE_COLORS[n.color] || STICKY_NOTE_COLORS.yellow;
       const hIn = Math.max(0.45, noteLines(n.text).length * 0.24 + 0.2);
       const nx = Math.max(0.1, Math.min(SW - NOTE_W_IN - 0.1, n.fx * SW));
       const ny = Math.max(0.1, Math.min(SH - hIn - 0.1, n.fy * SH));
+      const anchor = n.anchorId ? layout.cards.find(c => c.node.id === n.anchorId) : null;
+      if (anchor) {
+        const ax = X(anchor.x + anchor.w / 2), ay = Y(anchor.y + anchor.h / 2); // card center (in)
+        const bx = nx + NOTE_W_IN / 2, by = ny + hIn / 2;                        // note center (in)
+        slide.addShape(pptx.ShapeType.line, {
+          x: Math.min(ax, bx), y: Math.min(ay, by),
+          w: Math.abs(ax - bx), h: Math.abs(ay - by),
+          flipV: (ax < bx) !== (ay < by), // box lines run TL→BR by default; flip when the slope goes the other way
+          line: { color: hex(pal.border), width: 1, dashType: "dash" },
+        });
+      }
       slide.addText(n.text || "", {
         x: nx, y: ny, w: NOTE_W_IN, h: hIn, shape: pptx.ShapeType.roundRect, rectRadius: 0.04,
         fill: { color: hex(pal.bg) }, line: { color: hex(pal.border), width: 1 },
@@ -3456,12 +3483,14 @@ function OrgSlideView() {
   function buildDeckModels() {
     // Breakdown mode is always a single snapshot slide (the synthetic grouped root).
     if (isGroup) {
-      return [{ layout, fields, colorDim: renderColorDim, dens, title, subtitle, notes: stickyNotes }];
+      return [{ layout, fields, colorDim: renderColorDim, dens, title, subtitle, notes: notesOnSlide(stickyNotes, layout, { primary: true }) }];
     }
-    const mk = (node, mDepth, ttl, sub, withNotes) => ({
-      layout: computeSlideLayout(node, { maxDepth: mDepth, dens, leafMode, wrapCols: wrapColsVal, stackCols, wrapThreshold, openByManager }),
-      fields, colorDim, dens, title: ttl, subtitle: sub, notes: withNotes ? stickyNotes : [],
-    });
+    // Per-slide note routing: the primary slide carries free-floating notes; a note
+    // anchored to a person follows that person onto whichever slide shows them.
+    const mk = (node, mDepth, ttl, sub, primary) => {
+      const ly = computeSlideLayout(node, { maxDepth: mDepth, dens, leafMode, wrapCols: wrapColsVal, stackCols, wrapThreshold, openByManager });
+      return { layout: ly, fields, colorDim, dens, title: ttl, subtitle: sub, notes: notesOnSlide(stickyNotes, ly, { primary }) };
+    };
     if (!perTeam || !rootNode.children || rootNode.children.length === 0) {
       return [mk(rootNode, maxDepth, title, subtitle, true)];
     }
@@ -3482,11 +3511,12 @@ function OrgSlideView() {
   // breadth-first, down the whole subtree under rootNode (not just the visible depth).
   function downloadOrgBook() {
     const { slides, truncated } = enumerateBookNodes(rootNode, { slideCap: 60 });
-    const models = slides.map(s => {
+    const models = slides.map((s, i) => {
       const node = tree.map[s.nodeId] || rootNode;
+      const ly = computeSlideLayout(node, { maxDepth: 1, dens, leafMode, wrapCols: wrapColsVal, stackCols, wrapThreshold, openByManager });
       return {
-        layout: computeSlideLayout(node, { maxDepth: 1, dens, leafMode, wrapCols: wrapColsVal, stackCols, wrapThreshold, openByManager }),
-        fields, colorDim, dens, title: s.title, subtitle: s.subtitle, notes: [],
+        layout: ly, fields, colorDim, dens, title: s.title, subtitle: s.subtitle,
+        notes: notesOnSlide(stickyNotes, ly, { primary: i === 0 }), // anchored notes ride along to their person's slide
       };
     });
     exportSlidePPTX(models, { deckName: `${safeName}-org-book.pptx`, footer });
@@ -3700,7 +3730,7 @@ function OrgSlideView() {
             <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide">Sticky notes</label>
             <button onClick={addNote} className="flex items-center gap-1 text-[11px] text-amber-700 hover:text-amber-900"><Plus size={11}/>Add note</button>
           </div>
-          <p className="text-[10px] text-gray-400 -mt-1">Callouts on the slide. <b>Drag them on the preview</b> to place. They export to PNG + PowerPoint.</p>
+          <p className="text-[10px] text-gray-400 -mt-1">Callouts on the slide. <b>Drag them on the preview</b> to place. Attach one to a person and it points at their card — and follows them onto per-team and org-book slides. Exports to PNG + PowerPoint.</p>
           {stickyNotes.length === 0 && <p className="text-[10px] text-gray-300">No notes yet.</p>}
           {stickyNotes.map(n => (
             <div key={n.id} className={`rounded-md p-1.5 border ${selectedNoteId === n.id ? "border-blue-300 bg-blue-50/40" : "border-gray-100"}`} onClick={() => setSelectedNoteId(n.id)}>
@@ -3715,6 +3745,17 @@ function OrgSlideView() {
               <textarea value={n.text} onChange={e => updateNote(n.id, { text: e.target.value })} rows={2}
                 onFocus={() => setSelectedNoteId(n.id)}
                 className="w-full text-xs border border-gray-200 rounded px-1.5 py-1 bg-white resize-none" placeholder="Note text…" />
+              <select value={n.anchorId || ""} onChange={e => updateNote(n.id, { anchorId: e.target.value || null })}
+                title="Attach this note to a person — draws a dashed pointer to their card and carries the note onto any exported slide that shows them"
+                className="w-full text-[11px] border border-gray-200 rounded px-1.5 py-1 bg-white mt-1">
+                <option value="">📌 Floating (this slide only)</option>
+                {attachOptions.map(p => (
+                  <option key={p.id} value={p.id}>→ {p.first} {p.last}</option>
+                ))}
+              </select>
+              {n.anchorId && !attachOptions.some(p => p.id === n.anchorId) && (
+                <p className="text-[10px] text-amber-600 mt-0.5">Attached person isn’t on this slide — the pointer shows where they appear.</p>
+              )}
             </div>
           ))}
         </div>

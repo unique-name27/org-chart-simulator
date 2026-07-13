@@ -322,6 +322,15 @@ export function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfor
   return { cards, links, groups, width, height, count: cards.length, truncated };
 }
 
+// Which sticky notes belong on a given slide. Free-floating notes (no anchor) live
+// on the primary slide only; a note anchored to a person appears on EVERY slide
+// whose layout contains that person's card (per-team decks, the org book, …).
+export function notesOnSlide(notes, layout, { primary = false } = {}) {
+  if (!Array.isArray(notes) || !notes.length || !layout) return [];
+  const ids = new Set(layout.cards.map(c => c.node.id));
+  return notes.filter(n => (n.anchorId ? ids.has(n.anchorId) : primary));
+}
+
 // ─── FULL ORG BOOK (recursive multi-slide deck) ───
 // Breadth-first walk of the tree producing a flat, plain-data slide plan: an overview
 // slide for the root, then one slide per manager (a node with children), shallower
