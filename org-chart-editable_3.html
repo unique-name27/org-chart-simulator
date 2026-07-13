@@ -196,6 +196,19 @@ function linkManagers(employees) {
   }
   return stats;
 }
+function groupSubtree(root, dimField) {
+  const counts = /* @__PURE__ */ new Map();
+  const walk = (n) => {
+    for (const c of n.children || []) {
+      const raw = c[dimField];
+      const v = raw == null || raw === "" ? "\u2014" : String(raw);
+      counts.set(v, (counts.get(v) || 0) + 1);
+      walk(c);
+    }
+  };
+  walk(root);
+  return [...counts.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
 function previewImportStats(rows, mapping) {
   const col = (k) => {
     var _a;
@@ -3169,8 +3182,18 @@ function noteHeight(text) {
   return NOTE_PAD * 2 + noteLines(text).length * NOTE_LINE;
 }
 function slideCardLines(node, fields) {
+  if (node.__group) {
+    return {
+      name: `${node.first || ""}`.trim() || "\u2014",
+      title: "",
+      meta: `${node.count} ${node.count === 1 ? "person" : "people"}`
+    };
+  }
   const meta = [];
   if (fields.dept && node.dept) meta.push(node.dept);
+  if (fields.fn && node.fn) meta.push(node.fn);
+  if (fields.bg && node.bg) meta.push(node.bg);
+  if (fields.location && node.location && node.location !== "Unknown") meta.push(node.location);
   if (fields.level && node.level) meta.push(displayLevel(node.level));
   if (fields.size && (node._totalReports || 0) > 0) meta.push(`${node._totalReports} in org`);
   return {
@@ -3458,7 +3481,9 @@ function OrgSlideView() {
   const [rootId, setRootId] = useState(() => slideSeedId && tree.map[slideSeedId] && slideSeedId || (focusRoot && tree.map[focusRoot] ? focusRoot : tree.root ? tree.root.id : people[0] && people[0].id));
   const [maxDepth, setMaxDepth] = useState(2);
   const [colorDim, setColorDim] = useState("department");
-  const [fields, setFields] = useState({ title: true, dept: true, level: true, size: true });
+  const [fields, setFields] = useState({ title: true, dept: true, fn: false, bg: false, location: false, level: true, size: true });
+  const [chartMode, setChartMode] = useState("tree");
+  const [groupDim, setGroupDim] = useState("department");
   const [perTeam, setPerTeam] = useState(false);
   const [search, setSearch] = useState("");
   const [titleText, setTitleText] = useState("");
@@ -3498,7 +3523,26 @@ function OrgSlideView() {
     });
     return m;
   }, [openRoles]);
-  const layout = useMemo(() => rootNode ? computeSlideLayout(rootNode, { maxDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }) : null, [rootNode, maxDepth, dens, wrap, wrapColsVal, openByManager]);
+  const DIM_FIELD = { department: "dept", discipline: "fn", business_group: "bg", location: "location", level: "level" };
+  const DIM_LABEL = { department: "Department", discipline: "Job family", business_group: "Business unit", location: "Location", level: "Level" };
+  const groupInfo = useMemo(() => {
+    if (chartMode !== "group" || !rootNode) return null;
+    const field = DIM_FIELD[groupDim] || "dept";
+    const groups = groupSubtree(rootNode, field);
+    const children = groups.map((g, i) => {
+      const label = groupDim === "level" ? displayLevel(g.value) : g.value;
+      const node = { id: `__grp_${i}`, __group: true, first: label, last: "", title: "", count: g.count, _totalReports: g.count, children: [] };
+      node[field] = g.value;
+      return node;
+    });
+    const total = groups.reduce((s, g) => s + g.count, 0);
+    return { root: { ...rootNode, children }, groups, total };
+  }, [chartMode, groupDim, rootNode]);
+  const effRoot = chartMode === "group" && groupInfo ? groupInfo.root : rootNode;
+  const effMaxDepth = chartMode === "group" ? 1 : maxDepth;
+  const effOpenByManager = chartMode === "group" ? {} : openByManager;
+  const renderColorDim = chartMode === "group" ? groupDim : colorDim;
+  const layout = useMemo(() => effRoot ? computeSlideLayout(effRoot, { maxDepth: effMaxDepth, dens, wrap, wrapCols: wrapColsVal, openByManager: effOpenByManager }) : null, [effRoot, effMaxDepth, dens, wrap, wrapColsVal, effOpenByManager]);
   const openCount = layout ? layout.cards.filter((c) => c.node.__open).length : 0;
   const attachOptions = useMemo(() => layout ? layout.cards.filter((c) => !c.node.__open).map((c) => c.node) : [], [layout]);
   function addOpenRole() {
@@ -3634,9 +3678,10 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
     const cols = ["Manager", "Title", "Level", "Count", "Department"];
     downloadFile("open-positions-template.csv", [cols.join(","), ...ex.map((r) => r.map(csvCell).join(","))].join("\n"), "text/csv");
   }
-  const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "\u2019" : "\u2019s"} organization` : "Org chart";
+  const isGroup = chartMode === "group";
+  const autoTitle = !rootNode ? "Org chart" : isGroup ? `${rootNode.first} ${rootNode.last} \u2014 ${DIM_LABEL[groupDim]} breakdown` : `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "\u2019" : "\u2019s"} organization`;
   const title = titleText.trim() || autoTitle;
-  const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  \xB7  ${rootNode._totalReports || 0} people in org` : "";
+  const subtitle = !rootNode ? "" : isGroup && groupInfo ? `${groupInfo.groups.length} ${DIM_LABEL[groupDim].toLowerCase()}${groupInfo.groups.length === 1 ? "" : "s"}  \xB7  ${groupInfo.total} people` : `${rootNode.title || displayLevel(rootNode.level)}  \xB7  ${rootNode._totalReports || 0} people in org`;
   const snapshotStamp = importedAt ? `Org snapshot as of ${new Date(importedAt).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" })}` : "Org snapshot (sample data)";
   const CONFIDENTIAL = "Company Confidential";
   const footer = `${CONFIDENTIAL}  \xB7  ${snapshotStamp}  \xB7  Generated ${(/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { year: "numeric", month: "long", day: "numeric" })}`;
@@ -3646,6 +3691,9 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
     return base.slice(0, 200);
   }, [people, search]);
   function buildDeckModels() {
+    if (isGroup) {
+      return [{ layout, fields, colorDim: renderColorDim, dens, title, subtitle, notes: stickyNotes }];
+    }
     const mk = (node, mDepth, ttl, sub, withNotes) => ({
       layout: computeSlideLayout(node, { maxDepth: mDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }),
       fields,
@@ -3729,7 +3777,15 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
       className: "w-full text-xs border border-gray-200 rounded-lg px-1 py-1 bg-white"
     },
     filtered.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.first, " ", p.last, " \u2014 ", p.title || displayLevel(p.level), " (", p._totalReports || 0, ")"))
-  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Levels deep: ", maxDepth), /* @__PURE__ */ React.createElement("input", { type: "range", min: "1", max: "4", value: maxDepth, onChange: (e) => setMaxDepth(parseInt(e.target.value, 10)), className: "w-full" }), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-[10px] text-gray-400" }, /* @__PURE__ */ React.createElement("span", null, "Direct reports"), /* @__PURE__ */ React.createElement("span", null, "4 levels"))), /* @__PURE__ */ React.createElement("div", { className: "bg-white border border-gray-200 rounded-lg p-2.5 space-y-2.5" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide" }, "Compress to fit"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-gray-400 mb-1" }, "Card density"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-4 gap-1" }, Object.values(SLIDE_DENSITY).map((d) => /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Chart type"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-1" }, [["tree", "Reporting tree"], ["group", "Breakdown"]].map(([v, l]) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: v,
+      onClick: () => setChartMode(v),
+      className: `text-[11px] py-1.5 rounded border transition-colors ${chartMode === v ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`
+    },
+    l
+  ))), isGroup && /* @__PURE__ */ React.createElement("div", { className: "mt-2" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-gray-400 mb-1" }, "Break down by"), /* @__PURE__ */ React.createElement("select", { value: groupDim, onChange: (e) => setGroupDim(e.target.value), className: "w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "department" }, "Department"), /* @__PURE__ */ React.createElement("option", { value: "discipline" }, "Job family"), /* @__PURE__ */ React.createElement("option", { value: "business_group" }, "Business unit"), /* @__PURE__ */ React.createElement("option", { value: "location" }, "Location"), /* @__PURE__ */ React.createElement("option", { value: "level" }, "Level")), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 mt-1" }, "One card per ", DIM_LABEL[groupDim].toLowerCase(), " in ", rootNode.first, "\u2019s org, with headcounts."))), !isGroup && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Levels deep: ", maxDepth), /* @__PURE__ */ React.createElement("input", { type: "range", min: "1", max: "4", value: maxDepth, onChange: (e) => setMaxDepth(parseInt(e.target.value, 10)), className: "w-full" }), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-[10px] text-gray-400" }, /* @__PURE__ */ React.createElement("span", null, "Direct reports"), /* @__PURE__ */ React.createElement("span", null, "4 levels"))), /* @__PURE__ */ React.createElement("div", { className: "bg-white border border-gray-200 rounded-lg p-2.5 space-y-2.5" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide" }, "Compress to fit"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-gray-400 mb-1" }, "Card density"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-4 gap-1" }, Object.values(SLIDE_DENSITY).map((d) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: d.key,
@@ -3738,7 +3794,7 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
       className: `text-[10px] py-1 rounded border transition-colors ${density === d.key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`
     },
     d.label
-  )))), /* @__PURE__ */ React.createElement("label", { className: "flex items-start gap-2 text-xs text-gray-700" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: wrap, onChange: (e) => setWrap(e.target.checked), className: "mt-0.5" }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "font-medium" }, "Wrap wide teams into a grid"), /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, "Packs a long row of reports into a compact block."))), wrap && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 text-xs pl-6" }, /* @__PURE__ */ React.createElement("span", { className: "text-gray-500" }, "Columns"), /* @__PURE__ */ React.createElement("select", { value: wrapCols, onChange: (e) => setWrapCols(e.target.value), className: "flex-1 text-xs border border-gray-200 rounded-md px-2 py-1 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "auto" }, "Auto"), [3, 4, 5, 6, 8, 10].map((n) => /* @__PURE__ */ React.createElement("option", { key: n, value: n }, n, " per row")))), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-gray-400" }, "Chart is ", Math.round(layout.width), "\xD7", Math.round(layout.height), " px \xB7 aspect ", (layout.width / layout.height).toFixed(1), ":1")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Color cards by"), /* @__PURE__ */ React.createElement("select", { value: colorDim, onChange: (e) => setColorDim(e.target.value), className: "w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "department" }, "Department"), /* @__PURE__ */ React.createElement("option", { value: "business_group" }, "Business Unit"), /* @__PURE__ */ React.createElement("option", { value: "discipline" }, "Discipline"), /* @__PURE__ */ React.createElement("option", { value: "location" }, "Location"), /* @__PURE__ */ React.createElement("option", { value: "level" }, "Level"))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1.5" }, "Show on each card"), /* @__PURE__ */ React.createElement("div", { className: "space-y-1" }, [["title", "Job title"], ["dept", "Department"], ["level", "Level"], ["size", "Team size"]].map(([k, l]) => /* @__PURE__ */ React.createElement("label", { key: k, className: "flex items-center gap-2 text-xs text-gray-700" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: fields[k], onChange: (e) => setFields((f) => ({ ...f, [k]: e.target.checked })) }), l)))), /* @__PURE__ */ React.createElement("div", { className: "bg-white border border-gray-200 rounded-lg p-2.5 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide" }, "Open positions"), openRoles.length > 0 && /* @__PURE__ */ React.createElement("button", { onClick: () => setOpenRoles([]), className: "text-[10px] text-gray-400 hover:text-red-500" }, "Clear all")), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 -mt-1" }, "Add to-be-hired boxes under any manager. They show as dashed \u201COPEN\u201D cards and export to PNG + PowerPoint."), /* @__PURE__ */ React.createElement(
+  )))), /* @__PURE__ */ React.createElement("label", { className: "flex items-start gap-2 text-xs text-gray-700" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: wrap, onChange: (e) => setWrap(e.target.checked), className: "mt-0.5" }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "font-medium" }, "Wrap wide teams into a grid"), /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, "Packs a long row of reports into a compact block."))), wrap && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 text-xs pl-6" }, /* @__PURE__ */ React.createElement("span", { className: "text-gray-500" }, "Columns"), /* @__PURE__ */ React.createElement("select", { value: wrapCols, onChange: (e) => setWrapCols(e.target.value), className: "flex-1 text-xs border border-gray-200 rounded-md px-2 py-1 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "auto" }, "Auto"), [3, 4, 5, 6, 8, 10].map((n) => /* @__PURE__ */ React.createElement("option", { key: n, value: n }, n, " per row")))), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-gray-400" }, "Chart is ", Math.round(layout.width), "\xD7", Math.round(layout.height), " px \xB7 aspect ", (layout.width / layout.height).toFixed(1), ":1")), !isGroup && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Color cards by"), /* @__PURE__ */ React.createElement("select", { value: colorDim, onChange: (e) => setColorDim(e.target.value), className: "w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "department" }, "Department"), /* @__PURE__ */ React.createElement("option", { value: "business_group" }, "Business Unit"), /* @__PURE__ */ React.createElement("option", { value: "discipline" }, "Job family"), /* @__PURE__ */ React.createElement("option", { value: "location" }, "Location"), /* @__PURE__ */ React.createElement("option", { value: "level" }, "Level"))), !isGroup && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1.5" }, "Show on each card"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-x-3 gap-y-1" }, [["title", "Job title"], ["dept", "Department"], ["fn", "Job family"], ["bg", "Business unit"], ["location", "Location"], ["level", "Level"], ["size", "Team size"]].map(([k, l]) => /* @__PURE__ */ React.createElement("label", { key: k, className: "flex items-center gap-2 text-xs text-gray-700" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!fields[k], onChange: (e) => setFields((f) => ({ ...f, [k]: e.target.checked })) }), l)))), !isGroup && /* @__PURE__ */ React.createElement("div", { className: "bg-white border border-gray-200 rounded-lg p-2.5 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide" }, "Open positions"), openRoles.length > 0 && /* @__PURE__ */ React.createElement("button", { onClick: () => setOpenRoles([]), className: "text-[10px] text-gray-400 hover:text-red-500" }, "Clear all")), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 -mt-1" }, "Add to-be-hired boxes under any manager. They show as dashed \u201COPEN\u201D cards and export to PNG + PowerPoint."), /* @__PURE__ */ React.createElement(
     "select",
     {
       value: newRole.managerId || rootId,
@@ -3830,7 +3886,7 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
       placeholder: autoTitle,
       className: "w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
     }
-  )), /* @__PURE__ */ React.createElement("label", { className: "flex items-start gap-2 text-xs text-gray-700 bg-white border border-gray-200 rounded-lg p-2" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: perTeam, onChange: (e) => setPerTeam(e.target.checked), className: "mt-0.5" }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "font-medium" }, "Break into one slide per team"), /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, "Overview slide + a slide for each direct report\u2019s org (multi-slide .pptx)."))), /* @__PURE__ */ React.createElement("div", { className: "pt-2 border-t border-gray-200 space-y-2" }, /* @__PURE__ */ React.createElement(
+  )), !isGroup && /* @__PURE__ */ React.createElement("label", { className: "flex items-start gap-2 text-xs text-gray-700 bg-white border border-gray-200 rounded-lg p-2" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: perTeam, onChange: (e) => setPerTeam(e.target.checked), className: "mt-0.5" }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "font-medium" }, "Break into one slide per team"), /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "text-gray-400" }, "Overview slide + a slide for each direct report\u2019s org (multi-slide .pptx)."))), /* @__PURE__ */ React.createElement("div", { className: "pt-2 border-t border-gray-200 space-y-2" }, /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => exportSlidePNG(svgRef.current, `${safeName}.png`),
@@ -3847,7 +3903,7 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
     /* @__PURE__ */ React.createElement(FileText, { size: 13 }),
     "Download PowerPoint",
     perTeam && rootNode.children && rootNode.children.length ? ` (${rootNode.children.length + 1} slides)` : ""
-  ), /* @__PURE__ */ React.createElement(
+  ), !isGroup && /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: downloadOrgBook,
@@ -3855,12 +3911,12 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
     },
     /* @__PURE__ */ React.createElement(FileText, { size: 13 }),
     "Download full org book (.pptx)"
-  ), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 text-center" }, "PNG = paste into any deck \xB7 PPTX = fully editable shapes \xB7 Org book = every team, recursively"))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-auto bg-slate-100 p-6" }, layout.truncated && /* @__PURE__ */ React.createElement("div", { className: "mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" }, "This slice is large (", layout.count, "+ boxes). Reduce \u201CLevels deep\u201D, pick a lower manager as the top of the box, or use \u201Cone slide per team\u201D to keep each slide readable."), /* @__PURE__ */ React.createElement("div", { className: "mx-auto bg-white rounded-lg shadow-xl overflow-hidden", style: { maxWidth: 1100 } }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-gray-400 text-center" }, "PNG = paste into any deck \xB7 PPTX = fully editable shapes", !isGroup ? " \xB7 Org book = every team, recursively" : ""))), /* @__PURE__ */ React.createElement("div", { className: "flex-1 overflow-auto bg-slate-100 p-6" }, layout.truncated && /* @__PURE__ */ React.createElement("div", { className: "mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" }, "This slice is large (", layout.count, "+ boxes). Reduce \u201CLevels deep\u201D, pick a lower manager as the top of the box, or use \u201Cone slide per team\u201D to keep each slide readable."), /* @__PURE__ */ React.createElement("div", { className: "mx-auto bg-white rounded-lg shadow-xl overflow-hidden", style: { maxWidth: 1100 } }, /* @__PURE__ */ React.createElement(
     OrgSlideSVG,
     {
       layout,
       fields,
-      colorDim,
+      colorDim: renderColorDim,
       title,
       subtitle,
       svgRef,
@@ -3871,7 +3927,7 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
       selectedNoteId,
       footer
     }
-  )), /* @__PURE__ */ React.createElement("p", { className: "text-center text-[11px] text-gray-400 mt-2" }, "Live preview \xB7 ", layout.count - openCount, " ", layout.count - openCount === 1 ? "person" : "people", " shown", openCount > 0 ? ` \xB7 ${openCount} open position${openCount === 1 ? "" : "s"}` : "")));
+  )), /* @__PURE__ */ React.createElement("p", { className: "text-center text-[11px] text-gray-400 mt-2" }, isGroup && groupInfo ? `Live preview \xB7 ${groupInfo.groups.length} ${DIM_LABEL[groupDim].toLowerCase()}${groupInfo.groups.length === 1 ? "" : "s"} \xB7 ${groupInfo.total} people` : `Live preview \xB7 ${layout.count - openCount} ${layout.count - openCount === 1 ? "person" : "people"} shown${openCount > 0 ? ` \xB7 ${openCount} open position${openCount === 1 ? "" : "s"}` : ""}`)));
 }
 function largestRemainderAlloc(total, weights) {
   const sumW = weights.reduce((s, w) => s + w, 0);

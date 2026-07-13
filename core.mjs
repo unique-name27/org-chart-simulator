@@ -123,6 +123,25 @@ export function linkManagers(employees) {
   return stats;
 }
 
+// Roll up everyone in a root's subtree (excluding the root itself) by a node field
+// (dept / fn / bg / location / level) into { value, count } groups, sorted by count
+// desc then name. Powers the slide "Breakdown by department / job family / …" mode.
+export function groupSubtree(root, dimField) {
+  const counts = new Map();
+  const walk = (n) => {
+    for (const c of (n.children || [])) {
+      const raw = c[dimField];
+      const v = (raw == null || raw === "") ? "—" : String(raw);
+      counts.set(v, (counts.get(v) || 0) + 1);
+      walk(c);
+    }
+  };
+  walk(root);
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
 // Live preview stats for the import wizard: given raw rows + the column mapping, how
 // many rows will import and how many managers will actually link (by id or name) vs.
 // land at top-level — shown BEFORE importing so mis-mappings are caught early.

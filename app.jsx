@@ -2959,10 +2959,21 @@ function noteHeight(text) { return NOTE_PAD * 2 + noteLines(text).length * NOTE_
 // computeSlideLayout moved to core.mjs (merged into build scope by build.mjs)
 
 function slideCardLines(node, fields) {
+  // Breakdown "group" cards show the dimension value + a headcount.
+  if (node.__group) {
+    return {
+      name: `${node.first || ""}`.trim() || "—",
+      title: "",
+      meta: `${node.count} ${node.count === 1 ? "person" : "people"}`,
+    };
+  }
   const meta = [];
-  if (fields.dept  && node.dept)  meta.push(node.dept);
-  if (fields.level && node.level) meta.push(displayLevel(node.level));
-  if (fields.size  && (node._totalReports || 0) > 0) meta.push(`${node._totalReports} in org`);
+  if (fields.dept     && node.dept)  meta.push(node.dept);
+  if (fields.fn       && node.fn)    meta.push(node.fn);
+  if (fields.bg       && node.bg)    meta.push(node.bg);
+  if (fields.location && node.location && node.location !== "Unknown") meta.push(node.location);
+  if (fields.level    && node.level) meta.push(displayLevel(node.level));
+  if (fields.size     && (node._totalReports || 0) > 0) meta.push(`${node._totalReports} in org`);
   return {
     name: `${node.first || ""} ${node.last || ""}`.trim() || node.id || "—",
     title: fields.title ? (node.title || "") : "",
@@ -3233,7 +3244,9 @@ function OrgSlideView() {
   const [rootId, setRootId]   = useState(() => (slideSeedId && tree.map[slideSeedId] && slideSeedId) || (focusRoot && tree.map[focusRoot] ? focusRoot : (tree.root ? tree.root.id : (people[0] && people[0].id))));
   const [maxDepth, setMaxDepth] = useState(2);
   const [colorDim, setColorDim] = useState("department");
-  const [fields, setFields]     = useState({ title: true, dept: true, level: true, size: true });
+  const [fields, setFields]     = useState({ title: true, dept: true, fn: false, bg: false, location: false, level: true, size: true });
+  const [chartMode, setChartMode] = useState("tree");   // "tree" reporting chart | "group" breakdown snapshot
+  const [groupDim, setGroupDim]   = useState("department");
   const [perTeam, setPerTeam]   = useState(false);
   const [search, setSearch]     = useState("");
   const [titleText, setTitleText] = useState("");
@@ -3271,7 +3284,33 @@ function OrgSlideView() {
     return m;
   }, [openRoles]);
 
-  const layout = useMemo(() => rootNode ? computeSlideLayout(rootNode, { maxDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }) : null, [rootNode, maxDepth, dens, wrap, wrapColsVal, openByManager]);
+  // Which node field + color dimension each breakdown key maps to.
+  const DIM_FIELD = { department: "dept", discipline: "fn", business_group: "bg", location: "location", level: "level" };
+  const DIM_LABEL = { department: "Department", discipline: "Job family", business_group: "Business unit", location: "Location", level: "Level" };
+
+  // In "group" mode we render a synthetic root whose children are one card per
+  // dimension value (with a headcount), so the same layout/preview/export pipeline
+  // produces a "breakdown by <dimension>" snapshot slide.
+  const groupInfo = useMemo(() => {
+    if (chartMode !== "group" || !rootNode) return null;
+    const field = DIM_FIELD[groupDim] || "dept";
+    const groups = groupSubtree(rootNode, field);
+    const children = groups.map((g, i) => {
+      const label = groupDim === "level" ? displayLevel(g.value) : g.value;
+      const node = { id: `__grp_${i}`, __group: true, first: label, last: "", title: "", count: g.count, _totalReports: g.count, children: [] };
+      node[field] = g.value; // so slideNodeColor colors each card by its group value
+      return node;
+    });
+    const total = groups.reduce((s, g) => s + g.count, 0);
+    return { root: { ...rootNode, children }, groups, total };
+  }, [chartMode, groupDim, rootNode]);
+
+  const effRoot = chartMode === "group" && groupInfo ? groupInfo.root : rootNode;
+  const effMaxDepth = chartMode === "group" ? 1 : maxDepth;
+  const effOpenByManager = chartMode === "group" ? {} : openByManager;
+  const renderColorDim = chartMode === "group" ? groupDim : colorDim;
+
+  const layout = useMemo(() => effRoot ? computeSlideLayout(effRoot, { maxDepth: effMaxDepth, dens, wrap, wrapCols: wrapColsVal, openByManager: effOpenByManager }) : null, [effRoot, effMaxDepth, dens, wrap, wrapColsVal, effOpenByManager]);
   const openCount = layout ? layout.cards.filter(c => c.node.__open).length : 0;
 
   // Managers you can attach an open role to = the real (non-open) cards currently on the slide.
@@ -3393,9 +3432,14 @@ function OrgSlideView() {
     downloadFile("open-positions-template.csv", [cols.join(","), ...ex.map(r => r.map(csvCell).join(","))].join("\n"), "text/csv");
   }
 
-  const autoTitle = rootNode ? `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "’" : "’s"} organization` : "Org chart";
+  const isGroup = chartMode === "group";
+  const autoTitle = !rootNode ? "Org chart"
+    : isGroup ? `${rootNode.first} ${rootNode.last} — ${DIM_LABEL[groupDim]} breakdown`
+    : `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "’" : "’s"} organization`;
   const title = titleText.trim() || autoTitle;
-  const subtitle = rootNode ? `${rootNode.title || displayLevel(rootNode.level)}  ·  ${(rootNode._totalReports || 0)} people in org` : "";
+  const subtitle = !rootNode ? ""
+    : isGroup && groupInfo ? `${groupInfo.groups.length} ${DIM_LABEL[groupDim].toLowerCase()}${groupInfo.groups.length === 1 ? "" : "s"}  ·  ${groupInfo.total} people`
+    : `${rootNode.title || displayLevel(rootNode.level)}  ·  ${(rootNode._totalReports || 0)} people in org`;
   const snapshotStamp = importedAt ? `Org snapshot as of ${new Date(importedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}` : "Org snapshot (sample data)";
   const CONFIDENTIAL = "Company Confidential";
   const footer = `${CONFIDENTIAL}  ·  ${snapshotStamp}  ·  Generated ${new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}`;
@@ -3408,6 +3452,10 @@ function OrgSlideView() {
 
   // Build the list of slide models for a multi-slide (.pptx) export.
   function buildDeckModels() {
+    // Breakdown mode is always a single snapshot slide (the synthetic grouped root).
+    if (isGroup) {
+      return [{ layout, fields, colorDim: renderColorDim, dens, title, subtitle, notes: stickyNotes }];
+    }
     const mk = (node, mDepth, ttl, sub, withNotes) => ({
       layout: computeSlideLayout(node, { maxDepth: mDepth, dens, wrap, wrapCols: wrapColsVal, openByManager }),
       fields, colorDim, dens, title: ttl, subtitle: sub, notes: withNotes ? stickyNotes : [],
@@ -3474,10 +3522,35 @@ function OrgSlideView() {
         </div>
 
         <div>
+          <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Chart type</label>
+          <div className="grid grid-cols-2 gap-1">
+            {[["tree", "Reporting tree"], ["group", "Breakdown"]].map(([v, l]) => (
+              <button key={v} onClick={() => setChartMode(v)}
+                className={`text-[11px] py-1.5 rounded border transition-colors ${chartMode === v ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>{l}</button>
+            ))}
+          </div>
+          {isGroup && (
+            <div className="mt-2">
+              <label className="block text-[10px] text-gray-400 mb-1">Break down by</label>
+              <select value={groupDim} onChange={e => setGroupDim(e.target.value)} className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+                <option value="department">Department</option>
+                <option value="discipline">Job family</option>
+                <option value="business_group">Business unit</option>
+                <option value="location">Location</option>
+                <option value="level">Level</option>
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">One card per {DIM_LABEL[groupDim].toLowerCase()} in {rootNode.first}’s org, with headcounts.</p>
+            </div>
+          )}
+        </div>
+
+        {!isGroup && (
+        <div>
           <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Levels deep: {maxDepth}</label>
           <input type="range" min="1" max="4" value={maxDepth} onChange={e => setMaxDepth(parseInt(e.target.value, 10))} className="w-full" />
           <div className="flex justify-between text-[10px] text-gray-400"><span>Direct reports</span><span>4 levels</span></div>
         </div>
+        )}
 
         <div className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-2.5">
           <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide">Compress to fit</label>
@@ -3508,28 +3581,33 @@ function OrgSlideView() {
           <div className="text-[10px] text-gray-400">Chart is {Math.round(layout.width)}×{Math.round(layout.height)} px · aspect {(layout.width / layout.height).toFixed(1)}:1</div>
         </div>
 
+        {!isGroup && (
         <div>
           <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Color cards by</label>
           <select value={colorDim} onChange={e => setColorDim(e.target.value)} className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
             <option value="department">Department</option>
             <option value="business_group">Business Unit</option>
-            <option value="discipline">Discipline</option>
+            <option value="discipline">Job family</option>
             <option value="location">Location</option>
             <option value="level">Level</option>
           </select>
         </div>
+        )}
 
+        {!isGroup && (
         <div>
           <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1.5">Show on each card</label>
-          <div className="space-y-1">
-            {[["title", "Job title"], ["dept", "Department"], ["level", "Level"], ["size", "Team size"]].map(([k, l]) => (
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+            {[["title", "Job title"], ["dept", "Department"], ["fn", "Job family"], ["bg", "Business unit"], ["location", "Location"], ["level", "Level"], ["size", "Team size"]].map(([k, l]) => (
               <label key={k} className="flex items-center gap-2 text-xs text-gray-700">
-                <input type="checkbox" checked={fields[k]} onChange={e => setFields(f => ({ ...f, [k]: e.target.checked }))} />{l}
+                <input type="checkbox" checked={!!fields[k]} onChange={e => setFields(f => ({ ...f, [k]: e.target.checked }))} />{l}
               </label>
             ))}
           </div>
         </div>
+        )}
 
+        {!isGroup && (
         <div className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-2">
           <div className="flex items-center justify-between">
             <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide">Open positions</label>
@@ -3586,6 +3664,7 @@ function OrgSlideView() {
             <p className="text-[10px] text-amber-600">Some open roles sit under a manager not shown at this depth — increase “Levels deep” or change the root to see them.</p>
           )}
         </div>
+        )}
 
         <div className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-2">
           <div className="flex items-center justify-between">
@@ -3617,10 +3696,12 @@ function OrgSlideView() {
             className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white" />
         </div>
 
+        {!isGroup && (
         <label className="flex items-start gap-2 text-xs text-gray-700 bg-white border border-gray-200 rounded-lg p-2">
           <input type="checkbox" checked={perTeam} onChange={e => setPerTeam(e.target.checked)} className="mt-0.5" />
           <span><span className="font-medium">Break into one slide per team</span><br/><span className="text-gray-400">Overview slide + a slide for each direct report’s org (multi-slide .pptx).</span></span>
         </label>
+        )}
 
         <div className="pt-2 border-t border-gray-200 space-y-2">
           <button onClick={() => exportSlidePNG(svgRef.current, `${safeName}.png`)}
@@ -3631,11 +3712,13 @@ function OrgSlideView() {
             className="w-full flex items-center justify-center gap-1.5 text-xs bg-amber-500 text-white px-3 py-2 rounded-lg font-medium hover:bg-amber-600">
             <FileText size={13}/>Download PowerPoint{perTeam && rootNode.children && rootNode.children.length ? ` (${rootNode.children.length + 1} slides)` : ""}
           </button>
+          {!isGroup && (
           <button onClick={downloadOrgBook}
             className="w-full flex items-center justify-center gap-1.5 text-xs bg-white text-amber-700 border border-amber-300 px-3 py-2 rounded-lg font-medium hover:bg-amber-50">
             <FileText size={13}/>Download full org book (.pptx)
           </button>
-          <p className="text-[10px] text-gray-400 text-center">PNG = paste into any deck · PPTX = fully editable shapes · Org book = every team, recursively</p>
+          )}
+          <p className="text-[10px] text-gray-400 text-center">PNG = paste into any deck · PPTX = fully editable shapes{!isGroup ? " · Org book = every team, recursively" : ""}</p>
         </div>
       </div>
 
@@ -3647,10 +3730,12 @@ function OrgSlideView() {
           </div>
         )}
         <div className="mx-auto bg-white rounded-lg shadow-xl overflow-hidden" style={{ maxWidth: 1100 }}>
-          <OrgSlideSVG layout={layout} fields={fields} colorDim={colorDim} title={title} subtitle={subtitle} svgRef={svgRef} dens={dens}
+          <OrgSlideSVG layout={layout} fields={fields} colorDim={renderColorDim} title={title} subtitle={subtitle} svgRef={svgRef} dens={dens}
             notes={stickyNotes} onMoveNote={moveNote} onSelectNote={setSelectedNoteId} selectedNoteId={selectedNoteId} footer={footer} />
         </div>
-        <p className="text-center text-[11px] text-gray-400 mt-2">Live preview · {layout.count - openCount} {(layout.count - openCount) === 1 ? "person" : "people"} shown{openCount > 0 ? ` · ${openCount} open position${openCount === 1 ? "" : "s"}` : ""}</p>
+        <p className="text-center text-[11px] text-gray-400 mt-2">{isGroup && groupInfo
+          ? `Live preview · ${groupInfo.groups.length} ${DIM_LABEL[groupDim].toLowerCase()}${groupInfo.groups.length === 1 ? "" : "s"} · ${groupInfo.total} people`
+          : `Live preview · ${layout.count - openCount} ${(layout.count - openCount) === 1 ? "person" : "people"} shown${openCount > 0 ? ` · ${openCount} open position${openCount === 1 ? "" : "s"}` : ""}`}</p>
       </div>
     </div>
   );
