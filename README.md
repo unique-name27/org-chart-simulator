@@ -10,6 +10,10 @@ analytics, a drag-and-drop reorg simulator, and a multi-year growth timeline.
 - **Open the app:** https://unique-name27.github.io/org-chart-simulator/org-chart-editable_3.html
 - **Landing page:** https://unique-name27.github.io/org-chart-simulator/
 
+## Docs
+
+- [Discovery interview questions](docs/discovery-questions.md) — what to ask the comp partner / HRBP to fine-tune (or remake) this tool for their real workflow.
+
 ## Performance (this is the "fast" build)
 
 This repo is the performance-tuned version of the simulator. Key wins:
