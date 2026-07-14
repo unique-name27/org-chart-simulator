@@ -2987,24 +2987,88 @@ function truncateToWidth(s, px, fontPx) {
 }
 
 // Card text as vertically-centered lines, capped by the density's `lines` budget.
-function slideCardTextLines(node, fields, dens) {
+// Colors come from the active slide theme (defaults to the original "clean" palette).
+function slideCardTextLines(node, fields, dens, th) {
+  const t = th || { nameColor: "#0f172a", bodyColor: "#475569", metaColor: "#94a3b8" };
   const L = slideCardLines(node, fields);
-  const lines = [{ text: L.name, size: dens.nameSz, weight: 700, fill: node.__open ? "#475569" : "#0f172a" }];
-  if (L.title) lines.push({ text: L.title, size: dens.subSz, weight: 400, fill: "#475569" });
-  if (L.meta)  lines.push({ text: L.meta,  size: dens.metaSz, weight: 400, fill: "#94a3b8" });
+  const lines = [{ text: L.name, size: dens.nameSz, weight: 700, fill: node.__open ? t.bodyColor : t.nameColor }];
+  if (L.title) lines.push({ text: L.title, size: dens.subSz, weight: 400, fill: t.bodyColor });
+  if (L.meta)  lines.push({ text: L.meta,  size: dens.metaSz, weight: 400, fill: t.metaColor });
   return lines.slice(0, dens.lines);
 }
 
 // ─── The slide as an <svg>. Also the exact thing the PNG exporter serializes. ───
-function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable, notes = [], onMoveNote, onSelectNote, selectedNoteId, footer }) {
+function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens = SLIDE_DENSITY.comfortable, notes = [], onMoveNote, onSelectNote, selectedNoteId, footer, theme, compare }) {
+  const th = theme || SLIDE_THEMES.clean;
   const PAD = 28, TITLE_H = title ? 74 : 24;
-  const W = Math.max(760, layout.width + PAD * 2);
-  const H = layout.height + PAD * 2 + TITLE_H + (footer ? 22 : 0);
-  const ox = (W - layout.width) / 2;
-  const oy = PAD + TITLE_H;
+  // Compare mode: two panels side by side, each independently scaled to fit.
+  const PANEL_W = 620, PANEL_GAP = 44, PANEL_MAXH = 560;
+  let W, H, ox = 0, oy = 0, panels = null;
+  if (compare) {
+    const sA = Math.min(PANEL_W / compare.layoutA.width, PANEL_MAXH / compare.layoutA.height, 1.2);
+    const sB = Math.min(PANEL_W / compare.layoutB.width, PANEL_MAXH / compare.layoutB.height, 1.2);
+    const panelH = Math.max(compare.layoutA.height * sA, compare.layoutB.height * sB);
+    W = PANEL_W * 2 + PANEL_GAP + PAD * 2;
+    H = PAD + TITLE_H + 26 + panelH + 40 + (footer ? 22 : 0);
+    panels = [
+      { ly: compare.layoutA, s: sA, tx: PAD + (PANEL_W - compare.layoutA.width * sA) / 2, label: compare.labelA, cx: PAD + PANEL_W / 2 },
+      { ly: compare.layoutB, s: sB, tx: PAD + PANEL_W + PANEL_GAP + (PANEL_W - compare.layoutB.width * sB) / 2, label: compare.labelB, cx: PAD + PANEL_W + PANEL_GAP + PANEL_W / 2 },
+    ];
+    panels.top = PAD + TITLE_H + 26; panels.h = panelH;
+  } else {
+    W = Math.max(760, layout.width + PAD * 2);
+    H = layout.height + PAD * 2 + TITLE_H + (footer ? 22 : 0);
+    ox = (W - layout.width) / 2;
+    oy = PAD + TITLE_H;
+  }
   const stripe = Math.max(4, Math.round(dens.cardW * 0.032));
   const padL = Math.max(stripe + 4, Math.round(dens.cardW * 0.07));
   const rx = Math.min(9, Math.round(dens.cardH * 0.18));
+
+  // Groups + connectors + cards for one layout, at native px coordinates (the
+  // caller positions them with an SVG transform). Shared by single & compare modes.
+  const renderLayoutContents = (ly) => (<>
+    {ly.groups.map((g, i) => (
+      <rect key={"g" + i} x={g.x} y={g.y} width={g.w} height={g.h} rx="12" fill={th.groupBg} stroke={th.groupBorder} strokeWidth="1" />
+    ))}
+    <g stroke={th.connector} strokeWidth="1.5" fill="none">
+      {ly.links.map((l, i) => (
+        <path key={i} d={"M " + l.pts.map(p => `${p[0]} ${p[1]}`).join(" L ")} />
+      ))}
+    </g>
+    {ly.cards.map((c, i) => {
+      const open = c.node.__open, dim = c.node.__dim;
+      const color = slideNodeColor(c.node, colorDim);
+      const x = c.x, y = c.y;
+      const tls = slideCardTextLines(c.node, fields, dens, th);
+      const showPill = open && dens.lines >= 2 && c.w >= 104;
+      const pillW = Math.min(34, c.w * 0.3);
+      const innerW = c.w - padL - 6 - (showPill ? pillW + 4 : 0);
+      const totalH = tls.reduce((s, ln) => s + ln.size, 0) + (tls.length - 1) * 3;
+      let ty = y + (c.h - totalH) / 2;
+      return (
+        <g key={i} opacity={dim ? 0.45 : 1}>
+          <rect x={x} y={y} width={c.w} height={c.h} rx={rx} fill={th.cardBg}
+            stroke={open ? color : th.cardBorder} strokeWidth="1.5"
+            strokeDasharray={open ? "5 3" : undefined} strokeOpacity={open ? 0.9 : 1} />
+          {!open && !dim && <>
+            <rect x={x} y={y} width={stripe} height={c.h} rx={Math.min(3, stripe / 2)} fill={color} />
+            <rect x={x} y={y} width={stripe} height={c.h * 0.5} fill={color} />
+          </>}
+          {showPill && <>
+            <rect x={x + c.w - pillW - 6} y={y + 5} width={pillW} height="13" rx="6" fill="#ecfdf5" stroke="#6ee7b7" strokeWidth="0.75" />
+            <text x={x + c.w - 6 - pillW / 2} y={y + 14.5} fontSize="8" fontWeight="700" fill="#059669" textAnchor="middle">OPEN</text>
+          </>}
+          {tls.map((ln, j) => {
+            ty += ln.size;
+            const el = <text key={j} x={x + padL} y={ty} fontSize={ln.size} fontWeight={ln.weight} fill={ln.fill}>{truncateToWidth(ln.text, innerW, ln.size)}</text>;
+            ty += 3;
+            return el;
+          })}
+        </g>
+      );
+    })}
+  </>);
 
   // Drag sticky notes directly on the canvas (client px → SVG user units via CTM).
   const dragRef = useRef(null);
@@ -3032,58 +3096,26 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
 
   return (
     <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width={W} height={H} xmlns="http://www.w3.org/2000/svg"
-      style={{ width: "100%", height: "auto", background: "#ffffff", fontFamily: "'DM Sans', Arial, sans-serif" }}>
-      <rect x="0" y="0" width={W} height={H} fill="#ffffff" />
+      style={{ width: "100%", height: "auto", background: th.pageBg, fontFamily: "'DM Sans', Arial, sans-serif" }}>
+      <rect x="0" y="0" width={W} height={H} fill={th.pageBg} />
       {title && <>
-        <rect x="0" y="0" width={W} height="6" fill="#2563eb" />
-        <text x={PAD} y="46" fontSize="26" fontWeight="700" fill="#0f172a">{truncateToWidth(title, W - PAD * 2, 26)}</text>
-        {subtitle && <text x={PAD} y="66" fontSize="13" fill="#64748b">{truncateToWidth(subtitle, W - PAD * 2, 13)}</text>}
+        <rect x="0" y="0" width={W} height="6" fill={th.accent} />
+        <text x={PAD} y="46" fontSize="26" fontWeight="700" fill={th.titleColor}>{truncateToWidth(title, W - PAD * 2, 26)}</text>
+        {subtitle && <text x={PAD} y="66" fontSize="13" fill={th.subColor}>{truncateToWidth(subtitle, W - PAD * 2, 13)}</text>}
       </>}
-      {/* team boxes behind wrapped grids */}
-      {layout.groups.map((g, i) => (
-        <rect key={i} x={ox + g.x} y={oy + g.y} width={g.w} height={g.h} rx="12" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1" />
-      ))}
-      {/* connectors */}
-      <g stroke="#cbd5e1" strokeWidth="1.5" fill="none">
-        {layout.links.map((l, i) => (
-          <path key={i} d={"M " + l.pts.map(p => `${ox + p[0]} ${oy + p[1]}`).join(" L ")} />
-        ))}
-      </g>
-      {/* cards */}
-      {layout.cards.map((c, i) => {
-        const open = c.node.__open;
-        const color = slideNodeColor(c.node, colorDim);
-        const x = ox + c.x, y = oy + c.y;
-        const tls = slideCardTextLines(c.node, fields, dens);
-        const showPill = open && dens.lines >= 2 && c.w >= 104;
-        const pillW = Math.min(34, c.w * 0.3);
-        const innerW = c.w - padL - 6 - (showPill ? pillW + 4 : 0);
-        const totalH = tls.reduce((s, ln) => s + ln.size, 0) + (tls.length - 1) * 3;
-        let ty = y + (c.h - totalH) / 2;
-        return (
-          <g key={i}>
-            <rect x={x} y={y} width={c.w} height={c.h} rx={rx} fill="#ffffff"
-              stroke={open ? color : "#e2e8f0"} strokeWidth="1.5"
-              strokeDasharray={open ? "5 3" : undefined} strokeOpacity={open ? 0.9 : 1} />
-            {!open && <>
-              <rect x={x} y={y} width={stripe} height={c.h} rx={Math.min(3, stripe / 2)} fill={color} />
-              <rect x={x} y={y} width={stripe} height={c.h * 0.5} fill={color} />
-            </>}
-            {showPill && <>
-              <rect x={x + c.w - pillW - 6} y={y + 5} width={pillW} height="13" rx="6" fill="#ecfdf5" stroke="#6ee7b7" strokeWidth="0.75" />
-              <text x={x + c.w - 6 - pillW / 2} y={y + 14.5} fontSize="8" fontWeight="700" fill="#059669" textAnchor="middle">OPEN</text>
-            </>}
-            {tls.map((ln, j) => {
-              ty += ln.size;
-              const el = <text key={j} x={x + padL} y={ty} fontSize={ln.size} fontWeight={ln.weight} fill={ln.fill}>{truncateToWidth(ln.text, innerW, ln.size)}</text>;
-              ty += 3;
-              return el;
-            })}
-          </g>
-        );
-      })}
+      {compare ? (<>
+        {panels.map((p, i) => (<g key={i}>
+          <text x={p.cx} y={panels.top - 8} fontSize="15" fontWeight="700" fill={th.subColor} textAnchor="middle">{p.label}</text>
+          <g transform={`translate(${p.tx}, ${panels.top}) scale(${p.s})`}>{renderLayoutContents(p.ly)}</g>
+        </g>))}
+        <line x1={W / 2} y1={panels.top - 18} x2={W / 2} y2={panels.top + panels.h + 12}
+          stroke={th.cardBorder} strokeWidth="1.5" strokeDasharray="6 5" />
+        {compare.deltas && <text x={W / 2} y={panels.top + panels.h + 34} fontSize="15" fontWeight="700" fill={th.accent} textAnchor="middle">{compare.deltas}</text>}
+      </>) : (
+        <g transform={`translate(${ox}, ${oy})`}>{renderLayoutContents(layout)}</g>
+      )}
       {/* anchored-note connectors (dashed, under the notes) */}
-      {notes.map(n => {
+      {!compare && notes.map(n => {
         if (!n.anchorId) return null;
         const card = layout.cards.find(c => c.node.id === n.anchorId);
         if (!card) return null;
@@ -3094,8 +3126,8 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
         return <line key={`ln_${n.id}`} x1={nx} y1={ny} x2={cx} y2={cy}
           stroke={pal.border} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.85" />;
       })}
-      {/* sticky notes (draggable, drawn on top) */}
-      {notes.map(n => {
+      {/* sticky notes (draggable, drawn on top; hidden in compare mode) */}
+      {!compare && notes.map(n => {
         const pal = STICKY_NOTE_COLORS[n.color] || STICKY_NOTE_COLORS.yellow;
         const lines = noteLines(n.text);
         const h = NOTE_PAD * 2 + lines.length * NOTE_LINE;
@@ -3112,7 +3144,7 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
           </g>
         );
       })}
-      {footer && <text x={PAD} y={H - 12} fontSize="11" fill="#94a3b8">{truncateToWidth(footer, W - PAD * 2, 11)}</text>}
+      {footer && <text x={PAD} y={H - 12} fontSize="11" fill={th.footerColor}>{truncateToWidth(footer, W - PAD * 2, 11)}</text>}
     </svg>
   );
 }
@@ -3153,9 +3185,20 @@ function exportSlidePNG(svgEl, filename, scale = 2) {
   img.src = svg64;
 }
 
+// Slide themes — page background, accent, and card/text colors, applied to the SVG
+// preview, PNG, and PPTX identically. "clean" is the original look.
+const SLIDE_THEMES = {
+  clean:    { key: "clean",    label: "Clean",     pageBg: "#ffffff", accent: "#2563eb", titleColor: "#0f172a", subColor: "#64748b", cardBg: "#ffffff", cardBorder: "#e2e8f0", nameColor: "#0f172a", bodyColor: "#475569", metaColor: "#94a3b8", connector: "#cbd5e1", groupBg: "#f8fafc", groupBorder: "#e2e8f0", footerColor: "#94a3b8" },
+  midnight: { key: "midnight", label: "Midnight",  pageBg: "#0f172a", accent: "#818cf8", titleColor: "#f1f5f9", subColor: "#94a3b8", cardBg: "#1e293b", cardBorder: "#334155", nameColor: "#f1f5f9", bodyColor: "#cbd5e1", metaColor: "#7c8aa0", connector: "#475569", groupBg: "#172033", groupBorder: "#334155", footerColor: "#64748b" },
+  warm:     { key: "warm",     label: "Warm",      pageBg: "#faf6f0", accent: "#d97706", titleColor: "#43301b", subColor: "#8a7561", cardBg: "#fffdf9", cardBorder: "#e7dccb", nameColor: "#43301b", bodyColor: "#7c6a55", metaColor: "#a89478", connector: "#d6c7b2", groupBg: "#f3ece1", groupBorder: "#e7dccb", footerColor: "#a89478" },
+  mono:     { key: "mono",     label: "Mono",      pageBg: "#ffffff", accent: "#111827", titleColor: "#111827", subColor: "#6b7280", cardBg: "#ffffff", cardBorder: "#d1d5db", nameColor: "#111827", bodyColor: "#4b5563", metaColor: "#9ca3af", connector: "#9ca3af", groupBg: "#f9fafb", groupBorder: "#e5e7eb", footerColor: "#9ca3af" },
+};
+
 // Build a native, editable .pptx from one or more slide models via PptxGenJS.
 // Each card becomes a real rounded-rectangle text box and each connector a real
 // line, so HRBPs can nudge, recolor, or retype anything in PowerPoint afterward.
+// A model may instead carry `compare: { layoutA, layoutB, labelA, labelB, deltas }`
+// which renders two panels side by side on one slide (scenario A|B / Then & Now).
 function exportSlidePPTX(slideModels, { deckName, footer }) {
   const Ctor = window.PptxGenJS;
   if (!Ctor) { alert("PowerPoint library not loaded — reload the page and try again."); return; }
@@ -3165,92 +3208,107 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
   const hex = c => (c || "#64748b").replace("#", "");
 
   slideModels.forEach(model => {
-    const { layout, fields, colorDim, title, subtitle, dens = SLIDE_DENSITY.comfortable, notes = [] } = model;
+    const { layout, fields, colorDim, title, subtitle, dens = SLIDE_DENSITY.comfortable, notes = [], compare } = model;
+    const th = model.theme || SLIDE_THEMES.clean;
     const slide = pptx.addSlide();
-    slide.background = { color: "FFFFFF" };
-    slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: SW, h: 0.09, fill: { color: "2563EB" } });
-    if (title)    slide.addText(title,    { x: 0.45, y: 0.28, w: SW - 0.9, h: 0.5,  fontSize: 24, bold: true, color: "0F172A", fontFace: "Arial" });
-    if (subtitle) slide.addText(subtitle, { x: 0.45, y: 0.78, w: SW - 0.9, h: 0.3,  fontSize: 12, color: "64748B", fontFace: "Arial" });
-
+    slide.background = { color: hex(th.pageBg) };
+    slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: SW, h: 0.09, fill: { color: hex(th.accent) } });
+    if (title)    slide.addText(title,    { x: 0.45, y: 0.28, w: SW - 0.9, h: 0.5,  fontSize: 24, bold: true, color: hex(th.titleColor), fontFace: "Arial" });
+    if (subtitle) slide.addText(subtitle, { x: 0.45, y: 0.78, w: SW - 0.9, h: 0.3,  fontSize: 12, color: hex(th.subColor), fontFace: "Arial" });
     const topPad = title ? 1.25 : 0.5, botPad = footer ? 0.55 : 0.35, sidePad = 0.45;
-    const scale = Math.min((SW - sidePad * 2) / layout.width, (SH - topPad - botPad) / layout.height);
-    const ox = (SW - layout.width * scale) / 2;
-    const oy = topPad;
-    const X = px => ox + px * scale;
-    const Y = px => oy + px * scale;
-    const pt = px => Math.max(5, Math.min(22, +(px * scale * 72).toFixed(1))); // px height → font points
-    const stripe = Math.max(4, Math.round(dens.cardW * 0.032));
-    const padL = Math.max(stripe + 4, Math.round(dens.cardW * 0.07));
 
-    // team boxes behind wrapped grids
-    layout.groups.forEach(g => slide.addShape(pptx.ShapeType.roundRect, {
-      x: X(g.x), y: Y(g.y), w: g.w * scale, h: g.h * scale, rectRadius: 0.08,
-      fill: { color: "F8FAFC" }, line: { color: "E2E8F0", width: 0.75 },
-    }));
+    // Draw one layout scaled into a region {x,y,w,h} (inches). Returns mappers for callers.
+    const drawLayout = (ly, region) => {
+      const scale = Math.min(region.w / ly.width, region.h / ly.height);
+      const ox = region.x + (region.w - ly.width * scale) / 2;
+      const oy = region.y;
+      const X = px => ox + px * scale;
+      const Y = px => oy + px * scale;
+      const pt = px => Math.max(5, Math.min(22, +(px * scale * 72).toFixed(1)));
+      const stripe = Math.max(4, Math.round(dens.cardW * 0.032));
+      const padL = Math.max(stripe + 4, Math.round(dens.cardW * 0.07));
 
-    // connectors (behind cards) — each link is a polyline of orthogonal segments
-    layout.links.forEach(l => {
-      for (let i = 0; i < l.pts.length - 1; i++) {
-        const [x1, y1] = l.pts[i], [x2, y2] = l.pts[i + 1];
-        slide.addShape(pptx.ShapeType.line, {
-          x: X(Math.min(x1, x2)), y: Y(Math.min(y1, y2)),
-          w: Math.abs(x2 - x1) * scale, h: Math.abs(y2 - y1) * scale,
-          line: { color: "CBD5E1", width: 1 },
-        });
-      }
-    });
-
-    layout.cards.forEach(c => {
-      const open = c.node.__open;
-      const color = hex(slideNodeColor(c.node, colorDim));
-      const tls = slideCardTextLines(c.node, fields, dens);
-      const x = X(c.x), y = Y(c.y), w = c.w * scale, h = c.h * scale;
-      const runs = tls.map(ln => ({ text: ln.text, options: { bold: ln.weight >= 700, fontSize: pt(ln.size), color: hex(ln.fill), breakLine: true } }));
-      slide.addText(runs, {
-        shape: pptx.ShapeType.roundRect, rectRadius: Math.min(0.06, h * 0.16),
-        x, y, w, h, fill: { color: "FFFFFF" },
-        line: open ? { color, width: 1.25, dashType: "dash" } : { color: "E2E8F0", width: 1 },
-        align: "left", valign: "middle", margin: [1, 3, 1, Math.max(4, padL * scale * 72)], fontFace: "Arial",
+      ly.groups.forEach(g => slide.addShape(pptx.ShapeType.roundRect, {
+        x: X(g.x), y: Y(g.y), w: g.w * scale, h: g.h * scale, rectRadius: 0.08,
+        fill: { color: hex(th.groupBg) }, line: { color: hex(th.groupBorder), width: 0.75 },
+      }));
+      ly.links.forEach(l => {
+        for (let i = 0; i < l.pts.length - 1; i++) {
+          const [x1, y1] = l.pts[i], [x2, y2] = l.pts[i + 1];
+          slide.addShape(pptx.ShapeType.line, {
+            x: X(Math.min(x1, x2)), y: Y(Math.min(y1, y2)),
+            w: Math.abs(x2 - x1) * scale, h: Math.abs(y2 - y1) * scale,
+            line: { color: hex(th.connector), width: 1 },
+          });
+        }
       });
-      if (open) {
-        // "OPEN" chip top-right; a real editable text box in the deck
-        if (dens.lines >= 2 && w >= 1.2) slide.addText("OPEN", {
-          x: x + w - 0.6, y: y + 0.04, w: 0.55, h: 0.18, rectRadius: 0.03, shape: pptx.ShapeType.roundRect,
-          fill: { color: "ECFDF5" }, line: { color: "6EE7B7", width: 0.5 },
-          fontSize: 7, bold: true, color: "059669", align: "center", valign: "middle", fontFace: "Arial",
+      ly.cards.forEach(c => {
+        const open = c.node.__open, dim = c.node.__dim;
+        const color = hex(slideNodeColor(c.node, colorDim));
+        const tls = slideCardTextLines(c.node, fields, dens, th);
+        const x = X(c.x), y = Y(c.y), w = c.w * scale, h = c.h * scale;
+        const runs = tls.map(ln => ({ text: ln.text, options: { bold: ln.weight >= 700, fontSize: pt(ln.size), color: hex(dim ? th.metaColor : ln.fill), breakLine: true } }));
+        slide.addText(runs, {
+          shape: pptx.ShapeType.roundRect, rectRadius: Math.min(0.06, h * 0.16),
+          x, y, w, h, fill: { color: hex(th.cardBg) },
+          line: open ? { color, width: 1.25, dashType: "dash" } : { color: hex(th.cardBorder), width: 1 },
+          align: "left", valign: "middle", margin: [1, 3, 1, Math.max(4, padL * scale * 72)], fontFace: "Arial",
         });
-      } else {
-        slide.addShape(pptx.ShapeType.rect, { x, y, w: stripe * scale, h, fill: { color } });
-      }
-    });
-
-    // sticky notes — positioned relative to the whole slide, editable text boxes.
-    // A note anchored to a person also gets a dashed connector to that card.
-    const NOTE_W_IN = 2.0;
-    notes.forEach(n => {
-      const pal = STICKY_NOTE_COLORS[n.color] || STICKY_NOTE_COLORS.yellow;
-      const hIn = Math.max(0.45, noteLines(n.text).length * 0.24 + 0.2);
-      const nx = Math.max(0.1, Math.min(SW - NOTE_W_IN - 0.1, n.fx * SW));
-      const ny = Math.max(0.1, Math.min(SH - hIn - 0.1, n.fy * SH));
-      const anchor = n.anchorId ? layout.cards.find(c => c.node.id === n.anchorId) : null;
-      if (anchor) {
-        const ax = X(anchor.x + anchor.w / 2), ay = Y(anchor.y + anchor.h / 2); // card center (in)
-        const bx = nx + NOTE_W_IN / 2, by = ny + hIn / 2;                        // note center (in)
-        slide.addShape(pptx.ShapeType.line, {
-          x: Math.min(ax, bx), y: Math.min(ay, by),
-          w: Math.abs(ax - bx), h: Math.abs(ay - by),
-          flipV: (ax < bx) !== (ay < by), // box lines run TL→BR by default; flip when the slope goes the other way
-          line: { color: hex(pal.border), width: 1, dashType: "dash" },
-        });
-      }
-      slide.addText(n.text || "", {
-        x: nx, y: ny, w: NOTE_W_IN, h: hIn, shape: pptx.ShapeType.roundRect, rectRadius: 0.04,
-        fill: { color: hex(pal.bg) }, line: { color: hex(pal.border), width: 1 },
-        fontSize: 12, color: hex(pal.text), align: "left", valign: "top", margin: 6, fontFace: "Arial",
+        if (open) {
+          if (dens.lines >= 2 && w >= 1.2) slide.addText("OPEN", {
+            x: x + w - 0.6, y: y + 0.04, w: 0.55, h: 0.18, rectRadius: 0.03, shape: pptx.ShapeType.roundRect,
+            fill: { color: "ECFDF5" }, line: { color: "6EE7B7", width: 0.5 },
+            fontSize: 7, bold: true, color: "059669", align: "center", valign: "middle", fontFace: "Arial",
+          });
+        } else if (!dim) {
+          slide.addShape(pptx.ShapeType.rect, { x, y, w: stripe * scale, h, fill: { color } });
+        }
       });
-    });
+      return { X, Y };
+    };
 
-    if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: "94A3B8", fontFace: "Arial" });
+    if (compare) {
+      // Two panels + a delta strip down the middle-bottom.
+      const half = (SW - sidePad * 3) / 2;
+      const panelH = SH - topPad - botPad - 0.75;
+      slide.addText(compare.labelA, { x: sidePad, y: topPad, w: half, h: 0.3, fontSize: 13, bold: true, color: hex(th.subColor), align: "center", fontFace: "Arial" });
+      slide.addText(compare.labelB, { x: sidePad * 2 + half, y: topPad, w: half, h: 0.3, fontSize: 13, bold: true, color: hex(th.subColor), align: "center", fontFace: "Arial" });
+      drawLayout(compare.layoutA, { x: sidePad, y: topPad + 0.4, w: half, h: panelH });
+      drawLayout(compare.layoutB, { x: sidePad * 2 + half, y: topPad + 0.4, w: half, h: panelH });
+      slide.addShape(pptx.ShapeType.line, { x: SW / 2, y: topPad + 0.2, w: 0, h: panelH + 0.2, line: { color: hex(th.cardBorder), width: 0.75, dashType: "dash" } });
+      if (compare.deltas) slide.addText(compare.deltas, {
+        x: sidePad, y: SH - botPad - 0.42, w: SW - sidePad * 2, h: 0.35,
+        fontSize: 12, bold: true, color: hex(th.accent), align: "center", fontFace: "Arial",
+      });
+    } else {
+      const { X, Y } = drawLayout(layout, { x: sidePad, y: topPad, w: SW - sidePad * 2, h: SH - topPad - botPad });
+      // sticky notes — editable text boxes; anchored notes get a dashed pointer.
+      const NOTE_W_IN = 2.0;
+      notes.forEach(n => {
+        const pal = STICKY_NOTE_COLORS[n.color] || STICKY_NOTE_COLORS.yellow;
+        const hIn = Math.max(0.45, noteLines(n.text).length * 0.24 + 0.2);
+        const nx = Math.max(0.1, Math.min(SW - NOTE_W_IN - 0.1, n.fx * SW));
+        const ny = Math.max(0.1, Math.min(SH - hIn - 0.1, n.fy * SH));
+        const anchor = n.anchorId ? layout.cards.find(c => c.node.id === n.anchorId) : null;
+        if (anchor) {
+          const ax = X(anchor.x + anchor.w / 2), ay = Y(anchor.y + anchor.h / 2);
+          const bx = nx + NOTE_W_IN / 2, by = ny + hIn / 2;
+          slide.addShape(pptx.ShapeType.line, {
+            x: Math.min(ax, bx), y: Math.min(ay, by),
+            w: Math.abs(ax - bx), h: Math.abs(ay - by),
+            flipV: (ax < bx) !== (ay < by),
+            line: { color: hex(pal.border), width: 1, dashType: "dash" },
+          });
+        }
+        slide.addText(n.text || "", {
+          x: nx, y: ny, w: NOTE_W_IN, h: hIn, shape: pptx.ShapeType.roundRect, rectRadius: 0.04,
+          fill: { color: hex(pal.bg) }, line: { color: hex(pal.border), width: 1 },
+          fontSize: 12, color: hex(pal.text), align: "left", valign: "top", margin: 6, fontFace: "Arial",
+        });
+      });
+    }
+
+    if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: hex(th.footerColor), fontFace: "Arial" });
   });
 
   pptx.writeFile({ fileName: deckName }).catch(err => alert("Could not write PowerPoint: " + (err?.message || err)));
@@ -3258,7 +3316,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
 
 // The Slide Builder view.
 function OrgSlideView() {
-  const { tree, activeEmployees, focusRoot, importEmployeesCSV, slideSeedId, setSlideSeedId, openRoles, setOpenRoles, stickyNotes, setStickyNotes, importedAt } = useContext(AppCtx);
+  const { tree, activeEmployees, employees, focusRoot, importEmployeesCSV, slideSeedId, setSlideSeedId, openRoles, setOpenRoles, stickyNotes, setStickyNotes, importedAt, scenarioA, setScenarioA, scenarioB } = useContext(AppCtx);
   const svgRef = useRef(null);
 
   // People who can head a slide (anyone in the tree). Default to the focused subtree
@@ -3272,8 +3330,16 @@ function OrgSlideView() {
   const [maxDepth, setMaxDepth] = useState(2);
   const [colorDim, setColorDim] = useState("department");
   const [fields, setFields]     = useState({ title: true, dept: true, fn: false, bg: false, location: false, level: true, size: true });
-  const [chartMode, setChartMode] = useState("tree");   // "tree" reporting chart | "group" breakdown snapshot
+  const [chartMode, setChartMode] = useState("tree");   // "tree" | "group" breakdown | "compare" A-vs-B
   const [groupDim, setGroupDim]   = useState("department");
+  const [themeKey, setThemeKey]   = useState("clean");   // slide style/background
+  const [compareRight, setCompareRight] = useState("current"); // right panel: "B" capture or "current" roster
+  // Slice filters (tree + breakdown): only show people matching every active filter,
+  // keeping non-matching managers as dimmed connectors.
+  const [fLoc, setFLoc]   = useState("All");
+  const [fDept, setFDept] = useState("All");
+  const [fFn, setFFn]     = useState("All");
+  const [fBg, setFBg]     = useState("All");
   const [perTeam, setPerTeam]   = useState(false);
   const [search, setSearch]     = useState("");
   const [titleText, setTitleText] = useState("");
@@ -3316,14 +3382,35 @@ function OrgSlideView() {
   // Which node field + color dimension each breakdown key maps to.
   const DIM_FIELD = { department: "dept", discipline: "fn", business_group: "bg", location: "location", level: "level" };
   const DIM_LABEL = { department: "Department", discipline: "Job family", business_group: "Business unit", location: "Location", level: "Level" };
+  const th = SLIDE_THEMES[themeKey] || SLIDE_THEMES.clean;
+
+  // Filter option values: distinct locations/depts/families/BUs in the root's subtree.
+  const filterOptions = useMemo(() => {
+    const vals = { location: new Set(), dept: new Set(), fn: new Set(), bg: new Set() };
+    const walk = n => { for (const f of Object.keys(vals)) { const v = (n[f] || "").toString().trim(); if (v && v !== "Unknown" && v !== "—") vals[f].add(v); } (n.children || []).forEach(walk); };
+    if (rootNode) walk(rootNode);
+    const s = o => [...o].sort();
+    return { location: s(vals.location), dept: s(vals.dept), fn: s(vals.fn), bg: s(vals.bg) };
+  }, [rootNode]);
+
+  const filtersActive = fLoc !== "All" || fDept !== "All" || fFn !== "All" || fBg !== "All";
+  const filterDesc = [fLoc !== "All" && fLoc, fDept !== "All" && fDept, fFn !== "All" && fFn, fBg !== "All" && fBg].filter(Boolean).join(" · ");
+  const filteredResult = useMemo(() => {
+    if (!rootNode || !filtersActive) return rootNode;
+    const pred = n => (fLoc === "All" || n.location === fLoc) && (fDept === "All" || n.dept === fDept)
+      && (fFn === "All" || n.fn === fFn) && (fBg === "All" || n.bg === fBg);
+    return filterSubtree(rootNode, pred); // null when nothing matches
+  }, [rootNode, filtersActive, fLoc, fDept, fFn, fBg]);
+  const filterEmpty = filtersActive && !filteredResult;
+  const filteredRoot = filteredResult || rootNode;
 
   // In "group" mode we render a synthetic root whose children are one card per
   // dimension value (with a headcount), so the same layout/preview/export pipeline
   // produces a "breakdown by <dimension>" snapshot slide.
   const groupInfo = useMemo(() => {
-    if (chartMode !== "group" || !rootNode) return null;
+    if (chartMode !== "group" || !filteredRoot) return null;
     const field = DIM_FIELD[groupDim] || "dept";
-    const groups = groupSubtree(rootNode, field);
+    const groups = groupSubtree(filteredRoot, field);
     const children = groups.map((g, i) => {
       const label = groupDim === "level" ? displayLevel(g.value) : g.value;
       const node = { id: `__grp_${i}`, __group: true, first: label, last: "", title: "", count: g.count, _totalReports: g.count, children: [] };
@@ -3331,10 +3418,39 @@ function OrgSlideView() {
       return node;
     });
     const total = groups.reduce((s, g) => s + g.count, 0);
-    return { root: { ...rootNode, children }, groups, total };
-  }, [chartMode, groupDim, rootNode]);
+    return { root: { ...filteredRoot, children }, groups, total };
+  }, [chartMode, groupDim, filteredRoot]);
 
-  const effRoot = chartMode === "group" && groupInfo ? groupInfo.root : rootNode;
+  // Compare mode (side-by-side / Then & Now): left = scenario A capture, right =
+  // scenario B capture or the CURRENT roster. Panels show the chosen root's subtree
+  // in each snapshot; the delta strip comes from diffScenarios over those subtrees.
+  const compareInfo = useMemo(() => {
+    if (chartMode !== "compare" || !scenarioA) return null;
+    const rightEmps = compareRight === "B" ? (scenarioB && scenarioB.employees) : employees;
+    if (!rightEmps) return null;
+    const treeA = buildTree(scenarioA.employees);
+    const treeB = buildTree(rightEmps);
+    const rootA = treeA.map[rootId] || treeA.root;
+    const rootB = treeB.map[rootId] || treeB.root;
+    if (!rootA || !rootB) return null;
+    const flatten = (n, acc = []) => { acc.push(n); (n.children || []).forEach(k => flatten(k, acc)); return acc; };
+    const flatA = flatten(rootA), flatB = flatten(rootB);
+    const d = diffScenarios(flatA, flatB);
+    const deltas = `Headcount ${flatA.length} → ${flatB.length}` +
+      ` · ${d.reportingChanges.length} move${d.reportingChanges.length === 1 ? "" : "s"}` +
+      (d.added.length ? ` · +${d.added.length} joined` : "") + (d.removed.length ? ` · −${d.removed.length} left` : "");
+    const joiners = d.added.slice(0, 3).map(a => a.name).join(", ") + (d.added.length > 3 ? ` +${d.added.length - 3}` : "");
+    const leavers = d.removed.slice(0, 3).map(a => a.name).join(", ") + (d.removed.length > 3 ? ` +${d.removed.length - 3}` : "");
+    const fmt = iso => iso ? new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+    const labelA = `${scenarioA.label || "Then"} · ${fmt(scenarioA.capturedAt)}`;
+    const labelB = compareRight === "B" ? `${scenarioB.label || "Now"} · ${fmt(scenarioB.capturedAt)}` : `Now · ${fmt(new Date().toISOString())}`;
+    const opts = { maxDepth, dens, leafMode, wrapCols: wrapColsVal, stackCols, wrapThreshold, openByManager: {} };
+    return { layoutA: computeSlideLayout(rootA, opts), layoutB: computeSlideLayout(rootB, opts),
+      labelA, labelB, deltas, joiners, leavers, addedN: d.added.length, removedN: d.removed.length };
+  }, [chartMode, scenarioA, scenarioB, compareRight, employees, rootId, maxDepth, dens, leafMode, wrapColsVal, stackCols, wrapThreshold]);
+
+  const isCompare = chartMode === "compare";
+  const effRoot = chartMode === "group" && groupInfo ? groupInfo.root : filteredRoot;
   const effMaxDepth = chartMode === "group" ? 1 : maxDepth;
   const effOpenByManager = chartMode === "group" ? {} : openByManager;
   const renderColorDim = chartMode === "group" ? groupDim : colorDim;
@@ -3463,12 +3579,14 @@ function OrgSlideView() {
 
   const isGroup = chartMode === "group";
   const autoTitle = !rootNode ? "Org chart"
+    : isCompare ? `${rootNode.first} ${rootNode.last} — Then & Now`
     : isGroup ? `${rootNode.first} ${rootNode.last} — ${DIM_LABEL[groupDim]} breakdown`
     : `${rootNode.first} ${rootNode.last}${/s$/i.test(rootNode.last || "") ? "’" : "’s"} organization`;
   const title = titleText.trim() || autoTitle;
   const subtitle = !rootNode ? ""
-    : isGroup && groupInfo ? `${groupInfo.groups.length} ${DIM_LABEL[groupDim].toLowerCase()}${groupInfo.groups.length === 1 ? "" : "s"}  ·  ${groupInfo.total} people`
-    : `${rootNode.title || displayLevel(rootNode.level)}  ·  ${(rootNode._totalReports || 0)} people in org`;
+    : isCompare && compareInfo ? [compareInfo.addedN ? `Joined: ${compareInfo.joiners}` : "", compareInfo.removedN ? `Left: ${compareInfo.leavers}` : ""].filter(Boolean).join("   ·   ") || "No joiners or leavers in this slice"
+    : isGroup && groupInfo ? `${groupInfo.groups.length} ${DIM_LABEL[groupDim].toLowerCase()}${groupInfo.groups.length === 1 ? "" : "s"}  ·  ${groupInfo.total} people${filterDesc ? `  ·  filtered: ${filterDesc}` : ""}`
+    : `${rootNode.title || displayLevel(rootNode.level)}  ·  ${(filteredRoot?._totalReports ?? 0)} people in org${filterDesc ? `  ·  filtered: ${filterDesc}` : ""}`;
   const snapshotStamp = importedAt ? `Org snapshot as of ${new Date(importedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}` : "Org snapshot (sample data)";
   const CONFIDENTIAL = "Company Confidential";
   const footer = `${CONFIDENTIAL}  ·  ${snapshotStamp}  ·  Generated ${new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}`;
@@ -3481,22 +3599,27 @@ function OrgSlideView() {
 
   // Build the list of slide models for a multi-slide (.pptx) export.
   function buildDeckModels() {
+    // Compare mode: one side-by-side slide with panels + delta strip.
+    if (isCompare && compareInfo) {
+      return [{ compare: { layoutA: compareInfo.layoutA, layoutB: compareInfo.layoutB, labelA: compareInfo.labelA, labelB: compareInfo.labelB, deltas: compareInfo.deltas },
+        fields, colorDim, dens, theme: th, title, subtitle, notes: [] }];
+    }
     // Breakdown mode is always a single snapshot slide (the synthetic grouped root).
     if (isGroup) {
-      return [{ layout, fields, colorDim: renderColorDim, dens, title, subtitle, notes: notesOnSlide(stickyNotes, layout, { primary: true }) }];
+      return [{ layout, fields, colorDim: renderColorDim, dens, theme: th, title, subtitle, notes: notesOnSlide(stickyNotes, layout, { primary: true }) }];
     }
     // Per-slide note routing: the primary slide carries free-floating notes; a note
     // anchored to a person follows that person onto whichever slide shows them.
     const mk = (node, mDepth, ttl, sub, primary) => {
       const ly = computeSlideLayout(node, { maxDepth: mDepth, dens, leafMode, wrapCols: wrapColsVal, stackCols, wrapThreshold, openByManager });
-      return { layout: ly, fields, colorDim, dens, title: ttl, subtitle: sub, notes: notesOnSlide(stickyNotes, ly, { primary }) };
+      return { layout: ly, fields, colorDim, dens, theme: th, title: ttl, subtitle: sub, notes: notesOnSlide(stickyNotes, ly, { primary }) };
     };
-    if (!perTeam || !rootNode.children || rootNode.children.length === 0) {
-      return [mk(rootNode, maxDepth, title, subtitle, true)];
+    if (!perTeam || !filteredRoot.children || filteredRoot.children.length === 0) {
+      return [mk(filteredRoot, maxDepth, title, subtitle, true)];
     }
     // Overview slide (root + direct reports) then one slide per report that manages people.
-    const models = [mk(rootNode, 1, title, `Leadership overview  ·  ${rootNode.children.length} direct reports`, true)];
-    rootNode.children.forEach(child => {
+    const models = [mk(filteredRoot, 1, title, `Leadership overview  ·  ${filteredRoot.children.length} direct reports`, true)];
+    filteredRoot.children.forEach(child => {
       const heads = (child.children && child.children.length > 0);
       models.push(mk(child, heads ? maxDepth : 1,
         `${child.first} ${child.last}${/s$/i.test(child.last || "") ? "’" : "’s"} team`,
@@ -3515,7 +3638,7 @@ function OrgSlideView() {
       const node = tree.map[s.nodeId] || rootNode;
       const ly = computeSlideLayout(node, { maxDepth: 1, dens, leafMode, wrapCols: wrapColsVal, stackCols, wrapThreshold, openByManager });
       return {
-        layout: ly, fields, colorDim, dens, title: s.title, subtitle: s.subtitle,
+        layout: ly, fields, colorDim, dens, theme: th, title: s.title, subtitle: s.subtitle,
         notes: notesOnSlide(stickyNotes, ly, { primary: i === 0 }), // anchored notes ride along to their person's slide
       };
     });
@@ -3555,12 +3678,32 @@ function OrgSlideView() {
 
         <div>
           <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Chart type</label>
-          <div className="grid grid-cols-2 gap-1">
-            {[["tree", "Reporting tree"], ["group", "Breakdown"]].map(([v, l]) => (
+          <div className="grid grid-cols-3 gap-1">
+            {[["tree", "Tree"], ["group", "Breakdown"], ["compare", "Then & Now"]].map(([v, l]) => (
               <button key={v} onClick={() => setChartMode(v)}
                 className={`text-[11px] py-1.5 rounded border transition-colors ${chartMode === v ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>{l}</button>
             ))}
           </div>
+          {isCompare && (
+            <div className="mt-2 space-y-1.5">
+              {!scenarioA ? (
+                <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                  No “Then” snapshot yet. Capture the current org as your baseline, make changes (or re-import next month’s file), then come back.
+                  <button onClick={() => setScenarioA({ label: "Then", capturedAt: new Date().toISOString(), employees: JSON.parse(JSON.stringify(employees)) })}
+                    className="mt-1.5 w-full text-[11px] bg-amber-600 text-white px-2 py-1 rounded-md font-medium hover:bg-amber-700">📸 Capture current org as “Then”</button>
+                </div>
+              ) : (<>
+                <div className="text-[10px] text-gray-400">Left: <b className="text-gray-600">{scenarioA.label}</b> · {new Date(scenarioA.capturedAt).toLocaleString()}</div>
+                <label className="block text-[10px] text-gray-400">Right panel</label>
+                <select value={compareRight} onChange={e => setCompareRight(e.target.value)} className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+                  <option value="current">Current roster (Now)</option>
+                  <option value="B" disabled={!scenarioB}>Scenario B capture{scenarioB ? "" : " — none yet"}</option>
+                </select>
+                <button onClick={() => setScenarioA({ label: "Then", capturedAt: new Date().toISOString(), employees: JSON.parse(JSON.stringify(employees)) })}
+                  className="w-full text-[11px] bg-gray-100 text-gray-600 px-2 py-1 rounded-md hover:bg-gray-200">📸 Re-capture “Then” from current org</button>
+              </>)}
+            </div>
+          )}
           {isGroup && (
             <div className="mt-2">
               <label className="block text-[10px] text-gray-400 mb-1">Break down by</label>
@@ -3574,6 +3717,40 @@ function OrgSlideView() {
               <p className="text-[10px] text-gray-400 mt-1">One card per {DIM_LABEL[groupDim].toLowerCase()} in {rootNode.first}’s org, with headcounts.</p>
             </div>
           )}
+        </div>
+
+        {!isCompare && (
+        <div className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide">Filter the slice</label>
+            {filtersActive && <button onClick={() => { setFLoc("All"); setFDept("All"); setFFn("All"); setFBg("All"); }} className="text-[10px] text-gray-400 hover:text-red-500">Clear</button>}
+          </div>
+          {[["Location", fLoc, setFLoc, filterOptions.location], ["Department", fDept, setFDept, filterOptions.dept],
+            ["Job family", fFn, setFFn, filterOptions.fn], ["Business unit", fBg, setFBg, filterOptions.bg]].map(([lbl, val, set, opts]) => (
+            <div key={lbl} className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-400 w-20 shrink-0">{lbl}</span>
+              <select value={val} onChange={e => set(e.target.value)} className="flex-1 min-w-0 text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white">
+                <option value="All">All</option>
+                {opts.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+          ))}
+          {filtersActive && !filterEmpty && <p className="text-[10px] text-blue-600">Showing only matching people; managers kept for context appear faded.</p>}
+          {filterEmpty && <p className="text-[10px] text-amber-600">Nobody in this slice matches those filters — showing everyone instead.</p>}
+        </div>
+        )}
+
+        <div>
+          <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Slide style</label>
+          <div className="grid grid-cols-4 gap-1">
+            {Object.values(SLIDE_THEMES).map(t => (
+              <button key={t.key} onClick={() => setThemeKey(t.key)} title={t.label}
+                className={`rounded-lg border p-1 text-center transition-all ${themeKey === t.key ? "border-blue-500 ring-1 ring-blue-400" : "border-gray-200 hover:border-gray-300"}`}>
+                <span className="block h-6 rounded" style={{ background: t.pageBg, borderTop: `3px solid ${t.accent}`, border: `1px solid ${t.cardBorder}`, borderTopWidth: 3, borderTopColor: t.accent }} />
+                <span className="block text-[9px] text-gray-500 mt-0.5">{t.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         {!isGroup && (
@@ -3666,7 +3843,7 @@ function OrgSlideView() {
         </div>
         )}
 
-        {!isGroup && (
+        {!isGroup && !isCompare && (
         <div className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-2">
           <div className="flex items-center justify-between">
             <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide">Open positions</label>
@@ -3725,6 +3902,7 @@ function OrgSlideView() {
         </div>
         )}
 
+        {!isCompare && (
         <div className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-2">
           <div className="flex items-center justify-between">
             <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide">Sticky notes</label>
@@ -3759,6 +3937,7 @@ function OrgSlideView() {
             </div>
           ))}
         </div>
+        )}
 
         <div>
           <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Slide title</label>
@@ -3766,7 +3945,7 @@ function OrgSlideView() {
             className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white" />
         </div>
 
-        {!isGroup && (
+        {!isGroup && !isCompare && (
         <label className="flex items-start gap-2 text-xs text-gray-700 bg-white border border-gray-200 rounded-lg p-2">
           <input type="checkbox" checked={perTeam} onChange={e => setPerTeam(e.target.checked)} className="mt-0.5" />
           <span><span className="font-medium">Break into one slide per team</span><br/><span className="text-gray-400">Overview slide + a slide for each direct report’s org (multi-slide .pptx).</span></span>
@@ -3782,7 +3961,7 @@ function OrgSlideView() {
             className="w-full flex items-center justify-center gap-1.5 text-xs bg-amber-500 text-white px-3 py-2 rounded-lg font-medium hover:bg-amber-600">
             <FileText size={13}/>Download PowerPoint{perTeam && rootNode.children && rootNode.children.length ? ` (${rootNode.children.length + 1} slides)` : ""}
           </button>
-          {!isGroup && (
+          {!isGroup && !isCompare && (
           <button onClick={downloadOrgBook}
             className="w-full flex items-center justify-center gap-1.5 text-xs bg-white text-amber-700 border border-amber-300 px-3 py-2 rounded-lg font-medium hover:bg-amber-50">
             <FileText size={13}/>Download full org book (.pptx)
@@ -3799,11 +3978,21 @@ function OrgSlideView() {
             This slice is large ({layout.count}+ boxes). Reduce “Levels deep”, pick a lower manager as the top of the box, or use “one slide per team” to keep each slide readable.
           </div>
         )}
+        {isCompare && !compareInfo ? (
+          <div className="mx-auto max-w-md text-center text-sm text-gray-500 bg-white rounded-lg shadow p-8">
+            <div className="text-3xl mb-2">🕰️</div>
+            Then &amp; Now needs a “Then” snapshot. Use <b>📸 Capture current org as “Then”</b> in the left panel, then change the org (drag people, import a newer file) and come back.
+          </div>
+        ) : (
         <div className="mx-auto bg-white rounded-lg shadow-xl overflow-hidden" style={{ maxWidth: 1100 }}>
           <OrgSlideSVG layout={layout} fields={fields} colorDim={renderColorDim} title={title} subtitle={subtitle} svgRef={svgRef} dens={dens}
+            theme={th} compare={isCompare ? (compareInfo && { layoutA: compareInfo.layoutA, layoutB: compareInfo.layoutB, labelA: compareInfo.labelA, labelB: compareInfo.labelB, deltas: compareInfo.deltas }) : null}
             notes={stickyNotes} onMoveNote={moveNote} onSelectNote={setSelectedNoteId} selectedNoteId={selectedNoteId} footer={footer} />
         </div>
-        <p className="text-center text-[11px] text-gray-400 mt-2">{isGroup && groupInfo
+        )}
+        <p className="text-center text-[11px] text-gray-400 mt-2">{isCompare
+          ? (compareInfo ? `Live preview · ${compareInfo.labelA}  vs  ${compareInfo.labelB} · ${compareInfo.deltas}` : "Waiting for a “Then” snapshot")
+          : isGroup && groupInfo
           ? `Live preview · ${groupInfo.groups.length} ${DIM_LABEL[groupDim].toLowerCase()}${groupInfo.groups.length === 1 ? "" : "s"} · ${groupInfo.total} people`
           : `Live preview · ${layout.count - openCount} ${(layout.count - openCount) === 1 ? "person" : "people"} shown${openCount > 0 ? ` · ${openCount} open position${openCount === 1 ? "" : "s"}` : ""}`}</p>
       </div>

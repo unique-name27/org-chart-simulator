@@ -434,6 +434,22 @@ export function computeSlideLayout(root, { maxDepth, dens = SLIDE_DENSITY.comfor
   return { cards, links, groups, width, height, count: cards.length, truncated };
 }
 
+// Prune a tree slice to the people matching `pred`, keeping non-matching managers
+// only when they're needed as connectors to a matching descendant (marked __dim so
+// the renderer can fade them). Returns a cloned tree or null if nothing matches.
+export function filterSubtree(root, pred) {
+  if (!root) return null;
+  const walk = (n) => {
+    const kids = (n.children || []).map(walk).filter(Boolean);
+    const match = !!pred(n);
+    if (!match && kids.length === 0) return null;
+    return { ...n, children: kids, __dim: !match, _totalReports: kids.reduce((s, k) => s + 1 + (k._totalReports || 0), 0) };
+  };
+  const out = walk(root);
+  if (out) out.__dim = false; // the chosen root always shows full-strength
+  return out;
+}
+
 // Which sticky notes belong on a given slide. Free-floating notes (no anchor) live
 // on the primary slide only; a note anchored to a person appears on EVERY slide
 // whose layout contains that person's card (per-team decks, the org book, …).

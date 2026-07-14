@@ -67,6 +67,11 @@ console.log("── 4. Built artifact: shipped features present ──");
   ["orgSimSession", "autosave/session persistence"],
   ["Download full org book", "org book button"],
   ["OPEN", "open-position ghost cards"],
+  ["SLIDE_THEMES", "slide style/background themes"],
+  ["function filterSubtree", "slice filters (location/dept/family/BU)"],
+  ["Then & Now", "side-by-side compare / Then & Now mode"],
+  ["Filter the slice", "filter controls UI"],
+  ["Slide style", "theme picker UI"],
 ].forEach(([needle, label]) => check(html.includes(needle), label));
 
 console.log("── 5. Vendored dependency integrity ──");
