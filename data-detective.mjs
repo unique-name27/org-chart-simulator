@@ -202,3 +202,12 @@ $("dlLog").onclick = () => {
     ["Employee ID,Name,Field,Issue,Action,New value", ...log.map(l => [l.empId, l.name, l.field, l.issue, l.action, l.newValue].map(csvCell).join(","))].join("\n"));
 };
 $("again").onclick = () => { show("setup"); };
+
+// Handoff to the org chart: stage the cleaned roster (fixes applied) in
+// same-origin localStorage and open the main app, which imports it on load.
+// Nothing leaves the browser.
+$("openOrg").onclick = () => {
+  try { localStorage.setItem("orgSimHandoff", JSON.stringify({ v: 1, at: new Date().toISOString(), employees })); }
+  catch (e) { alert("Couldn't stage the handoff (storage full?): " + (e.message || e)); return; }
+  location.href = "./org-chart-editable_3.html?handoff=1";
+};

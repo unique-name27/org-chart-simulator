@@ -72,6 +72,10 @@ console.log("── 4. Built artifact: shipped features present ──");
   ["Then & Now", "side-by-side compare / Then & Now mode"],
   ["Filter the slice", "filter controls UI"],
   ["Slide style", "theme picker UI"],
+  ["orgSimSlidePresets", "slide presets (save/load)"],
+  ["function extractPptxTheme", "company .pptx template mapping"],
+  ["Match company template", "template upload control"],
+  ["orgSimHandoff", "Detective → org chart handoff (app side)"],
 ].forEach(([needle, label]) => check(html.includes(needle), label));
 
 console.log("── 5. Vendored dependency integrity ──");
@@ -92,6 +96,7 @@ check(gameJs.includes('from "./core.mjs"'), "game imports the tested core detect
 check(/detectDataIssues|computeDataHealth/.test(gameJs), "game uses detectDataIssues/computeDataHealth");
 check(/glean\.com\/search\?q=\{query\}/.test(gameJs), "Glean look-up template wired");
 check(/corrected-roster-/.test(gameJs) && /data-fix-log-/.test(gameJs), "corrected CSV + audit log exports present");
+check(/orgSimHandoff/.test(gameJs) && /handoff=1/.test(gameJs), "Detective → org chart handoff (game side)");
 
 console.log("── 7. Repo hygiene ──");
 check(!existsSync("._merged.jsx"), "no build scratch file left behind");

@@ -3094,9 +3094,10 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
   };
   const onNoteUp = () => { dragRef.current = null; };
 
+  const fontFam = th.fontFace ? `'${th.fontFace}', 'DM Sans', Arial, sans-serif` : "'DM Sans', Arial, sans-serif";
   return (
     <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width={W} height={H} xmlns="http://www.w3.org/2000/svg"
-      style={{ width: "100%", height: "auto", background: th.pageBg, fontFamily: "'DM Sans', Arial, sans-serif" }}>
+      style={{ width: "100%", height: "auto", background: th.pageBg, fontFamily: fontFam }}>
       <rect x="0" y="0" width={W} height={H} fill={th.pageBg} />
       {title && <>
         <rect x="0" y="0" width={W} height="6" fill={th.accent} />
@@ -3194,6 +3195,20 @@ const SLIDE_THEMES = {
   mono:     { key: "mono",     label: "Mono",      pageBg: "#ffffff", accent: "#111827", titleColor: "#111827", subColor: "#6b7280", cardBg: "#ffffff", cardBorder: "#d1d5db", nameColor: "#111827", bodyColor: "#4b5563", metaColor: "#9ca3af", connector: "#9ca3af", groupBg: "#f9fafb", groupBorder: "#e5e7eb", footerColor: "#9ca3af" },
 };
 
+// Derive a full slide theme from the 3 colors + heading font a corporate .pptx
+// theme actually declares (extractPptxTheme). Everything else is blended.
+function themeFromTemplate(t) {
+  const dark = t.dark || "#0f172a", light = t.light || "#ffffff", accent = t.accent1 || "#2563eb";
+  return {
+    key: "company", label: "Company", pageBg: light, accent,
+    titleColor: dark, subColor: mixHex(dark, light, 0.45),
+    cardBg: mixHex(light, "#ffffff", 0.7), cardBorder: mixHex(dark, light, 0.85),
+    nameColor: dark, bodyColor: mixHex(dark, light, 0.3), metaColor: mixHex(dark, light, 0.55),
+    connector: mixHex(dark, light, 0.75), groupBg: mixHex(light, dark, 0.04), groupBorder: mixHex(dark, light, 0.85),
+    footerColor: mixHex(dark, light, 0.55), fontFace: t.fontFace || null,
+  };
+}
+
 // Build a native, editable .pptx from one or more slide models via PptxGenJS.
 // Each card becomes a real rounded-rectangle text box and each connector a real
 // line, so HRBPs can nudge, recolor, or retype anything in PowerPoint afterward.
@@ -3210,11 +3225,12 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
   slideModels.forEach(model => {
     const { layout, fields, colorDim, title, subtitle, dens = SLIDE_DENSITY.comfortable, notes = [], compare } = model;
     const th = model.theme || SLIDE_THEMES.clean;
+    const FONT = th.fontFace || "Arial"; // company-template heading font when mapped
     const slide = pptx.addSlide();
     slide.background = { color: hex(th.pageBg) };
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: SW, h: 0.09, fill: { color: hex(th.accent) } });
-    if (title)    slide.addText(title,    { x: 0.45, y: 0.28, w: SW - 0.9, h: 0.5,  fontSize: 24, bold: true, color: hex(th.titleColor), fontFace: "Arial" });
-    if (subtitle) slide.addText(subtitle, { x: 0.45, y: 0.78, w: SW - 0.9, h: 0.3,  fontSize: 12, color: hex(th.subColor), fontFace: "Arial" });
+    if (title)    slide.addText(title,    { x: 0.45, y: 0.28, w: SW - 0.9, h: 0.5,  fontSize: 24, bold: true, color: hex(th.titleColor), fontFace: FONT });
+    if (subtitle) slide.addText(subtitle, { x: 0.45, y: 0.78, w: SW - 0.9, h: 0.3,  fontSize: 12, color: hex(th.subColor), fontFace: FONT });
     const topPad = title ? 1.25 : 0.5, botPad = footer ? 0.55 : 0.35, sidePad = 0.45;
 
     // Draw one layout scaled into a region {x,y,w,h} (inches). Returns mappers for callers.
@@ -3252,13 +3268,13 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
           shape: pptx.ShapeType.roundRect, rectRadius: Math.min(0.06, h * 0.16),
           x, y, w, h, fill: { color: hex(th.cardBg) },
           line: open ? { color, width: 1.25, dashType: "dash" } : { color: hex(th.cardBorder), width: 1 },
-          align: "left", valign: "middle", margin: [1, 3, 1, Math.max(4, padL * scale * 72)], fontFace: "Arial",
+          align: "left", valign: "middle", margin: [1, 3, 1, Math.max(4, padL * scale * 72)], fontFace: FONT,
         });
         if (open) {
           if (dens.lines >= 2 && w >= 1.2) slide.addText("OPEN", {
             x: x + w - 0.6, y: y + 0.04, w: 0.55, h: 0.18, rectRadius: 0.03, shape: pptx.ShapeType.roundRect,
             fill: { color: "ECFDF5" }, line: { color: "6EE7B7", width: 0.5 },
-            fontSize: 7, bold: true, color: "059669", align: "center", valign: "middle", fontFace: "Arial",
+            fontSize: 7, bold: true, color: "059669", align: "center", valign: "middle", fontFace: FONT,
           });
         } else if (!dim) {
           slide.addShape(pptx.ShapeType.rect, { x, y, w: stripe * scale, h, fill: { color } });
@@ -3271,14 +3287,14 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
       // Two panels + a delta strip down the middle-bottom.
       const half = (SW - sidePad * 3) / 2;
       const panelH = SH - topPad - botPad - 0.75;
-      slide.addText(compare.labelA, { x: sidePad, y: topPad, w: half, h: 0.3, fontSize: 13, bold: true, color: hex(th.subColor), align: "center", fontFace: "Arial" });
-      slide.addText(compare.labelB, { x: sidePad * 2 + half, y: topPad, w: half, h: 0.3, fontSize: 13, bold: true, color: hex(th.subColor), align: "center", fontFace: "Arial" });
+      slide.addText(compare.labelA, { x: sidePad, y: topPad, w: half, h: 0.3, fontSize: 13, bold: true, color: hex(th.subColor), align: "center", fontFace: FONT });
+      slide.addText(compare.labelB, { x: sidePad * 2 + half, y: topPad, w: half, h: 0.3, fontSize: 13, bold: true, color: hex(th.subColor), align: "center", fontFace: FONT });
       drawLayout(compare.layoutA, { x: sidePad, y: topPad + 0.4, w: half, h: panelH });
       drawLayout(compare.layoutB, { x: sidePad * 2 + half, y: topPad + 0.4, w: half, h: panelH });
       slide.addShape(pptx.ShapeType.line, { x: SW / 2, y: topPad + 0.2, w: 0, h: panelH + 0.2, line: { color: hex(th.cardBorder), width: 0.75, dashType: "dash" } });
       if (compare.deltas) slide.addText(compare.deltas, {
         x: sidePad, y: SH - botPad - 0.42, w: SW - sidePad * 2, h: 0.35,
-        fontSize: 12, bold: true, color: hex(th.accent), align: "center", fontFace: "Arial",
+        fontSize: 12, bold: true, color: hex(th.accent), align: "center", fontFace: FONT,
       });
     } else {
       const { X, Y } = drawLayout(layout, { x: sidePad, y: topPad, w: SW - sidePad * 2, h: SH - topPad - botPad });
@@ -3303,12 +3319,12 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
         slide.addText(n.text || "", {
           x: nx, y: ny, w: NOTE_W_IN, h: hIn, shape: pptx.ShapeType.roundRect, rectRadius: 0.04,
           fill: { color: hex(pal.bg) }, line: { color: hex(pal.border), width: 1 },
-          fontSize: 12, color: hex(pal.text), align: "left", valign: "top", margin: 6, fontFace: "Arial",
+          fontSize: 12, color: hex(pal.text), align: "left", valign: "top", margin: 6, fontFace: FONT,
         });
       });
     }
 
-    if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: hex(th.footerColor), fontFace: "Arial" });
+    if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: hex(th.footerColor), fontFace: FONT });
   });
 
   pptx.writeFile({ fileName: deckName }).catch(err => alert("Could not write PowerPoint: " + (err?.message || err)));
@@ -3382,7 +3398,56 @@ function OrgSlideView() {
   // Which node field + color dimension each breakdown key maps to.
   const DIM_FIELD = { department: "dept", discipline: "fn", business_group: "bg", location: "location", level: "level" };
   const DIM_LABEL = { department: "Department", discipline: "Job family", business_group: "Business unit", location: "Location", level: "Level" };
-  const th = SLIDE_THEMES[themeKey] || SLIDE_THEMES.clean;
+  // Company template theme (mapped from an uploaded corporate .pptx) — persisted per device.
+  const [companyTheme, setCompanyTheme] = useState(() => { try { return JSON.parse(localStorage.getItem("orgSimCompanyTheme") || "null"); } catch { return null; } });
+  const th = themeKey === "company" && companyTheme ? companyTheme : (SLIDE_THEMES[themeKey] || SLIDE_THEMES.clean);
+  async function importTemplate(file) {
+    try {
+      const t = await extractPptxTheme(new Uint8Array(await file.arrayBuffer()));
+      const thm = themeFromTemplate(t);
+      setCompanyTheme(thm); setThemeKey("company");
+      try { localStorage.setItem("orgSimCompanyTheme", JSON.stringify(thm)); } catch {}
+      alert(`Matched ${file.name} — accent ${t.accent1 || "default"}, heading font ${t.fontFace || "default"}.\n“Company” style is now available in Slide style.`);
+    } catch (e) { alert("Couldn't read that template: " + (e && e.message || e)); }
+  }
+  function clearCompanyTheme() {
+    setCompanyTheme(null); if (themeKey === "company") setThemeKey("clean");
+    try { localStorage.removeItem("orgSimCompanyTheme"); } catch {}
+  }
+
+  // Slide presets: save the current configuration under a name ("My QBR style")
+  // and re-apply it in one click. Stored per device; data-independent (no root/title).
+  const PRESET_KEY = "orgSimSlidePresets";
+  const [presets, setPresets] = useState(() => { try { return JSON.parse(localStorage.getItem(PRESET_KEY) || "{}"); } catch { return {}; } });
+  const [presetSel, setPresetSel] = useState("");
+  const persistPresets = next => { setPresets(next); try { localStorage.setItem(PRESET_KEY, JSON.stringify(next)); } catch {} };
+  const savePreset = () => {
+    const name = (window.prompt("Preset name (e.g. “My QBR style”):", presetSel || "") || "").trim();
+    if (!name) return;
+    persistPresets({ ...presets, [name]: { chartMode, groupDim, colorDim, fields, density, leafMode, wrapCols, stackCols, wrapThreshold, themeKey, maxDepth, perTeam } });
+    setPresetSel(name);
+  };
+  const applyPreset = name => {
+    const p = presets[name]; if (!p) { setPresetSel(""); return; }
+    setPresetSel(name);
+    if (p.chartMode) setChartMode(p.chartMode);
+    if (p.groupDim) setGroupDim(p.groupDim);
+    if (p.colorDim) setColorDim(p.colorDim);
+    if (p.fields) setFields(p.fields);
+    if (p.density) setDensity(p.density);
+    if (p.leafMode) setLeafMode(p.leafMode);
+    if (p.wrapCols != null) setWrapCols(p.wrapCols);
+    if (p.stackCols) setStackCols(p.stackCols);
+    if (p.wrapThreshold) setWrapThreshold(p.wrapThreshold);
+    if (p.themeKey) setThemeKey(p.themeKey);
+    if (p.maxDepth) setMaxDepth(p.maxDepth);
+    if (typeof p.perTeam === "boolean") setPerTeam(p.perTeam);
+  };
+  const deletePreset = () => {
+    if (!presetSel || !window.confirm(`Delete preset “${presetSel}”?`)) return;
+    const next = { ...presets }; delete next[presetSel];
+    persistPresets(next); setPresetSel("");
+  };
 
   // Filter option values: distinct locations/depts/families/BUs in the root's subtree.
   const filterOptions = useMemo(() => {
@@ -3662,6 +3727,18 @@ function OrgSlideView() {
             <input type="file" accept=".csv,text/csv,.tsv,.txt,text/tab-separated-values,.xlsx,.xls,.xlsm,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f && importEmployeesCSV) importEmployeesCSV(f); e.target.value = ""; }}/>
           </label>
+          {/* Slide presets — save/apply the whole configuration in one click */}
+          <div className="mt-2 flex items-center gap-1">
+            <select value={presetSel} onChange={e => applyPreset(e.target.value)}
+              title="Apply a saved slide preset (layout, density, theme, fields — everything but the data)"
+              className="flex-1 min-w-0 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+              <option value="">Presets…</option>
+              {Object.keys(presets).sort().map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button onClick={savePreset} title="Save the current configuration as a named preset"
+              className="text-xs bg-gray-100 text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-200 shrink-0">💾 Save</button>
+            {presetSel && <button onClick={deletePreset} title="Delete this preset" className="text-gray-300 hover:text-red-500 shrink-0"><X size={13}/></button>}
+          </div>
         </div>
 
         <div>
@@ -3742,14 +3819,23 @@ function OrgSlideView() {
 
         <div>
           <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Slide style</label>
-          <div className="grid grid-cols-4 gap-1">
-            {Object.values(SLIDE_THEMES).map(t => (
-              <button key={t.key} onClick={() => setThemeKey(t.key)} title={t.label}
+          <div className={`grid ${companyTheme ? "grid-cols-5" : "grid-cols-4"} gap-1`}>
+            {[...Object.values(SLIDE_THEMES), ...(companyTheme ? [companyTheme] : [])].map(t => (
+              <button key={t.key} onClick={() => setThemeKey(t.key)} title={t.key === "company" ? `Company (from your template${t.fontFace ? ` · ${t.fontFace}` : ""})` : t.label}
                 className={`rounded-lg border p-1 text-center transition-all ${themeKey === t.key ? "border-blue-500 ring-1 ring-blue-400" : "border-gray-200 hover:border-gray-300"}`}>
                 <span className="block h-6 rounded" style={{ background: t.pageBg, borderTop: `3px solid ${t.accent}`, border: `1px solid ${t.cardBorder}`, borderTopWidth: 3, borderTopColor: t.accent }} />
                 <span className="block text-[9px] text-gray-500 mt-0.5">{t.label}</span>
               </button>
             ))}
+          </div>
+          <div className="mt-1.5 flex items-center gap-2">
+            <label title="Upload your corporate PowerPoint template (.pptx/.potx) — its accent color, text/background colors and heading font become a “Company” style"
+              className="flex-1 flex items-center justify-center gap-1 text-[11px] bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer">
+              🎨 Match company template (.pptx)
+              <input type="file" accept=".pptx,.potx,application/vnd.openxmlformats-officedocument.presentationml.presentation" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) importTemplate(f); e.target.value = ""; }}/>
+            </label>
+            {companyTheme && <button onClick={clearCompanyTheme} title="Remove the company style" className="text-[10px] text-gray-400 hover:text-red-500 shrink-0">Remove</button>}
           </div>
         </div>
 
@@ -11464,6 +11550,41 @@ function OrgChartApp() {
   }, [employees, annotations, plan, openRoles, stickyNotes, isSyntheticData, importedAt, scenarioA, scenarioB]);
   // Restore the last autosaved session once on mount.
   useEffect(() => { try { const raw = localStorage.getItem(SESSION_KEY); if (raw) applySessionDoc(JSON.parse(raw)); } catch {} }, []);
+
+  // HR Data Detective → org chart handoff: the game stages its cleaned roster in
+  // localStorage and opens this page with ?handoff=1. Runs AFTER the session
+  // restore above so the cleaned roster wins. Same-origin localStorage only —
+  // nothing crosses the network.
+  useEffect(() => {
+    try {
+      if (!new URLSearchParams(location.search).get("handoff")) return;
+      const raw = localStorage.getItem("orgSimHandoff");
+      if (!raw) return;
+      localStorage.removeItem("orgSimHandoff");
+      const doc = JSON.parse(raw);
+      if (!Array.isArray(doc.employees) || !doc.employees.length) return;
+      const list = doc.employees.map(e => {
+        const lv = normalizeLevel(e.level) || "IC3";
+        const dept = (e.dept || "").trim() || "General";
+        return { id: e.id, first: e.first || e.id, last: e.last || "",
+          title: (e.title || "").trim() || `${displayLevel(lv)} ${dept}`,
+          level: lv, dept, bg: dept, fn: dept,
+          location: (e.location || "").trim() || "Unknown", country: "—", employmentType: "FTE",
+          managerId: (e.managerId || "").trim() || null, status: e.status || "Active",
+          startDate: e.startDate || null, endDate: e.endDate || null, costCenter: null, band: null };
+      }).filter(e => e.id);
+      linkManagers(list);
+      setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(employees))]);
+      setEmployees(list);
+      setIsSyntheticData(false);
+      setImportedAt(doc.at || new Date().toISOString());
+      setSelectedNode(null); setDetailPanel(null); setFocusRoot(null);
+      try { const u = new URL(location.href); u.searchParams.delete("handoff"); history.replaceState(null, "", u); } catch {}
+      // No blocking alert on page load — the new roster (and Employees count) is
+      // its own confirmation; log for the curious.
+      console.log(`HR Data Detective handoff: loaded ${list.length} cleaned records.`);
+    } catch {}
+  }, []);
 
   // Build context value — new object each render is fine; components re-render but don't remount
   const ctxValue = {

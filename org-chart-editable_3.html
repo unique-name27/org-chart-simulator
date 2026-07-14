@@ -197,6 +197,55 @@ function linkManagers(employees) {
   }
   return stats;
 }
+async function unzipEntries(buf) {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let e = u8.length - 22;
+  while (e >= 0 && dv.getUint32(e, true) !== 101010256) e--;
+  if (e < 0) throw new Error("Not a ZIP/PPTX file");
+  const count = dv.getUint16(e + 10, true);
+  let off = dv.getUint32(e + 16, true);
+  const out = /* @__PURE__ */ new Map();
+  for (let i = 0; i < count; i++) {
+    if (dv.getUint32(off, true) !== 33639248) break;
+    const method = dv.getUint16(off + 10, true);
+    const csize = dv.getUint32(off + 20, true);
+    const nameLen = dv.getUint16(off + 28, true), extraLen = dv.getUint16(off + 30, true), cmtLen = dv.getUint16(off + 32, true);
+    const lho = dv.getUint32(off + 42, true);
+    const name = new TextDecoder().decode(u8.subarray(off + 46, off + 46 + nameLen));
+    const lnl = dv.getUint16(lho + 26, true), lel = dv.getUint16(lho + 28, true);
+    const dataStart = lho + 30 + lnl + lel;
+    out.set(name, { method, raw: u8.subarray(dataStart, dataStart + csize) });
+    off += 46 + nameLen + extraLen + cmtLen;
+  }
+  return out;
+}
+async function _inflateRaw(raw) {
+  const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function extractPptxTheme(buf) {
+  const entries = await unzipEntries(buf);
+  const key = [...entries.keys()].find((k) => k === "ppt/theme/theme1.xml") || [...entries.keys()].find((k) => /^ppt\/theme\/theme\d+\.xml$/.test(k));
+  if (!key) throw new Error("No theme found \u2014 is this a PowerPoint file?");
+  const ent = entries.get(key);
+  const xml = new TextDecoder().decode(ent.method === 0 ? ent.raw : await _inflateRaw(ent.raw));
+  const grab = (re) => (xml.match(re) || [])[1] || null;
+  const clr = (tag) => grab(new RegExp(`<a:${tag}>\\s*<a:srgbClr val="([0-9A-Fa-f]{6})"`)) || grab(new RegExp(`<a:${tag}>\\s*<a:sysClr[^>]*lastClr="([0-9A-Fa-f]{6})"`));
+  const hex = (v) => v ? "#" + v.toLowerCase() : null;
+  return {
+    accent1: hex(clr("accent1")),
+    dark: hex(clr("dk1")),
+    light: hex(clr("lt1")),
+    fontFace: grab(/<a:majorFont>\s*<a:latin typeface="([^"]+)"/) || null
+  };
+}
+function mixHex(a, b, t) {
+  const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [ar, ag, ab2] = p(a), [br, bg, bb] = p(b);
+  const c = (v) => Math.round(v).toString(16).padStart(2, "0");
+  return "#" + c(ar + (br - ar) * t) + c(ag + (bg - ag) * t) + c(ab2 + (bb - ab2) * t);
+}
 function detectDataIssues(employees, { today = "2026-01-01", spanLimit = 20 } = {}) {
   var _a, _b, _c, _d, _e, _f, _g, _h;
   const cases = [];
@@ -3438,6 +3487,7 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
   const onNoteUp = () => {
     dragRef.current = null;
   };
+  const fontFam = th.fontFace ? `'${th.fontFace}', 'DM Sans', Arial, sans-serif` : "'DM Sans', Arial, sans-serif";
   return /* @__PURE__ */ React.createElement(
     "svg",
     {
@@ -3446,7 +3496,7 @@ function OrgSlideSVG({ layout, fields, colorDim, title, subtitle, svgRef, dens =
       width: W,
       height: H,
       xmlns: "http://www.w3.org/2000/svg",
-      style: { width: "100%", height: "auto", background: th.pageBg, fontFamily: "'DM Sans', Arial, sans-serif" }
+      style: { width: "100%", height: "auto", background: th.pageBg, fontFamily: fontFam }
     },
     /* @__PURE__ */ React.createElement("rect", { x: "0", y: "0", width: W, height: H, fill: th.pageBg }),
     title && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("rect", { x: "0", y: "0", width: W, height: "6", fill: th.accent }), /* @__PURE__ */ React.createElement("text", { x: PAD, y: "46", fontSize: "26", fontWeight: "700", fill: th.titleColor }, truncateToWidth(title, W - PAD * 2, 26)), subtitle && /* @__PURE__ */ React.createElement("text", { x: PAD, y: "66", fontSize: "13", fill: th.subColor }, truncateToWidth(subtitle, W - PAD * 2, 13))),
@@ -3555,6 +3605,27 @@ const SLIDE_THEMES = {
   warm: { key: "warm", label: "Warm", pageBg: "#faf6f0", accent: "#d97706", titleColor: "#43301b", subColor: "#8a7561", cardBg: "#fffdf9", cardBorder: "#e7dccb", nameColor: "#43301b", bodyColor: "#7c6a55", metaColor: "#a89478", connector: "#d6c7b2", groupBg: "#f3ece1", groupBorder: "#e7dccb", footerColor: "#a89478" },
   mono: { key: "mono", label: "Mono", pageBg: "#ffffff", accent: "#111827", titleColor: "#111827", subColor: "#6b7280", cardBg: "#ffffff", cardBorder: "#d1d5db", nameColor: "#111827", bodyColor: "#4b5563", metaColor: "#9ca3af", connector: "#9ca3af", groupBg: "#f9fafb", groupBorder: "#e5e7eb", footerColor: "#9ca3af" }
 };
+function themeFromTemplate(t) {
+  const dark = t.dark || "#0f172a", light = t.light || "#ffffff", accent = t.accent1 || "#2563eb";
+  return {
+    key: "company",
+    label: "Company",
+    pageBg: light,
+    accent,
+    titleColor: dark,
+    subColor: mixHex(dark, light, 0.45),
+    cardBg: mixHex(light, "#ffffff", 0.7),
+    cardBorder: mixHex(dark, light, 0.85),
+    nameColor: dark,
+    bodyColor: mixHex(dark, light, 0.3),
+    metaColor: mixHex(dark, light, 0.55),
+    connector: mixHex(dark, light, 0.75),
+    groupBg: mixHex(light, dark, 0.04),
+    groupBorder: mixHex(dark, light, 0.85),
+    footerColor: mixHex(dark, light, 0.55),
+    fontFace: t.fontFace || null
+  };
+}
 function exportSlidePPTX(slideModels, { deckName, footer }) {
   const Ctor = window.PptxGenJS;
   if (!Ctor) {
@@ -3568,11 +3639,12 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
   slideModels.forEach((model) => {
     const { layout, fields, colorDim, title, subtitle, dens = SLIDE_DENSITY.comfortable, notes = [], compare } = model;
     const th = model.theme || SLIDE_THEMES.clean;
+    const FONT = th.fontFace || "Arial";
     const slide = pptx.addSlide();
     slide.background = { color: hex(th.pageBg) };
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: SW, h: 0.09, fill: { color: hex(th.accent) } });
-    if (title) slide.addText(title, { x: 0.45, y: 0.28, w: SW - 0.9, h: 0.5, fontSize: 24, bold: true, color: hex(th.titleColor), fontFace: "Arial" });
-    if (subtitle) slide.addText(subtitle, { x: 0.45, y: 0.78, w: SW - 0.9, h: 0.3, fontSize: 12, color: hex(th.subColor), fontFace: "Arial" });
+    if (title) slide.addText(title, { x: 0.45, y: 0.28, w: SW - 0.9, h: 0.5, fontSize: 24, bold: true, color: hex(th.titleColor), fontFace: FONT });
+    if (subtitle) slide.addText(subtitle, { x: 0.45, y: 0.78, w: SW - 0.9, h: 0.3, fontSize: 12, color: hex(th.subColor), fontFace: FONT });
     const topPad = title ? 1.25 : 0.5, botPad = footer ? 0.55 : 0.35, sidePad = 0.45;
     const drawLayout = (ly, region) => {
       const scale = Math.min(region.w / ly.width, region.h / ly.height);
@@ -3622,7 +3694,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
           align: "left",
           valign: "middle",
           margin: [1, 3, 1, Math.max(4, padL * scale * 72)],
-          fontFace: "Arial"
+          fontFace: FONT
         });
         if (open) {
           if (dens.lines >= 2 && w >= 1.2) slide.addText("OPEN", {
@@ -3639,7 +3711,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
             color: "059669",
             align: "center",
             valign: "middle",
-            fontFace: "Arial"
+            fontFace: FONT
           });
         } else if (!dim) {
           slide.addShape(pptx.ShapeType.rect, { x, y, w: stripe * scale, h, fill: { color } });
@@ -3650,8 +3722,8 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
     if (compare) {
       const half = (SW - sidePad * 3) / 2;
       const panelH = SH - topPad - botPad - 0.75;
-      slide.addText(compare.labelA, { x: sidePad, y: topPad, w: half, h: 0.3, fontSize: 13, bold: true, color: hex(th.subColor), align: "center", fontFace: "Arial" });
-      slide.addText(compare.labelB, { x: sidePad * 2 + half, y: topPad, w: half, h: 0.3, fontSize: 13, bold: true, color: hex(th.subColor), align: "center", fontFace: "Arial" });
+      slide.addText(compare.labelA, { x: sidePad, y: topPad, w: half, h: 0.3, fontSize: 13, bold: true, color: hex(th.subColor), align: "center", fontFace: FONT });
+      slide.addText(compare.labelB, { x: sidePad * 2 + half, y: topPad, w: half, h: 0.3, fontSize: 13, bold: true, color: hex(th.subColor), align: "center", fontFace: FONT });
       drawLayout(compare.layoutA, { x: sidePad, y: topPad + 0.4, w: half, h: panelH });
       drawLayout(compare.layoutB, { x: sidePad * 2 + half, y: topPad + 0.4, w: half, h: panelH });
       slide.addShape(pptx.ShapeType.line, { x: SW / 2, y: topPad + 0.2, w: 0, h: panelH + 0.2, line: { color: hex(th.cardBorder), width: 0.75, dashType: "dash" } });
@@ -3664,7 +3736,7 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
         bold: true,
         color: hex(th.accent),
         align: "center",
-        fontFace: "Arial"
+        fontFace: FONT
       });
     } else {
       const { X: X2, Y } = drawLayout(layout, { x: sidePad, y: topPad, w: SW - sidePad * 2, h: SH - topPad - botPad });
@@ -3701,11 +3773,11 @@ function exportSlidePPTX(slideModels, { deckName, footer }) {
           align: "left",
           valign: "top",
           margin: 6,
-          fontFace: "Arial"
+          fontFace: FONT
         });
       });
     }
-    if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: hex(th.footerColor), fontFace: "Arial" });
+    if (footer) slide.addText(footer, { x: 0.45, y: SH - 0.42, w: SW - 0.9, h: 0.3, fontSize: 9, color: hex(th.footerColor), fontFace: FONT });
   });
   pptx.writeFile({ fileName: deckName }).catch((err) => alert("Could not write PowerPoint: " + ((err == null ? void 0 : err.message) || err)));
 }
@@ -3772,7 +3844,87 @@ function OrgSlideView() {
   }, [openRoles]);
   const DIM_FIELD = { department: "dept", discipline: "fn", business_group: "bg", location: "location", level: "level" };
   const DIM_LABEL = { department: "Department", discipline: "Job family", business_group: "Business unit", location: "Location", level: "Level" };
-  const th = SLIDE_THEMES[themeKey] || SLIDE_THEMES.clean;
+  const [companyTheme, setCompanyTheme] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("orgSimCompanyTheme") || "null");
+    } catch {
+      return null;
+    }
+  });
+  const th = themeKey === "company" && companyTheme ? companyTheme : SLIDE_THEMES[themeKey] || SLIDE_THEMES.clean;
+  async function importTemplate(file) {
+    try {
+      const t = await extractPptxTheme(new Uint8Array(await file.arrayBuffer()));
+      const thm = themeFromTemplate(t);
+      setCompanyTheme(thm);
+      setThemeKey("company");
+      try {
+        localStorage.setItem("orgSimCompanyTheme", JSON.stringify(thm));
+      } catch {
+      }
+      alert(`Matched ${file.name} \u2014 accent ${t.accent1 || "default"}, heading font ${t.fontFace || "default"}.
+\u201CCompany\u201D style is now available in Slide style.`);
+    } catch (e) {
+      alert("Couldn't read that template: " + (e && e.message || e));
+    }
+  }
+  function clearCompanyTheme() {
+    setCompanyTheme(null);
+    if (themeKey === "company") setThemeKey("clean");
+    try {
+      localStorage.removeItem("orgSimCompanyTheme");
+    } catch {
+    }
+  }
+  const PRESET_KEY = "orgSimSlidePresets";
+  const [presets, setPresets] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(PRESET_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  });
+  const [presetSel, setPresetSel] = useState("");
+  const persistPresets = (next) => {
+    setPresets(next);
+    try {
+      localStorage.setItem(PRESET_KEY, JSON.stringify(next));
+    } catch {
+    }
+  };
+  const savePreset = () => {
+    const name = (window.prompt("Preset name (e.g. \u201CMy QBR style\u201D):", presetSel || "") || "").trim();
+    if (!name) return;
+    persistPresets({ ...presets, [name]: { chartMode, groupDim, colorDim, fields, density, leafMode, wrapCols, stackCols, wrapThreshold, themeKey, maxDepth, perTeam } });
+    setPresetSel(name);
+  };
+  const applyPreset = (name) => {
+    const p = presets[name];
+    if (!p) {
+      setPresetSel("");
+      return;
+    }
+    setPresetSel(name);
+    if (p.chartMode) setChartMode(p.chartMode);
+    if (p.groupDim) setGroupDim(p.groupDim);
+    if (p.colorDim) setColorDim(p.colorDim);
+    if (p.fields) setFields(p.fields);
+    if (p.density) setDensity(p.density);
+    if (p.leafMode) setLeafMode(p.leafMode);
+    if (p.wrapCols != null) setWrapCols(p.wrapCols);
+    if (p.stackCols) setStackCols(p.stackCols);
+    if (p.wrapThreshold) setWrapThreshold(p.wrapThreshold);
+    if (p.themeKey) setThemeKey(p.themeKey);
+    if (p.maxDepth) setMaxDepth(p.maxDepth);
+    if (typeof p.perTeam === "boolean") setPerTeam(p.perTeam);
+  };
+  const deletePreset = () => {
+    if (!presetSel || !window.confirm(`Delete preset \u201C${presetSel}\u201D?`)) return;
+    const next = { ...presets };
+    delete next[presetSel];
+    persistPresets(next);
+    setPresetSel("");
+  };
   const filterOptions = useMemo(() => {
     const vals = { location: /* @__PURE__ */ new Set(), dept: /* @__PURE__ */ new Set(), fn: /* @__PURE__ */ new Set(), bg: /* @__PURE__ */ new Set() };
     const walk = (n) => {
@@ -4076,7 +4228,25 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
         }
       }
     )
-  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Top of the box"), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("div", { className: "mt-2 flex items-center gap-1" }, /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: presetSel,
+      onChange: (e) => applyPreset(e.target.value),
+      title: "Apply a saved slide preset (layout, density, theme, fields \u2014 everything but the data)",
+      className: "flex-1 min-w-0 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
+    },
+    /* @__PURE__ */ React.createElement("option", { value: "" }, "Presets\u2026"),
+    Object.keys(presets).sort().map((n) => /* @__PURE__ */ React.createElement("option", { key: n, value: n }, n))
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: savePreset,
+      title: "Save the current configuration as a named preset",
+      className: "text-xs bg-gray-100 text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-200 shrink-0"
+    },
+    "\u{1F4BE} Save"
+  ), presetSel && /* @__PURE__ */ React.createElement("button", { onClick: deletePreset, title: "Delete this preset", className: "text-gray-300 hover:text-red-500 shrink-0" }, /* @__PURE__ */ React.createElement(X, { size: 13 })))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Top of the box"), /* @__PURE__ */ React.createElement(
     "input",
     {
       value: search,
@@ -4125,17 +4295,38 @@ Skipped ${skipped} row${skipped === 1 ? "" : "s"}${u.length ? ` \u2014 unmatched
     ["Department", fDept, setFDept, filterOptions.dept],
     ["Job family", fFn, setFFn, filterOptions.fn],
     ["Business unit", fBg, setFBg, filterOptions.bg]
-  ].map(([lbl, val, set, opts]) => /* @__PURE__ */ React.createElement("div", { key: lbl, className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-gray-400 w-20 shrink-0" }, lbl), /* @__PURE__ */ React.createElement("select", { value: val, onChange: (e) => set(e.target.value), className: "flex-1 min-w-0 text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "All" }, "All"), opts.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v }, v))))), filtersActive && !filterEmpty && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-blue-600" }, "Showing only matching people; managers kept for context appear faded."), filterEmpty && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-amber-600" }, "Nobody in this slice matches those filters \u2014 showing everyone instead.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Slide style"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-4 gap-1" }, Object.values(SLIDE_THEMES).map((t) => /* @__PURE__ */ React.createElement(
+  ].map(([lbl, val, set, opts]) => /* @__PURE__ */ React.createElement("div", { key: lbl, className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-gray-400 w-20 shrink-0" }, lbl), /* @__PURE__ */ React.createElement("select", { value: val, onChange: (e) => set(e.target.value), className: "flex-1 min-w-0 text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white" }, /* @__PURE__ */ React.createElement("option", { value: "All" }, "All"), opts.map((v) => /* @__PURE__ */ React.createElement("option", { key: v, value: v }, v))))), filtersActive && !filterEmpty && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-blue-600" }, "Showing only matching people; managers kept for context appear faded."), filterEmpty && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-amber-600" }, "Nobody in this slice matches those filters \u2014 showing everyone instead.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Slide style"), /* @__PURE__ */ React.createElement("div", { className: `grid ${companyTheme ? "grid-cols-5" : "grid-cols-4"} gap-1` }, [...Object.values(SLIDE_THEMES), ...companyTheme ? [companyTheme] : []].map((t) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: t.key,
       onClick: () => setThemeKey(t.key),
-      title: t.label,
+      title: t.key === "company" ? `Company (from your template${t.fontFace ? ` \xB7 ${t.fontFace}` : ""})` : t.label,
       className: `rounded-lg border p-1 text-center transition-all ${themeKey === t.key ? "border-blue-500 ring-1 ring-blue-400" : "border-gray-200 hover:border-gray-300"}`
     },
     /* @__PURE__ */ React.createElement("span", { className: "block h-6 rounded", style: { background: t.pageBg, borderTop: `3px solid ${t.accent}`, border: `1px solid ${t.cardBorder}`, borderTopWidth: 3, borderTopColor: t.accent } }),
     /* @__PURE__ */ React.createElement("span", { className: "block text-[9px] text-gray-500 mt-0.5" }, t.label)
-  )))), !isGroup && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Levels deep: ", maxDepth), /* @__PURE__ */ React.createElement("input", { type: "range", min: "1", max: "4", value: maxDepth, onChange: (e) => setMaxDepth(parseInt(e.target.value, 10)), className: "w-full" }), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-[10px] text-gray-400" }, /* @__PURE__ */ React.createElement("span", null, "Direct reports"), /* @__PURE__ */ React.createElement("span", null, "4 levels"))), /* @__PURE__ */ React.createElement("div", { className: "bg-white border border-gray-200 rounded-lg p-2.5 space-y-2.5" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide" }, "Compress to fit"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-gray-400 mb-1" }, "Card density"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-4 gap-1" }, Object.values(SLIDE_DENSITY).map((d) => /* @__PURE__ */ React.createElement(
+  ))), /* @__PURE__ */ React.createElement("div", { className: "mt-1.5 flex items-center gap-2" }, /* @__PURE__ */ React.createElement(
+    "label",
+    {
+      title: "Upload your corporate PowerPoint template (.pptx/.potx) \u2014 its accent color, text/background colors and heading font become a \u201CCompany\u201D style",
+      className: "flex-1 flex items-center justify-center gap-1 text-[11px] bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer"
+    },
+    "\u{1F3A8} Match company template (.pptx)",
+    /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "file",
+        accept: ".pptx,.potx,application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        className: "hidden",
+        onChange: (e) => {
+          var _a2;
+          const f = (_a2 = e.target.files) == null ? void 0 : _a2[0];
+          if (f) importTemplate(f);
+          e.target.value = "";
+        }
+      }
+    )
+  ), companyTheme && /* @__PURE__ */ React.createElement("button", { onClick: clearCompanyTheme, title: "Remove the company style", className: "text-[10px] text-gray-400 hover:text-red-500 shrink-0" }, "Remove"))), !isGroup && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1" }, "Levels deep: ", maxDepth), /* @__PURE__ */ React.createElement("input", { type: "range", min: "1", max: "4", value: maxDepth, onChange: (e) => setMaxDepth(parseInt(e.target.value, 10)), className: "w-full" }), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-[10px] text-gray-400" }, /* @__PURE__ */ React.createElement("span", null, "Direct reports"), /* @__PURE__ */ React.createElement("span", null, "4 levels"))), /* @__PURE__ */ React.createElement("div", { className: "bg-white border border-gray-200 rounded-lg p-2.5 space-y-2.5" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] font-bold text-gray-600 uppercase tracking-wide" }, "Compress to fit"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-gray-400 mb-1" }, "Card density"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-4 gap-1" }, Object.values(SLIDE_DENSITY).map((d) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: d.key,
@@ -11872,6 +12063,55 @@ ${exceptions.length} exception${exceptions.length > 1 ? "s" : ""} logged \u2014 
     try {
       const raw = localStorage.getItem(SESSION_KEY);
       if (raw) applySessionDoc(JSON.parse(raw));
+    } catch {
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      if (!new URLSearchParams(location.search).get("handoff")) return;
+      const raw = localStorage.getItem("orgSimHandoff");
+      if (!raw) return;
+      localStorage.removeItem("orgSimHandoff");
+      const doc = JSON.parse(raw);
+      if (!Array.isArray(doc.employees) || !doc.employees.length) return;
+      const list = doc.employees.map((e) => {
+        const lv = normalizeLevel(e.level) || "IC3";
+        const dept = (e.dept || "").trim() || "General";
+        return {
+          id: e.id,
+          first: e.first || e.id,
+          last: e.last || "",
+          title: (e.title || "").trim() || `${displayLevel(lv)} ${dept}`,
+          level: lv,
+          dept,
+          bg: dept,
+          fn: dept,
+          location: (e.location || "").trim() || "Unknown",
+          country: "\u2014",
+          employmentType: "FTE",
+          managerId: (e.managerId || "").trim() || null,
+          status: e.status || "Active",
+          startDate: e.startDate || null,
+          endDate: e.endDate || null,
+          costCenter: null,
+          band: null
+        };
+      }).filter((e) => e.id);
+      linkManagers(list);
+      setUndoStack((prev) => [...prev, JSON.parse(JSON.stringify(employees))]);
+      setEmployees(list);
+      setIsSyntheticData(false);
+      setImportedAt(doc.at || (/* @__PURE__ */ new Date()).toISOString());
+      setSelectedNode(null);
+      setDetailPanel(null);
+      setFocusRoot(null);
+      try {
+        const u = new URL(location.href);
+        u.searchParams.delete("handoff");
+        history.replaceState(null, "", u);
+      } catch {
+      }
+      console.log(`HR Data Detective handoff: loaded ${list.length} cleaned records.`);
     } catch {
     }
   }, []);

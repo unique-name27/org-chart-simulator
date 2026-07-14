@@ -123,6 +123,63 @@ export function linkManagers(employees) {
   return stats;
 }
 
+// ─── PPTX TEMPLATE MAPPING ───
+// Read a user's corporate .pptx and pull its theme (accent color, text/background
+// colors, heading font) so slides can match the company template. A .pptx is a ZIP;
+// this is a minimal, dependency-free reader (central directory walk + per-entry
+// DecompressionStream("deflate-raw")) — enough for well-formed Office files.
+export async function unzipEntries(buf) {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let e = u8.length - 22;                                   // EOCD scan from the end
+  while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error("Not a ZIP/PPTX file");
+  const count = dv.getUint16(e + 10, true);
+  let off = dv.getUint32(e + 16, true);
+  const out = new Map();
+  for (let i = 0; i < count; i++) {
+    if (dv.getUint32(off, true) !== 0x02014b50) break;      // central-dir signature
+    const method = dv.getUint16(off + 10, true);
+    const csize = dv.getUint32(off + 20, true);
+    const nameLen = dv.getUint16(off + 28, true), extraLen = dv.getUint16(off + 30, true), cmtLen = dv.getUint16(off + 32, true);
+    const lho = dv.getUint32(off + 42, true);
+    const name = new TextDecoder().decode(u8.subarray(off + 46, off + 46 + nameLen));
+    const lnl = dv.getUint16(lho + 26, true), lel = dv.getUint16(lho + 28, true);
+    const dataStart = lho + 30 + lnl + lel;
+    out.set(name, { method, raw: u8.subarray(dataStart, dataStart + csize) });
+    off += 46 + nameLen + extraLen + cmtLen;
+  }
+  return out;
+}
+async function _inflateRaw(raw) {
+  const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+export async function extractPptxTheme(buf) {
+  const entries = await unzipEntries(buf);
+  const key = [...entries.keys()].find(k => k === "ppt/theme/theme1.xml") ||
+              [...entries.keys()].find(k => /^ppt\/theme\/theme\d+\.xml$/.test(k));
+  if (!key) throw new Error("No theme found — is this a PowerPoint file?");
+  const ent = entries.get(key);
+  const xml = new TextDecoder().decode(ent.method === 0 ? ent.raw : await _inflateRaw(ent.raw));
+  const grab = re => (xml.match(re) || [])[1] || null;
+  const clr = tag => grab(new RegExp(`<a:${tag}>\\s*<a:srgbClr val="([0-9A-Fa-f]{6})"`)) ||
+                     grab(new RegExp(`<a:${tag}>\\s*<a:sysClr[^>]*lastClr="([0-9A-Fa-f]{6})"`));
+  const hex = v => (v ? "#" + v.toLowerCase() : null);
+  return {
+    accent1: hex(clr("accent1")), dark: hex(clr("dk1")), light: hex(clr("lt1")),
+    fontFace: grab(/<a:majorFont>\s*<a:latin typeface="([^"]+)"/) || null,
+  };
+}
+// Blend two hex colors (t=0 → a, t=1 → b); used to derive a full slide theme from
+// the three colors a PPTX theme actually declares.
+export function mixHex(a, b, t) {
+  const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const [ar, ag, ab2] = p(a), [br, bg, bb] = p(b);
+  const c = v => Math.round(v).toString(16).padStart(2, "0");
+  return "#" + c(ar + (br - ar) * t) + c(ag + (bg - ag) * t) + c(ab2 + (bb - ab2) * t);
+}
+
 // ─── DATA QUALITY DETECTORS (HR Data Detective game) ───
 // Scan a raw imported roster for suspicious records. Non-mutating; every finding is
 // a "case" a human should verify against the source of truth (Glean/Workday/etc).
