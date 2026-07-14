@@ -123,6 +123,118 @@ export function linkManagers(employees) {
   return stats;
 }
 
+// ─── DATA QUALITY DETECTORS (HR Data Detective game) ───
+// Scan a raw imported roster for suspicious records. Non-mutating; every finding is
+// a "case" a human should verify against the source of truth (Glean/Workday/etc).
+// employees: [{ id, first, last, title, level, dept, location, managerId, startDate,
+// endDate, status }] with RAW string values (pre-normalization). `today` is
+// injectable (ISO date) so the date checks are deterministic under test.
+export function detectDataIssues(employees, { today = "2026-01-01", spanLimit = 20 } = {}) {
+  const cases = [];
+  const add = (type, severity, emp, field, issue, suggestion) => cases.push({
+    key: `${type}:${emp?.id ?? "?"}:${field}`, type, severity,
+    empId: emp?.id ?? "", name: emp ? `${emp.first || ""} ${emp.last || ""}`.trim() : "",
+    field, issue, suggestion, value: emp?.[field] ?? "",
+  });
+  const todayMs = new Date(today + "T00:00:00Z").getTime();
+
+  // ids + duplicates
+  const seen = new Map();
+  for (const e of employees) {
+    const id = (e.id ?? "").toString().trim();
+    if (!id) { add("missing-id", "high", e, "id", "Record has no employee ID", "Find the real ID or remove the row"); continue; }
+    if (seen.has(id)) add("dup-id", "high", e, "id", `Employee ID '${id}' appears more than once`, "One of these rows is stale or belongs to someone else");
+    seen.set(id, e);
+  }
+  // duplicate people under different ids
+  const byName = new Map();
+  for (const e of employees) {
+    const k = normNameKey(`${e.first || ""} ${e.last || ""}`);
+    if (!k) { add("missing-name", "warn", e, "first", "Record has no name", "Look the ID up and fill the name in"); continue; }
+    if (!byName.has(k)) byName.set(k, []);
+    byName.get(k).push(e);
+  }
+  for (const [, list] of byName) if (list.length > 1 && new Set(list.map(e => e.id)).size > 1)
+    list.forEach(e => add("dup-person", "warn", e, "id", `'${e.first} ${e.last}' appears under ${list.length} different IDs`, "Same person twice, or two people sharing a name — verify which"));
+
+  // manager references (non-mutating version of linkManagers' checks)
+  const idSet = new Set([...seen.keys()]);
+  const nameIdx = byName;
+  const mgrOf = new Map(); // resolved manager id per employee (for span/cycle checks)
+  for (const e of employees) {
+    const ref = (e.managerId ?? "").toString().trim();
+    if (!ref) continue;
+    if (ref === e.id) { add("manager-self", "high", e, "managerId", "Listed as their own manager", "Point them at their real manager"); continue; }
+    if (idSet.has(ref)) { mgrOf.set(e.id, ref); continue; }
+    const matches = (nameIdx.get(normNameKey(ref)) || []).filter(x => x.id !== e.id);
+    if (matches.length === 1) { mgrOf.set(e.id, matches[0].id); continue; }
+    if (matches.length > 1) add("manager-ambiguous", "warn", e, "managerId", `Manager '${ref}' matches ${matches.length} people`, "Replace the name with the manager's employee ID");
+    else add("manager-unknown", "high", e, "managerId", `Manager '${ref}' isn't in this file`, "Manager may have left, changed name, or the ID is wrong");
+  }
+  // cycles
+  for (const e of employees) {
+    const walked = new Set(); let cur = e.id;
+    while (cur && mgrOf.has(cur)) {
+      if (walked.has(cur)) { add("manager-cycle", "high", e, "managerId", "Part of a reporting loop", "Someone in this chain reports to their own report"); break; }
+      walked.add(cur); cur = mgrOf.get(cur);
+    }
+  }
+  // span extremes + terminated managers
+  const spans = new Map();
+  for (const [emp, mgr] of mgrOf) spans.set(mgr, (spans.get(mgr) || 0) + 1);
+  for (const [mgr, n] of spans) {
+    const e = seen.get(mgr);
+    if (!e) continue;
+    if (n > spanLimit) add("span-extreme", "warn", e, "managerId", `${n} direct reports — above the ${spanLimit}-report sanity limit`, "Often a sign reports were dumped on a placeholder manager");
+    const status = (e.status || "").toLowerCase();
+    if (status.includes("term") || (e.endDate ?? "").toString().trim())
+      add("term-with-reports", "high", e, "status", `Marked terminated/ended but still has ${n} direct report${n > 1 ? "s" : ""}`, "Reassign the team or fix the status");
+  }
+
+  // dates
+  for (const e of employees) {
+    const s = (e.startDate ?? "").toString().trim();
+    const en = (e.endDate ?? "").toString().trim();
+    let sMs = null;
+    if (s) {
+      const p = parseHrisDate(s);
+      if (!p.ok) add("date-bad", "warn", e, "startDate", `Start date '${s}' isn't a recognizable date`, "Fix the format (YYYY-MM-DD is safest)");
+      else {
+        sMs = new Date(p.iso + "T00:00:00Z").getTime();
+        if (sMs > todayMs + 366 * 86400000) add("date-future", "warn", e, "startDate", `Start date ${p.iso} is more than a year in the future`, "Probably a typo in the year");
+        if (todayMs - sMs > 60 * 365.25 * 86400000) add("date-ancient", "warn", e, "startDate", `Start date ${p.iso} implies 60+ years of tenure`, "Probably a birth date or a typo");
+      }
+    }
+    if (en) {
+      const p = parseHrisDate(en);
+      if (!p.ok) add("date-bad", "warn", e, "endDate", `End date '${en}' isn't a recognizable date`, "Fix the format (YYYY-MM-DD is safest)");
+      else if (sMs != null && new Date(p.iso + "T00:00:00Z").getTime() < sMs)
+        add("date-order", "high", e, "endDate", "End date is before the start date", "One of the two dates is wrong");
+    }
+  }
+
+  // levels + basics
+  for (const e of employees) {
+    const lv = (e.level ?? "").toString().trim();
+    if (lv && !normalizeLevel(lv)) add("level-unknown", "warn", e, "level", `Level '${lv}' isn't a recognized level`, "Map it to your level framework (L1–L7 / M1–M4 / E1–E3)");
+    if (!(e.dept ?? "").toString().trim()) add("dept-missing", "info", e, "dept", "No department", "Fill in from the org chart or HRIS");
+    if (!(e.location ?? "").toString().trim()) add("loc-missing", "info", e, "location", "No location", "Fill in from the directory");
+  }
+
+  const rank = { high: 0, warn: 1, info: 2 };
+  cases.sort((a, b) => rank[a.severity] - rank[b.severity] || a.type.localeCompare(b.type));
+  return cases;
+}
+
+// 0–100 data-health score: start from 100 and charge each OPEN case against it,
+// weighted by severity and normalized by roster size so big files aren't doomed.
+export function computeDataHealth(totalRecords, openCases) {
+  if (!totalRecords) return 100;
+  const w = { high: 4, warn: 2, info: 0.5 };
+  const penalty = openCases.reduce((s, c) => s + (w[c.severity] || 1), 0);
+  return Math.max(0, Math.round(100 - (penalty / totalRecords) * 25));
+}
+
 // Roll up everyone in a root's subtree (excluding the root itself) by a node field
 // (dept / fn / bg / location / level) into { value, count } groups, sorted by count
 // desc then name. Powers the slide "Breakdown by department / job family / …" mode.

@@ -10,6 +10,10 @@ analytics, a drag-and-drop reorg simulator, and a multi-year growth timeline.
 - **Open the app:** https://unique-name27.github.io/org-chart-simulator/org-chart-editable_3.html
 - **Landing page:** https://unique-name27.github.io/org-chart-simulator/
 
+## Companion tools
+
+- **🕵️ HR Data Detective** — https://unique-name27.github.io/org-chart-simulator/data-detective.html — a local-only game that turns HRIS data cleanup into cases: import your export, verify each suspicious record against your source of truth (Glean/Workday/the directory), and export a corrected CSV + audit log. Same zero-network privacy stance as the main app.
+
 ## Docs
 
 - [Discovery interview questions](docs/discovery-questions.md) — what to ask the comp partner / HRBP to fine-tune (or remake) this tool for their real workflow.

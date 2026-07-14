@@ -77,7 +77,18 @@ check(pinned && sha === pinned, `xlsx sha256 matches vendor/README pin (${sha.sl
 check(existsSync("vendor/dmsans-latin.woff2"), "vendor/dmsans-latin.woff2 exists");
 check(readFileSync("fonts.mjs", "utf8").includes("DM_SANS_WOFF2_B64"), "fonts.mjs exports the font constant");
 
-console.log("── 6. Repo hygiene ──");
+console.log("── 6. HR Data Detective (companion game) ──");
+check(existsSync("data-detective.html") && existsSync("data-detective.mjs"), "game page + module exist");
+const game = readFileSync("data-detective.html", "utf8");
+const gameJs = readFileSync("data-detective.mjs", "utf8");
+const gameCsp = game.match(/Content-Security-Policy" content="([^"]+)"/)?.[1] ?? "";
+check(/connect-src 'self'/.test(gameCsp) && !/https?:\/\//.test(gameCsp), "game CSP is fully local (no external hosts)");
+check(gameJs.includes('from "./core.mjs"'), "game imports the tested core detectors");
+check(/detectDataIssues|computeDataHealth/.test(gameJs), "game uses detectDataIssues/computeDataHealth");
+check(/glean\.com\/search\?q=\{query\}/.test(gameJs), "Glean look-up template wired");
+check(/corrected-roster-/.test(gameJs) && /data-fix-log-/.test(gameJs), "corrected CSV + audit log exports present");
+
+console.log("── 7. Repo hygiene ──");
 check(!existsSync("._merged.jsx"), "no build scratch file left behind");
 const gi = existsSync(".gitignore") ? readFileSync(".gitignore", "utf8") : "";
 check(gi.includes("._merged.jsx"), ".gitignore covers the build scratch file");

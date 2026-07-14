@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>HR Data Detective</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none';"/>
+<style>
+  :root { --bg:#0f172a; --panel:#1e293b; --panel2:#243449; --line:#334155; --text:#e2e8f0; --dim:#94a3b8;
+          --hi:#f87171; --warn:#fbbf24; --info:#60a5fa; --good:#34d399; --accent:#818cf8; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; min-height:100vh; }
+  .wrap { max-width:880px; margin:0 auto; padding:24px 16px 60px; }
+  h1 { font-size:26px; letter-spacing:.5px; } h1 .badge { font-size:12px; vertical-align:middle; background:var(--accent); color:#0f172a; border-radius:6px; padding:2px 8px; margin-left:8px; font-weight:700; }
+  .sub { color:var(--dim); font-size:13px; margin-top:4px; }
+  .privacy { background:#14532d33; border:1px solid #16653433; color:#86efac; font-size:12px; border-radius:10px; padding:8px 12px; margin:14px 0; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; margin-top:16px; }
+  .btn { background:var(--accent); color:#0f172a; font-weight:700; border:0; border-radius:10px; padding:10px 16px; font-size:14px; cursor:pointer; }
+  .btn.sec { background:var(--panel2); color:var(--text); border:1px solid var(--line); font-weight:500; }
+  .btn.good { background:var(--good); } .btn.warn { background:var(--warn); } .btn:disabled { opacity:.4; cursor:default; }
+  .btn:hover:not(:disabled) { filter:brightness(1.1); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  input[type=text], textarea, select { background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:8px 10px; font-size:13px; width:100%; }
+  label.small { font-size:11px; color:var(--dim); display:block; margin:10px 0 4px; text-transform:uppercase; letter-spacing:.6px; }
+  .drop { border:2px dashed var(--line); border-radius:12px; padding:26px; text-align:center; color:var(--dim); font-size:14px; cursor:pointer; }
+  .drop.on { border-color:var(--accent); color:var(--accent); background:#818cf811; }
+  .hud { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .stat { background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:8px 14px; font-size:13px; }
+  .stat b { font-size:18px; display:block; }
+  .meter { flex:1; min-width:160px; }
+  .meter .bar { height:14px; background:var(--panel2); border-radius:7px; overflow:hidden; border:1px solid var(--line); }
+  .meter .fill { height:100%; background:linear-gradient(90deg,#f87171,#fbbf24,#34d399); transition:width .4s; }
+  .sev { font-size:11px; font-weight:700; padding:2px 10px; border-radius:99px; text-transform:uppercase; letter-spacing:.5px; }
+  .sev.high { background:#7f1d1d; color:#fecaca; } .sev.warn { background:#78350f; color:#fde68a; } .sev.info { background:#1e3a5f; color:#bfdbfe; }
+  .case h2 { font-size:19px; margin:10px 0 2px; } .case .who { color:var(--dim); font-size:13px; }
+  .issue { background:var(--panel2); border-left:4px solid var(--warn); border-radius:8px; padding:10px 12px; margin:12px 0; font-size:14px; }
+  .hint { color:var(--dim); font-size:12px; font-style:italic; }
+  .fixrow { display:none; margin-top:10px; } .fixrow.on { display:flex; gap:8px; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--good); color:#0f172a; font-weight:700; border-radius:10px; padding:10px 20px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  .toast.on { opacity:1; }
+  .grade { font-size:64px; font-weight:900; color:var(--good); }
+  .badges span { display:inline-block; background:var(--panel2); border:1px solid var(--line); border-radius:99px; padding:6px 14px; margin:4px 6px 0 0; font-size:13px; }
+  table.log { width:100%; border-collapse:collapse; font-size:12px; margin-top:10px; }
+  table.log td, table.log th { border-bottom:1px solid var(--line); padding:5px 6px; text-align:left; color:var(--dim); }
+  a { color:var(--accent); }
+  .screen { display:none; } .screen.on { display:block; }
+  .streak { color:var(--warn); font-weight:700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🕵️ HR Data Detective <span class="badge">local-only</span></h1>
+  <div class="sub">Import your HRIS export, get dealt the suspicious records as cases, verify each one against your source of truth (Glean, Workday, the directory…), and export a cleaned file + audit log.</div>
+  <div class="privacy">🔒 Everything stays in this browser tab — nothing is uploaded, no network calls are made. The “Look up” button just opens your own search tool in a new tab.</div>
+
+  <!-- ── SETUP ── -->
+  <div id="setup" class="screen on">
+    <div class="card">
+      <div class="drop" id="drop">Drop your headcount file here (CSV / TSV / Excel), click to browse…<br/><span style="font-size:12px">or paste rows straight from Excel anywhere on this page</span></div>
+      <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx,.xls" style="display:none"/>
+      <div class="row" style="margin-top:12px">
+        <button class="btn sec" id="sampleBtn">🎲 Play with sample data (25 messy records)</button>
+      </div>
+      <label class="small">Look-up tool (opens when you hit 🔍 on a case)</label>
+      <div class="row">
+        <select id="providerSel" style="max-width:180px">
+          <option value="https://app.glean.com/search?q={query}">Glean</option>
+          <option value="https://www.google.com/search?q={query}">Google</option>
+          <option value="custom">Custom URL…</option>
+        </select>
+        <input type="text" id="providerUrl" style="flex:1" value="https://app.glean.com/search?q={query}"/>
+      </div>
+      <div class="hint" style="margin-top:6px">Use <code>{query}</code> where the person’s name should go. Saved on this device only.</div>
+    </div>
+  </div>
+
+  <!-- ── GAME ── -->
+  <div id="game" class="screen">
+    <div class="card hud">
+      <div class="stat">Score<b id="score">0</b></div>
+      <div class="stat">Streak<b class="streak" id="streak">0</b></div>
+      <div class="stat">Cases<b id="caseNo">0/0</b></div>
+      <div class="meter"><div style="font-size:11px;color:var(--dim);margin-bottom:4px">DATA HEALTH <span id="healthPct"></span></div><div class="bar"><div class="fill" id="healthFill" style="width:100%"></div></div></div>
+    </div>
+    <div class="card case" id="caseCard">
+      <span class="sev high" id="sev">HIGH</span>
+      <h2 id="caseName">—</h2>
+      <div class="who" id="caseWho">—</div>
+      <div class="issue"><div id="caseIssue">—</div><div class="hint" id="caseHint"></div></div>
+      <div class="row">
+        <button class="btn sec" id="lookupBtn">🔍 Look up</button>
+        <button class="btn good" id="okBtn">✔ Verified correct <span style="font-weight:400">+10</span></button>
+        <button class="btn warn" id="fixBtn">✏️ Fix it <span style="font-weight:400">+15</span></button>
+        <button class="btn sec" id="skipBtn">⏭ Flag for follow-up</button>
+      </div>
+      <div class="fixrow" id="fixRow">
+        <input type="text" id="fixInput" placeholder="Corrected value…"/>
+        <button class="btn" id="fixApply">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── END ── -->
+  <div id="end" class="screen">
+    <div class="card" style="text-align:center">
+      <div class="grade" id="grade">A</div>
+      <div id="endSummary" style="margin:8px 0 4px"></div>
+      <div class="badges" id="badges"></div>
+      <div class="row" style="justify-content:center;margin-top:16px">
+        <button class="btn" id="dlFixed">⬇ Download corrected CSV</button>
+        <button class="btn sec" id="dlLog">⬇ Download fix log (audit CSV)</button>
+        <button class="btn sec" id="again">↻ New game</button>
+      </div>
+      <table class="log" id="logTable"></table>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script src="./vendor/xlsx.full.min.js"></script>
+<script type="module" src="./data-detective.mjs"></script>
+</body>
+</html>
