@@ -8,6 +8,14 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Patrick+Hand&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+  <style>
+    @media print {
+      .no-print { display: none !important; }
+      body { background: #fff !important; }
+      .hrbp-dashboard { overflow: visible !important; height: auto !important; }
+      .hrbp-dashboard * { box-shadow: none !important; }
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>

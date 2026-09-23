@@ -9,12 +9,13 @@
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 
-// Merge fonts.mjs + core.mjs (strip ESM exports) + app.jsx into one scope, then transpile.
+// Merge fonts.mjs + core.mjs + hrbp.mjs (strip ESM exports) + app.jsx into one scope, then transpile.
 const fonts = readFileSync("fonts.mjs", "utf8").replace(/^export\s+/gm, "");
 const core  = readFileSync("core.mjs", "utf8").replace(/^export\s+/gm, "");
+const hrbp  = readFileSync("hrbp.mjs", "utf8").replace(/^export\s+/gm, "");
 const app   = readFileSync("app.jsx", "utf8");
 const mergedFile = "._merged.jsx";
-writeFileSync(mergedFile, fonts + "\n/* ---- core.mjs ---- */\n" + core + "\n/* ---- app.jsx ---- */\n" + app);
+writeFileSync(mergedFile, fonts + "\n/* ---- core.mjs ---- */\n" + core + "\n/* ---- hrbp.mjs ---- */\n" + hrbp + "\n/* ---- app.jsx ---- */\n" + app);
 
 let compiled;
 try {
